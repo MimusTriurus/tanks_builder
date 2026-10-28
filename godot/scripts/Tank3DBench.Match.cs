@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -22,8 +23,9 @@ namespace TankSpriteTest;
 /// another enemy is pointed at or the turn passes (<see cref="DropTarget"/>);
 /// its marks go back with it (<c>_parkedHits</c>).
 ///
-/// <b>Sides.</b> The first five homes of the board are green, the next five
-/// brown, each side in <see cref="Roster"/>'s order - LT, MT, HT, TD, HM. The
+/// <b>Sides.</b> Each home names its side, class and facing, or leaves them to
+/// the old split: the first half of the homes green, the rest brown, each side
+/// in <see cref="Roster"/>'s order - LT, MT, HT, TD, HM (<see cref="LineUpSides"/>). The
 /// brown side is the same models with their green paint taken to brown in the cel
 /// shader (<c>side_brown</c>, <see cref="Toon"/>), not models of their own.
 ///
@@ -57,7 +59,7 @@ public sealed partial class Tank3DBench
     private enum Side { Green, Brown }
 
     /// <summary>Each side's five, in its homes' order.</summary>
-    private static readonly string[] Roster = { "LTR", "MTR", "HTR", "TDR", "HMR" };
+    private static string[] Roster => Lineup.Roster;
 
     /// <summary>The match's board when <c>--map</c> named none.</summary>
     private const string MatchMap = "drill10";
@@ -110,45 +112,72 @@ public sealed partial class Tank3DBench
 
     // --- the sides -------------------------------------------------------------
 
+    /// <summary>The match's units in the homes' order (<see cref="Lineup.Of"/>);
+    /// the first green one rides the rig.</summary>
+    private List<Lineup.Unit> _lineup = new();
+
+    /// <summary>The unit on the rig at the start, an index into <see cref="_lineup"/>.</summary>
+    private int _rigUnit = -1;
+
+    private static Side SideOf(Lineup.Unit u) => u.Side == Parking.Brown ? Side.Brown : Side.Green;
+
+    /// <summary>
+    /// Who stands on which home (<see cref="Lineup.Of"/>, the editor's rule
+    /// too), before the rig is mounted - the rig's model and cell come off it.
+    /// </summary>
+    private void LineUpSides()
+    {
+        _lineup = new List<Lineup.Unit>();
+        _rigUnit = -1;
+        if (!Match)
+            return;
+        _lineup = Lineup.Of(_parkings);
+        int green = _lineup.Count(u => u.Side == Parking.Green), brown = _lineup.Count - green;
+        Log.Print($"tank3d: match: the board fields {green} green and {brown} brown");
+        // a side with no homes has nothing to move, and the match is won before it starts
+        if (green == 0 || brown == 0)
+            Log.Print($"tank3d: match: one side has no homes - {green} green, {brown} brown");
+        if (_lineup.Count == 0)
+            return;
+        _rigUnit = Math.Max(0, _lineup.FindIndex(u => u.Side == Parking.Green));
+        Lineup.Unit rig = _lineup[_rigUnit];
+        _modelTag = rig.Model;
+        _side = _turn = SideOf(rig);
+        if (_startCell is null)
+            _home = rig.Cell;
+    }
+
     /// <summary>The bench's <see cref="BuildParked"/> for a match: the rig is
-    /// the first green unit, every other home a unit standing, facing across
-    /// the board.</summary>
-    private void BuildSides()
+    /// the first green unit, every other unit of the line-up standing on its
+    /// home, facing the way the home says.</summary>
+    private async Task BuildSides()
     {
         if (_field is null)
             return;
-        int n = Roster.Length;
-        if (_parkings.Count < 2 * n)
-            Log.Print($"tank3d: match: the board has {_parkings.Count} homes for {2 * n} units - the rest stay out");
-        for (int i = 0; i < _parkings.Count && i < 2 * n; i++)
+        for (int i = 0; i < _lineup.Count; i++)
         {
-            Vector2I cell = _parkings[i].Cell;
-            Side side = i < n ? Side.Green : Side.Brown;
-            if (i == 0)
+            Lineup.Unit u = _lineup[i];
+            if (i == _rigUnit)
             {
-                Heading = SideHeading(cell, side);
+                Heading = HeadingFor(CellHere, u.Facing);
                 continue;
             }
-            if (_field.InBounds(cell))
-                Stand(Roster[i % n], cell, SideHeading(cell, side), side);
+            if (!_field.InBounds(u.Cell))
+                continue;
+            await TankStage(u.Model, i, _lineup.Count);
+            Stand(u.Model, u.Cell, HeadingFor(u.Cell, u.Facing), SideOf(u));
         }
-        Log.Print($"tank3d: match: green {_modelTag} {CellHere} on the rig; standing "
-                 + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {p.Cell}")));
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
+                 + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
         Banner($"Раунд 1 · ходят {SideName(_turn)}", SideInk(_turn));
     }
-
-    /// <summary>Straight up the column at the other side: green on the near
-    /// rows looks up the screen, brown down it.</summary>
-    private float SideHeading(Vector2I cell, Side side) =>
-        HeadingFor(cell, HexField.HeadingTo(cell, cell + new Vector2I(0, side == Side.Green ? -1 : 1)));
 
     /// <summary>The side's paint on a model: brown or the model's own.</summary>
     private void SidePaint(TankModel model, Side side)
     {
         if (!Match)
             return;
-        foreach (ShaderMaterial m in model.Cel)
-            m.Param("side_brown", side == Side.Brown ? 1.0f : 0.0f);
+        Lineup.Paint(model, side == Side.Brown ? Parking.Brown : Parking.Green);
     }
 
     /// <summary>Every unit on the board, the rig's first.</summary>
@@ -210,7 +239,7 @@ public sealed partial class Tank3DBench
         if (_fired)
             return $"{_modelTag} уже стрелял в этом ходу";
         if (_parked.Find(p => p.Cell == cell && p.Fate != Fate.Destroyed) is { } on && on.Side == _side)
-            return $"на {cell} свой {on.Tag}";
+            return $"на {MapAt(cell)} свой {on.Tag}";
         return "";
     }
 
@@ -302,7 +331,7 @@ public sealed partial class Tank3DBench
             {
                 TakeOver(next);
                 Banner($"Раунд {_round} · ходят {SideName(_turn)}", SideInk(_turn));
-                Log.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {CellHere}");
+                Log.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {MapAt(CellHere)}");
                 return;
             }
             if (_side == _turn && _fate == Fate.Alive)
@@ -328,12 +357,21 @@ public sealed partial class Tank3DBench
     {
         Log.Print($"tank3d: match: restart on {_mapName}");
         if (_handed)
+        {
             Session.Map = _mapName;
+            // the editor's board again, not its file, and the parked editor
+            // stays parked through the reload (Play-in-Editor)
+            Session.Board = _handedBoard;
+            Session.Unsaved = _unsaved;
+        }
+        _keepEditor = true;
         Session.Editing = _editing;
         _restarted = true;
-        // deferred: the reload takes the scene out of the tree at once, and the
-        // rest of this frame's _Process would run on a node outside it
-        Callable.From(() => GetTree().ReloadCurrentScene()).CallDeferred();
+        // Under the loading veil, as Run comes in: the same scene from its
+        // file, built in stages - a bare reload sat on the last frame for the
+        // whole build (16 s on ABBEY). Loading defers the change itself, so
+        // the rest of this frame still runs on a node in the tree.
+        Loading.Go(GetTree(), SceneFilePath, $"Restarting {_mapName}…");
     }
 
     /// <summary>The side's first standing unit able to act, in the roster's order.</summary>
@@ -507,7 +545,7 @@ public sealed partial class Tank3DBench
             Quench(side, tag, steam: false);
             Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
             _matchNote = $"{SideName(side)} {tag} подбит";
-            Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} knocked out");
+            Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} knocked out");
             return Fate.Knocked;
         }
         return Explode(model, tag, cell, side);
@@ -538,7 +576,7 @@ public sealed partial class Tank3DBench
         Boom(at, 1.0f, grounded: true);
         _shake.Blast(_profile.ShotShake * 0.6);
         _matchNote = $"{SideName(side)} {tag} уничтожен";
-        Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} destroyed");
+        Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} destroyed");
         Blast(cell);
         return Fate.Destroyed;
     }

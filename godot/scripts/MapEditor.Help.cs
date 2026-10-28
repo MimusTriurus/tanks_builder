@@ -35,23 +35,45 @@ public sealed partial class MapEditor
     {
         new("Board", "left drag", "paint with the brush", "paint"),
         new("Board", "right drag", "erase: plain ground, no cover, level 0", "erase"),
-        new("Board", "1  2  3", "Foundation, Cover, Level tab"),
+        new("Board", "1 - 7", "Floor, Look, Roads, Cover, Level, Units, Presets tab"),
+        new("Tools", "toolbar", "brush, line, box, fill, select, pick - over every tab"),
+        new("Tools", "U  G  I", "box, fill, pick; Esc back to the brush", "box, fill, pick"),
+        new("Tools", "shift+click", "with the brush: a line from the last cell painted"),
+        new("Tools", "right drag", "with the line or the box: erase along it"),
+        new("Presets", "left drag", "lay the preset: core under the brush, edge ring round it"),
+        new("Presets", "right drag", "clear every axis: plain ground at the datum"),
         new("Board", "Q", "next brush on the tab"),
         new("Board", "[  ]", "brush radius, 0 to 6"),
         new("Board", "F", "fill the cell's region with the brush", "fill"),
         new("Board", "H", "put a home (parking) on the cell", "home"),
-        new("Board", "Z  Y", "undo, redo - a stroke at a time", "undo, redo"),
+        new("Board", "alt+drag", "turn a home's tank towards the pointer, on the edges"),
+        new("Board", "ctrl+wheel", "turn a home's tank an edge"),
+        new("Board", "ctrl+(shift+)Z", "undo, redo - a stroke at a time; Z and Y alone too", "undo, redo"),
         new("Board", "wheel, middle drag", "zoom, pan; middle tap or Home recentres"),
-        new("Board", "Esc", "close the sheet, then drop the picked cell"),
+        new("Board", "Esc", "close the sheet, drop what is in hand, unmark, then drop the picked cell"),
+        new("Select", "R", "the select tool, on any tab; again, back to the brush", "select"),
+        new("Select", "left drag", "mark a box of cells; shift adds, alt takes away"),
+        new("Select", "drag marked", "carry the marked cells - one undo"),
+        new("Select", "right click", "unmark; drop what is in hand"),
+        new("Select", "ctrl+A  ctrl+D", "mark the whole board, unmark"),
+        new("Select", "ctrl+C  ctrl+X", "copy, cut the marked cells: ground, cover, level, walls, tanks", "copy, cut"),
+        new("Select", "ctrl+V", "paste: the piece follows the pointer, a click lays it (again and again)", "paste"),
+        new("Select", "ctrl+shift+V", "paste without its tanks"),
+        new("Select", "Del", "clear the marked cells to plain ground"),
+        new("Select", "F", "with cells marked, fills them with the brush"),
         new("Foundation", "W", "the brush is water"),
         new("Foundation", "E", "the brush puts a cell on or off the board"),
         new("Cover", "W", "the bunker brush; again, its slit turns a side"),
-        new("Level", "W", "the brush is a ramp - its tilt is worked out from the heights"),
-        new("File", "N  O", "new board, open one"),
-        new("File", "S  shift+S", "save, save as"),
-        new("File", "F5", "run the board on the 3D bench (Edit F5 there comes back)"),
-        new("File", "shift+F5", "run it in the sprite harness"),
-        new("View", "L  R  G  B", "levels, ramps, ramp sites, flood"),
+        new("Units", "left click", "put the brush's tank here; on a tank, make it the brush's"),
+        new("Units", "left drag", "carry a tank to another cell"),
+        new("Units", "right click", "take the tank off this cell"),
+        new("File", "ctrl+N  ctrl+O", "new board, open one; N and O alone too"),
+        new("File", "ctrl+S  ctrl+shift+S", "save, save as; S and shift+S alone too"),
+        new("File", "F5", "play the board as it is, saved or not, on the 3D bench (Edit F5 there comes back)"),
+        new("File", "shift+F5", "play it with the tank on the cell under the pointer"),
+        new("File", "ctrl+F5", "run it as a match: two sides off the homes"),
+        new("Board", "P", "symmetry: off, half a turn, mirror left-right, mirror top-bottom - the brush draws the twin too", "symmetry"),
+        new("View", "L  B", "levels, flood"),
         new("View", "T  M  K", "trees, grass, walls - shown or hidden"),
         new("View", ",  .", "turn the board a hex side either way; Home turns it back"),
         new("View", "F1", "this sheet", "every key"),
@@ -71,6 +93,8 @@ public sealed partial class MapEditor
         Levels, Ramps, Sites, Flood, Homes, Faults,
         Trees, Grass, Walls, Bunkers, Mines,
         Sheet,
+        // MapEditor.Select
+        Select, MarkAll, Copy, Cut, Paste, Clear, SaveStamp,
     }
 
     /// <summary>Edit, View and Help beside File.</summary>
@@ -78,19 +102,18 @@ public sealed partial class MapEditor
     {
         var edit = new PopupMenu { Name = "Edit" };
         edit.AddThemeFontSizeOverride("font_size", 16);
-        edit.AddItem("Undo              Z", (int)More.Undo);
-        edit.AddItem("Redo              Y", (int)More.Redo);
+        edit.AddItem("Undo           ctrl+Z", (int)More.Undo);
+        edit.AddItem("Redo     ctrl+shift+Z", (int)More.Redo);
         edit.AddSeparator();
         edit.AddItem("Fill region       F", (int)More.Fill);
         edit.AddItem("Put a home        H", (int)More.PlaceHome);
+        SelectMenu(edit);
         edit.IdPressed += id => Act((More)id);
         bar.AddChild(edit);
 
         var view = new PopupMenu { Name = "View" };
         view.AddThemeFontSizeOverride("font_size", 16);
         view.AddCheckItem("Levels            L", (int)More.Levels);
-        view.AddCheckItem("Ramps             R", (int)More.Ramps);
-        view.AddCheckItem("Ramp sites        G", (int)More.Sites);
         view.AddCheckItem("Flood             B", (int)More.Flood);
         view.AddCheckItem("Homes", (int)More.Homes);
         view.AddCheckItem("Faults", (int)More.Faults);
@@ -109,8 +132,7 @@ public sealed partial class MapEditor
         {
             foreach ((More item, bool on) in new[]
                      {
-                         (More.Levels, _layers.HasFlag(Layers.Levels)), (More.Ramps, _layers.HasFlag(Layers.Ramps)),
-                         (More.Sites, _layers.HasFlag(Layers.Sites)), (More.Flood, _layers.HasFlag(Layers.Flood)),
+                         (More.Levels, _layers.HasFlag(Layers.Levels)), (More.Flood, _layers.HasFlag(Layers.Flood)),
                          (More.Homes, _layers.HasFlag(Layers.Homes)), (More.Faults, _layers.HasFlag(Layers.Faults)),
                          (More.Trees, _show.Trees), (More.Grass, _show.Grass), (More.Walls, _show.Walls),
                          (More.Bunkers, _show.Bunkers), (More.Mines, _show.Mines),
@@ -130,6 +152,13 @@ public sealed partial class MapEditor
     /// <summary>A menu item or a key: the same call either way.</summary>
     private void Act(More what)
     {
+        if (SelectAct(what))
+        {
+            _field.QueueRedraw();
+            _marks.QueueRedraw();
+            Say();
+            return;
+        }
         switch (what)
         {
             case More.Undo: Take(_edit.Undo(), "undone"); return;
@@ -225,13 +254,35 @@ public sealed partial class MapEditor
         _layer.AddChild(_sheet);
     }
 
-    /// <summary>Escape backs out a layer at a time: the sheet, then the picked
-    /// cell. Answers whether it had anything to close.</summary>
+    /// <summary>Escape backs out a layer at a time: the sheet, the piece in
+    /// hand, the marked cells, the select tool, then the picked cell. Answers
+    /// whether it had anything to close.</summary>
     private bool Escape()
     {
         if (_sheet is not null)
         {
             Sheet(false);
+            return true;
+        }
+        if (_held is not null)
+        {
+            Drop(_moving ? "move called off" : "put down nothing");
+            return true;
+        }
+        if (_selected.Count > 0 || _boxFrom is not null)
+        {
+            _selected.Clear();
+            _boxFrom = null;
+            _said = "nothing marked";
+            return true;
+        }
+        // any tool but the brush, the select tool among them (MapEditor.Tools)
+        if (_instrument != Instrument.Brush || _dragFrom is not null)
+        {
+            if (_selectTool)
+                SelectTool(false);
+            else
+                Use(Instrument.Brush);
             return true;
         }
         if (_edit.Inside(_picked))
@@ -273,12 +324,10 @@ public sealed partial class MapEditor
             parts.Add(g.Over.ToString().ToLowerInvariant());
         parts.Add($"level {g.Level}");
         if (_edit.IsRamp(c))
-        {
-            int heading = _field.RampHeading(c);
-            parts.Add(heading >= 0 ? $"ramp up to {heading}" : "ramp, no tilt");
-        }
+            parts.Add("ramp in the file, not built");
         if (_field.InBounds(c) && _field.IsWater(c))
-            parts.Add(_field.IsDeep(c) ? "deep water" : "water");
+            parts.Add(_field.IsDeep(c) ? "deep water"
+                : _field.Brimmed(c) ? "ford, shelf of deep water" : "water");
         int home = _edit.Homes.ToList().FindIndex(h => h.Cell == c);
         if (home >= 0)
             parts.Add($"home {home + 1}" + (_edit.Homes[home].Class is { Length: > 0 } cls ? $" {cls}" : ""));
@@ -301,7 +350,22 @@ public sealed partial class MapEditor
     /// </summary>
     private void Ghost(Overlay on)
     {
+        // the road tool draws its own (MapEditor.Roads)
+        if (RoadGhost(on))
+            return;
         if (!_edit.Inside(_under) || _sheet is not null)
+            return;
+        // the pointer is the selection's (MapEditor.Select), which draws its own
+        if (Selecting)
+        {
+            if (_held is null)
+                on.DrawString(ThemeDB.FallbackFont, TopOnScreen(_under) + new Vector2(18.0f, -18.0f), "select",
+                              HorizontalAlignment.Left, -1, 15, SelectInk);
+            return;
+        }
+        // a line or a box being dragged, the eyedropper, a preset's result
+        // (MapEditor.Tools)
+        if (ToolGhost(on))
             return;
         Color ink = _erasing ? new Color(1.0f, 0.6f, 0.5f, 0.9f) : new Color(BrushInk, 0.9f);
         foreach (Vector2I cell in Patch())
@@ -311,20 +375,34 @@ public sealed partial class MapEditor
             float rise = 0.0f;
             if (_tab == MapEdit.Tab.Level && !_erasing && _field.Atlas is not null)
             {
+                // The brush's level is the letter's, over the plinth; the field's
+                // top is the board's, plinth and all (MapEdit.Draft). Without
+                // the plinth the target stood a level low on every board drawn
+                // here (plinth 1): its outline fell on the cell in front, and
+                // the stroke seemed to land on the cell behind it (2026-10-26).
                 float want = _rampBrush
                     ? _field.LevelAt(cell) * _field.Lift + _field.Lift * 0.5f
-                    : _level * _field.Lift;
+                    : (_level + _edit.Plinth) * _field.Lift;
                 rise = want - _field.TopAt(cell);
             }
+            // The cell is the loud part, the height the quiet one. Seen from
+            // above, a top a level off lands on the next cell's ground - a
+            // drop on the one in front, a lift on the one behind - so drawn
+            // brighter than the cell it read as the brush standing between
+            // two hexes (2026-10-26).
+            var corners = new Vector2[6];
+            foreach (int heading in HexField.EdgeHeadings)
+                corners[HexField.EdgeIndex(heading)] = EdgeOnScreen(cell, heading).A;
+            on.DrawColoredPolygon(corners, new Color(ink, 0.18f));
             foreach (int heading in HexField.EdgeHeadings)
             {
                 (Vector2 a, Vector2 b) = EdgeOnScreen(cell, heading);
-                on.DrawLine(a, b, new Color(ink, 0.55f), 2.0f);
+                on.DrawLine(a, b, ink, 2.5f);
                 if (Mathf.Abs(rise) < 0.5f)
                     continue;
                 (Vector2 ua, Vector2 ub) = EdgeOnScreen(cell, heading, rise);
-                on.DrawLine(ua, ub, ink, 2.5f);
-                on.DrawLine(a, ua, new Color(ink, 0.45f), 1.5f);
+                on.DrawLine(ua, ub, new Color(ink, 0.45f), 1.5f);
+                on.DrawLine(a, ua, new Color(ink, 0.35f), 1.0f);
             }
         }
         // The bunker brush: which way each capon's slit would face, an arrow
@@ -334,7 +412,9 @@ public sealed partial class MapEditor
             {
                 if (!_field.InBounds(cell))
                     continue;
-                (Vector2 a, Vector2 b) = EdgeOnScreen(cell, _facing);
+                // a twin's slit turned with it (MapEditor.Symmetry)
+                int facing = Own().Contains(cell) ? _facing : MapEdit.Turned(_facing, _symmetry);
+                (Vector2 a, Vector2 b) = EdgeOnScreen(cell, facing);
                 Vector2 from = TopOnScreen(cell), to = (a + b) * 0.5f;
                 on.DrawLine(from, to, ink, 3.0f);
                 Vector2 back = (from - to).Normalized() * 10.0f;

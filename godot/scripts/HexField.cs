@@ -221,7 +221,24 @@ public sealed partial class HexField : Node2D
     /// same number and the result is continuous either way.
     /// </summary>
     public float TopAtPoint(Vector2 flat) =>
-        Atlas is null ? 0.0f : TopOn(CellUnder(flat), flat);
+        Atlas is null ? 0.0f : Surface?.Invoke(flat) ?? TopOn(CellUnder(flat), flat);
+
+    /// <summary>
+    /// The ground's height at a flat-space point when the board is drawn as
+    /// something other than its prisms - the relief's one smooth ground
+    /// (BOT-11, <c>--relief</c>, <see cref="Relief.HeightAt"/>). Set, it
+    /// answers <see cref="TopAtPoint"/> and <see cref="TopOn"/> for every
+    /// point, the named cell or not: what a tank, a rut, a crater or a tree
+    /// stands on is the ground that is drawn, and a second description of
+    /// it disagrees exactly where it is hardest to see.
+    ///
+    /// <b>The rules do not read it.</b> <see cref="TopAt"/>,
+    /// <see cref="TopCorners"/>, <see cref="LevelAt"/>, <see cref="WaterTop"/>
+    /// and <see cref="BedAt"/> stay the cells' own, so pathing, the line of fire
+    /// and the water's surface are what they were; and the relief itself is
+    /// built off <see cref="TopOn"/> before this is set.
+    /// </summary>
+    public Func<Vector2, float>? Surface;
 
     /// <summary>The same plane read for a <b>named</b> cell, which is how anything
     /// that has to keep its shape asks.
@@ -240,6 +257,8 @@ public sealed partial class HexField : Node2D
     {
         if (Atlas is null)
             return 0.0f;
+        if (Surface is not null)
+            return Surface(flat);
         float middle = TopAt(cell);
         if (!IsRamp(cell))
             return middle;
@@ -341,6 +360,7 @@ public sealed partial class HexField : Node2D
                  || ramps.Length != Columns * Rows
             ? null : DeriveRamps(ramps);
         _ordered = null;
+        _brim = null;
         QueueRedraw();
     }
 
@@ -390,16 +410,21 @@ public sealed partial class HexField : Node2D
     /// carries no homes and no cliffs, and the rules that need those are the ones
     /// a whole map is asked and this is not.
     /// </summary>
+    /// <remarks>A layer of another size is read as absent, <see cref="IsWater"/>'s
+    /// guard: the editor resizes the board and sets its layers one at a time,
+    /// and SetWater ran the rules over the old floor read at the new width - a
+    /// waterfall that was not there, on every resize with water on it.</remarks>
     private MapRules.Draft Drafted(bool[]? ramps = null) => new()
     {
         Columns = Columns,
         Rows = Rows,
-        Levels = _levels ?? new int[Columns * Rows],
+        Levels = _levels is { } levels && levels.Length == Columns * Rows ? levels : new int[Columns * Rows],
         Ramps = ramps ?? Marked(),
-        Water = _water ?? new bool[Columns * Rows],
-        Ground = _ground ?? new Foundation[Columns * Rows],
+        Water = _water is { } water && water.Length == Columns * Rows ? water : new bool[Columns * Rows],
+        Ground = _ground is { } ground && ground.Length == Columns * Rows ? ground : new Foundation[Columns * Rows],
         Cliffs = new bool[Columns * Rows],
         Plot = _plot,
+        Sea = Sea,
     };
 
     /// <summary>The derived headings read back as the flags they came from, for
@@ -408,7 +433,7 @@ public sealed partial class HexField : Node2D
     private bool[] Marked()
     {
         var marked = new bool[Columns * Rows];
-        if (_ramps is not null)
+        if (_ramps is not null && _ramps.Length == marked.Length)
             for (int at = 0; at < marked.Length; at++)
                 marked[at] = _ramps[at] >= 0;
         return marked;
@@ -495,8 +520,29 @@ public sealed partial class HexField : Node2D
     /// the same shape whether there is water at the bottom of it.
     /// </summary>
     public bool Drops(Vector2I from, Vector2I onto) =>
-        RampHeading(from) < 0 && RampHeading(onto) < 0
-        && LevelAt(onto) < LevelAt(from);
+        Slopes
+            ? LevelAt(onto) < LevelAt(from) - MaxClimb
+              || (TerrainRules.Plunges(FoundationAt(onto)) && LevelAt(onto) < LevelAt(from))
+            : RampHeading(from) < 0 && RampHeading(onto) < 0
+              && LevelAt(onto) < LevelAt(from);
+
+    /// <summary>
+    /// The levels are joined by slopes, not by ramps (BOT-11, <c>--relief</c>):
+    /// a board set with no ramps (<see cref="SetRelief"/>), on which
+    /// <see cref="Passable"/> already lets a hull up or down
+    /// <see cref="MaxClimb"/> levels, says so here, so that such a step is a
+    /// drive and not a fall. What still falls is more than
+    /// <see cref="MaxClimb"/> down, and any drop on to a floor that takes one
+    /// (deep water: off the bank into the pond). Off by default, so a board
+    /// that only lost its ramps - the harness's <c>--no-ramps</c> - falls as
+    /// it did. A departure from the GDD (field.md, "Рампа"), kept to the flag.
+    /// </summary>
+    public bool Slopes;
+
+    /// <summary>The sea round the board (<see cref="BoardMap.Moated"/>), or
+    /// null: deep water the one-surface guard does not ask about its
+    /// neighbours. Set before <see cref="SetWater"/>.</summary>
+    public IReadOnlySet<Vector2I>? Sea;
 
     public int LevelAt(Vector2I cell) =>
         _levels is null || !InBounds(cell) ? 0 : _levels[cell.Y * Columns + cell.X];
@@ -555,9 +601,12 @@ public sealed partial class HexField : Node2D
     {
         if (!InBounds(cell))
             return false;
-        int at = cell.Y * Columns + cell.X;
-        return (_water is not null && _water[at])
-               || (_ground is not null
+        // Lengths asked too: the editor resizes the board and then sets its
+        // layers one at a time, and SetWater re-reads the floor of the board
+        // before - a smaller one ran off the end of it on every Open.
+        int at = cell.Y * Columns + cell.X, n = Columns * Rows;
+        return (_water is not null && _water.Length == n && _water[at])
+               || (_ground is not null && _ground.Length == n
                    && (_ground[at] == Foundation.Shallow
                        || _ground[at] == Foundation.Deep));
     }
@@ -658,7 +707,22 @@ public sealed partial class HexField : Node2D
     /// </summary>
     public float BedAt(Vector2I cell) =>
         LevelAt(cell) * Lift
-        - (IsDeep(cell) && RampHeading(cell) < 0 ? Lift * (float)DeepBed : 0.0f);
+        - (IsDeep(cell) && RampHeading(cell) < 0 ? Lift * (float)DeepBed : 0.0f)
+        + Shelf(cell);
+
+    /// <summary>
+    /// How far a ford's bed stands over its level, screen px: nought, except
+    /// for a flat ford in a body that has deep water in it.
+    ///
+    /// <b>The surface is the body's and the depth is the bed's</b>
+    /// (<see cref="MapRules.Brimmed"/>). Such a ford stands at the deep water's
+    /// surface, so to stay a ford its bed comes up by the difference - a shelf
+    /// <see cref="WaterRise"/> under the one surface. The rules still read the
+    /// level (<see cref="TopAt"/>); this is where the floor is drawn.
+    /// </summary>
+    private float Shelf(Vector2I cell) =>
+        !IsDeep(cell) && RampHeading(cell) < 0 && Brimmed(cell)
+            ? DeepRise - WaterRise : 0.0f;
 
     /// <summary>
     /// Where the surface of the water over a cell stands, in screen px off the
@@ -675,7 +739,25 @@ public sealed partial class HexField : Node2D
     /// same number its flat neighbours carry, so one body of water comes out one
     /// surface by construction rather than by a check.
     /// </summary>
-    public float WaterTop(Vector2I cell) => LevelAt(cell) * Lift + WaterRiseAt(cell);
+    public float WaterTop(Vector2I cell) =>
+        LevelAt(cell) * Lift + (Brimmed(cell) ? DeepRise : WaterRiseAt(cell));
+
+    /// <summary>
+    /// Whether a water cell is in a body with deep water in it, and so stands
+    /// at the deep water's surface (<see cref="MapRules.Brimmed"/>, the rule's
+    /// one copy). Worked out once per change of the levels, the water or the
+    /// floor, on the first question after it.
+    /// </summary>
+    public bool Brimmed(Vector2I cell)
+    {
+        if (!InBounds(cell))
+            return false;
+        if (_brim is null || _brim.Length != Columns * Rows)
+            _brim = MapRules.Brimmed(Drafted());
+        return _brim[cell.Y * Columns + cell.X];
+    }
+
+    private bool[]? _brim;
 
     /// <summary>
     /// Whether a cell's water is deep: the hollow filled nearly to the brim, the
@@ -694,8 +776,9 @@ public sealed partial class HexField : Node2D
     /// ford stands <see cref="WaterRise"/> over its bed, which is one slider; deep
     /// water stands <see cref="DeepRise"/> over its own, which is the other - most
     /// of a <see cref="Lift"/>, a little under the bank rather than level with it,
-    /// see <see cref="DeepDepth"/> for why. The waterfall guard keeps the two out
-    /// of one body - see <see cref="MapRules.StepFaults"/>.
+    /// see <see cref="DeepDepth"/> for why. In one body the two meet at the deep
+    /// water's surface and the ford's bed rises to keep its depth
+    /// (<see cref="Shelf"/>), so this stays the depth over the cell's own bed.
     /// </summary>
     public float WaterRiseAt(Vector2I cell) => IsDeep(cell) ? DeepRise : WaterRise;
 
@@ -790,6 +873,7 @@ public sealed partial class HexField : Node2D
         for (int i = 0; i < _wet.Count; i++)
             _wetIndex[_wet[i]] = i;
         _ordered = null;
+        _brim = null;
         QueueRedraw();
     }
 
@@ -1580,6 +1664,44 @@ public sealed partial class HexField : Node2D
         }
         Rewet();
     }
+
+    /// <summary>The roads on the board, in its cells (format 3's <c>roads</c>,
+    /// <see cref="Road"/>): what the stage draws. The rule is the floor
+    /// (<see cref="Foundation.Road"/>, set with the ground); this is the
+    /// drawing's - which way each road runs through a cell.</summary>
+    public IReadOnlyList<RoadPath> Roads { get; set; } = Array.Empty<RoadPath>();
+
+    /// <summary>The board's mix of species (format 3's <c>wood</c>,
+    /// <see cref="Species"/>), null for oaks; and each cell's own
+    /// (<c>trees</c>), null when no cell said one. Look only: what a wooded
+    /// cell grows, which <see cref="BoardDress.Spots"/> asks.</summary>
+    public IReadOnlyDictionary<char, int>? WoodMix { get; set; }
+    public char[]? TreeCells { get; set; }
+
+    /// <summary>The species a cell's own letter names, <see cref="Species.As"/>
+    /// for none.</summary>
+    public char TreeAt(Vector2I cell) =>
+        TreeCells is not null && InBounds(cell) && TreeCells.Length == Columns * Rows
+            ? TreeCells[cell.Y * Columns + cell.X] : Species.As;
+
+    /// <summary>The look each cell's ground wears (<see cref="Soil"/>,
+    /// resolved), or null for today's ground everywhere.</summary>
+    private char[]? _soil;
+
+    /// <summary>
+    /// Dress the ground (format 3's soil, docs/map-format3-plan.md Ф4): one
+    /// look a cell, resolved (<see cref="BoardMap.Looks"/>), null for today's.
+    /// Look only - no rule asks it; the relief, the grass and the stage do.
+    /// </summary>
+    public void SetSoil(char[]? looks) =>
+        _soil = looks is not null && looks.Length == Columns * Rows ? looks : null;
+
+    /// <summary>The look a cell's ground wears: <see cref="Soil.Today"/>'s
+    /// for its floor when the board dressed nothing.</summary>
+    public char SoilAt(Vector2I cell) =>
+        !InBounds(cell) ? Soil.As
+        : _soil is not null ? _soil[cell.Y * Columns + cell.X]
+        : IsWater(cell) ? Soil.As : Soil.Today(FoundationAt(cell));
 
     /// <summary>
     /// Put the cover on. One entry per cell; the states are optional and default

@@ -148,13 +148,13 @@ public sealed partial class Tank3DBench
             CasemateGhost(from, o);
             GhostTrack(from, o);
             _judged = Judge(from, o);
-            _judgedNote = $"цель {o.Tag} {_judged.Cell}{(from != CellHere ? $" из {from}" : "")}: {_judged.Says}"
+            _judgedNote = $"цель {o.Tag} {MapAt(_judged.Cell)}{(from != CellHere ? $" из {MapAt(from)}" : "")}: {_judged.Says}"
                           + (_postLock && !driving ? "; ПКМ — ехать и стрелять" : "")
                           + (_postNone ? "; ни с одной клетки хода" : "");
             if (_lockCell is Vector2I after && _profile.FreeOrder && !driving && !_postLock)
             {
                 Judged then = Judge(after, o);
-                _judgedNote += $"; после хода из {after}: {then.Says}";
+                _judgedNote += $"; после хода из {MapAt(after)}: {then.Says}";
             }
             if (_aimMesh?.Mesh is ImmediateMesh plate)
                 AimGround(plate, _judged);
@@ -260,7 +260,7 @@ public sealed partial class Tank3DBench
         }
         if (why.Length == 0 && !_profile.Lobs && WallOnAxis(from, axis, cells, passOne: ShootsThrough) is { } wall)
         {
-            why = $"снаряд уйдёт в стену {wall.Cell}";
+            why = $"снаряд уйдёт в стену {MapAt(wall.Cell)}";
             end = wall.At;
             stop = wall.Cell;
         }
@@ -469,7 +469,7 @@ public sealed partial class Tank3DBench
                     || (clear && ShotWhy(here, c, out _, out _, out _).Length > 0))
                     continue;
                 PlaceOther(c, HeadingFor(c, side) + 90.0f);
-                Log.Print($"tank3d: target {_otherTag} stands on {c}, {cells} out along {side}");
+                Log.Print($"tank3d: target {_otherTag} stands on {MapAt(c)}, {cells} out along {side}");
                 return;
             }
     }

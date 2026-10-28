@@ -88,6 +88,13 @@ internal static class AssetRoot
     /// </summary>
     internal static readonly string Markers = Repo + "/assets/Images/Markers";
 
+    /// <summary>Tiling ground photographs for the relief (BOT-11,
+    /// <c>Stage3D.Relief</c>): <c>grass_basecolor.jpg</c> is the lawn. Its own
+    /// folder for the water's reason - TerrainSet would take it for a kind of
+    /// cell. Optional, and not in git (a bought texture's licence): without
+    /// it the relief paints its grass as before.</summary>
+    internal static readonly string Ground = Repo + "/assets/Images/Ground";
+
     /// <summary>Scratch output from ad-hoc runs. Gitignored, and it may not
     /// exist: anything writing here creates it or says why not.</summary>
     internal static readonly string Out = Repo + "/out";

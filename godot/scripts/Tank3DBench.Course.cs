@@ -71,6 +71,14 @@ public sealed partial class Tank3DBench
             },
         };
         AddChild(_course);
+        // the relief's zone: its own mesh, built when the reach changes
+        _zone = new MeshInstance3D
+        {
+            Name = "Zone",
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = _course.MaterialOverride,
+        };
+        AddChild(_zone);
         _courseInk = new Control { Name = "CourseInk", MouseFilter = Control.MouseFilterEnum.Ignore };
         _courseInk.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         _courseInk.Draw += DrawCourse;
@@ -127,7 +135,7 @@ public sealed partial class Tank3DBench
         // a fixed cell's ghost faces where the new way arrives
         if (_lockCell is not null)
             _lockFace = _ways[_wayIx].End.Heading;
-        Log.Print($"tank3d: way {_wayIx + 1} of {_ways.Count} to {_hoverCell}: {_ways[_wayIx]}");
+        Log.Print($"tank3d: way {_wayIx + 1} of {_ways.Count} to {MapAt(_hoverCell)}: {MapAt(_ways[_wayIx])}");
         return true;
     }
 
@@ -141,8 +149,8 @@ public sealed partial class Tank3DBench
             return;
         }
         var forks = _reach.Cells.Keys.Select(c => (c, _reach.RoutesTo(c))).Where(f => f.Item2.Count > 1).ToList();
-        Log.Print($"tank3d: forks from {_reach.Start.Cell} facing {_reach.Start.Heading}, budget {_reach.Budget}: "
-                 + (forks.Count == 0 ? "none" : string.Join("; ", forks.Select(f => $"{f.c} x{f.Item2.Count}"))));
+        Log.Print($"tank3d: forks from {MapAt(_reach.Start.Cell)} facing {_reach.Start.Heading}, budget {_reach.Budget}: "
+                 + (forks.Count == 0 ? "none" : string.Join("; ", forks.Select(f => $"{MapAt(f.c)} x{f.Item2.Count}"))));
     }
 
     /// <summary>Every frame: the reach searched again when the tank's pose or
@@ -153,6 +161,8 @@ public sealed partial class Tank3DBench
             return;
         mesh.ClearSurfaces();
         _courseNote = "";
+        if (_zone is not null)
+            _zone.Visible = CourseShown;
         if (!CourseShown)
         {
             _hoverCell = null;
@@ -205,11 +215,19 @@ public sealed partial class Tank3DBench
             }
         }
 
-        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-        Zone(mesh, _reach!);
-        if (_ways.Count > 0)
-            Ribbon(mesh, _ways[_wayIx % _ways.Count]);
-        mesh.SurfaceEnd();
+        if (_relief is not null)
+            ReliefZone(_reach!);
+        // an empty surface is an engine error: on the relief the zone is
+        // its own mesh, and with no way shown there is nothing here
+        if (_relief is null || _ways.Count > 0)
+        {
+            mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+            if (_relief is null)
+                Zone(mesh, _reach!);
+            if (_ways.Count > 0)
+                Ribbon(mesh, _ways[_wayIx % _ways.Count]);
+            mesh.SurfaceEnd();
+        }
 
         Steps.Route? shown = _ways.Count > 0 ? _ways[_wayIx % _ways.Count] : null;
         GhostTick(shown);
@@ -242,8 +260,9 @@ public sealed partial class Tank3DBench
     /// <summary>A board point on the top of <paramref name="cell"/>, in the
     /// world, nudged toward the eye like the marks.</summary>
     private Vector3 OnTop(Vector2I cell, Vector2 flat) =>
-        new Vector3(flat.X, _field!.TopOn(cell, flat) / RiseFactor, flat.Y / Squash)
-        + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
+        _relief is not null ? OnGround(cell, flat)
+        : new Vector3(flat.X, _field!.TopOn(cell, flat) / RiseFactor, flat.Y / Squash)
+          + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
 
     /// <summary>The hexagon's corners about its middle, board units: the
     /// marks' (<see cref="Band"/>).</summary>
@@ -316,6 +335,93 @@ public sealed partial class Tank3DBench
                      mid + a * 0.99f, mid + b * 0.99f, mid + b * 0.90f, mid + a * 0.90f);
             }
         }
+    }
+
+    private MeshInstance3D? _zone;
+    private int _zoneBuilt = -1;
+
+    /// <summary>How many pieces a hexagon's fan triangle and an outline edge
+    /// are cut into on the relief: enough for the tint to follow a terrace.</summary>
+    private const int ZoneCuts = 5;
+
+    /// <summary>
+    /// The zone on the relief (BOT-11): the same tint and outline as
+    /// <see cref="Zone"/>, cut fine and laid on the drawn ground - and on the
+    /// water's surface over a water cell, not on its bed.
+    ///
+    /// <b>Six flat triangles a cell were the prisms' zone</b>, a plane each
+    /// face; on the relief their middles cut through the terraces and over a
+    /// pond they lay on the bed, seen through the water and torn by its shore.
+    /// Built once a reach (<see cref="_reachVersion"/>), not every frame: a
+    /// few thousand triangles.
+    /// </summary>
+    private void ReliefZone(Steps.Reach reach)
+    {
+        if (_zone is null || _zoneBuilt == _reachVersion)
+            return;
+        _zoneBuilt = _reachVersion;
+        // Over the water, said for sure: the course's rung (RingOrder - 1) is
+        // the water's own, and on a tie the pond, drawn after, covered the
+        // zone and the ribbon laid on its surface. The marks share the rung
+        // above, and draw nothing since HUD stage 4.
+        if (_zone.MaterialOverride is BaseMaterial3D ink)
+            ink.RenderPriority = Stage3D.RingOrder;
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        Vector2[] corner = Corners();
+        void Put(Color ink, Vector2I cell, Vector2 p)
+        {
+            st.SetColor(ink);
+            st.AddVertex(OnGround(cell, p));
+        }
+        foreach ((Vector2I cell, int cost) in reach.Cells)
+        {
+            Vector2 mid = CellFlat(cell);
+            var tint = new Color(CourseInk, reach.Budget - cost >= 1 ? 0.30f : 0.13f);
+            for (int i = 0; i < 6; i++)
+            {
+                Vector2 a = corner[i] * 0.95f, b = corner[(i + 1) % 6] * 0.95f;
+                // the fan triangle (mid, a, b) cut into ZoneCuts² pieces
+                for (int u = 0; u < ZoneCuts; u++)
+                    for (int v = 0; u + v < ZoneCuts; v++)
+                    {
+                        Vector2 P(float s, float t) => mid + a * (s / ZoneCuts) + b * (t / ZoneCuts);
+                        Put(tint, cell, P(u, v)); Put(tint, cell, P(u + 1, v)); Put(tint, cell, P(u, v + 1));
+                        if (u + v + 2 <= ZoneCuts)
+                        {
+                            Put(tint, cell, P(u + 1, v)); Put(tint, cell, P(u + 1, v + 1)); Put(tint, cell, P(u, v + 1));
+                        }
+                    }
+            }
+            var line = new Color(CourseInk, 0.95f);
+            foreach (int side in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(cell, side);
+                if (reach.Reaches(next) || next == reach.Start.Cell)
+                    continue;
+                int e = EdgeOf(cell, side, corner);
+                Vector2 a = corner[e], b = corner[(e + 1) % 6];
+                for (int k = 0; k < ZoneCuts; k++)
+                {
+                    Vector2 a0 = a.Lerp(b, (float)k / ZoneCuts), a1 = a.Lerp(b, (float)(k + 1) / ZoneCuts);
+                    Vector2 o0 = mid + a0 * 0.99f, o1 = mid + a1 * 0.99f, i0 = mid + a0 * 0.90f, i1 = mid + a1 * 0.90f;
+                    Put(line, cell, o0); Put(line, cell, o1); Put(line, cell, i1);
+                    Put(line, cell, o0); Put(line, cell, i1); Put(line, cell, i0);
+                }
+            }
+        }
+        _zone.Mesh = st.Commit();
+    }
+
+    /// <summary><see cref="OnTop"/> on the relief: the drawn ground, or the
+    /// water's surface where a water cell's is over it.</summary>
+    private Vector3 OnGround(Vector2I cell, Vector2 flat)
+    {
+        float top = _field!.TopAtPoint(flat);
+        if (_field.IsWater(cell))
+            top = Mathf.Max(top, _field.WaterTop(cell));
+        return new Vector3(flat.X, top / RiseFactor, flat.Y / Squash)
+               + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
     }
 
     /// <summary>The ribbon: a strip through the middles of the cells the way

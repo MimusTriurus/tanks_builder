@@ -100,22 +100,34 @@ public static class Steps
         public List<Vector2I> Cells() =>
             Legs.Where(l => l.Act is Act.Forward or Act.Back).Select(l => l.At.Cell).ToList();
 
-        public override string ToString() =>
+        public override string ToString() => ToString(Vector2I.Zero);
+
+        /// <summary>The same with every cell less <paramref name="shift"/>:
+        /// a board that moved its map's cells prints the map's.</summary>
+        public string ToString(Vector2I shift) =>
             string.Join(" ", Legs.Skip(1).Select(l => l.Act switch
             {
                 Act.Turn => $"t{l.At.Heading}",
-                Act.Back => $"b{l.At.Cell}",
-                _ => $"{l.At.Cell}",
+                Act.Back => $"b{l.At.Cell - shift}",
+                _ => $"{l.At.Cell - shift}",
             })) + $" = {Spent}";
     }
 
-    internal readonly record struct State(Pose Pose, bool Final);
+    /// <summary>A pose in the search, whether it ends the move, and whether
+    /// every cell to it - the start among them - was road: the road's step
+    /// (<see cref="Paved"/>) is had only on such a way.</summary>
+    internal readonly record struct State(Pose Pose, bool Final, bool Paved = false);
 
     /// <summary>Everything a turn can do from one pose, searched once.</summary>
     public sealed class Reach
     {
         public required Pose Start { get; init; }
+        /// <summary>The most steps any way has: the speed, or one in mud or a
+        /// wood, and one more where the whole way is road.</summary>
         public required int Budget { get; init; }
+        /// <summary>The steps a way off the road has (<see cref="Budget"/>
+        /// without the road's).</summary>
+        public int Plain { get; init; }
         internal readonly Dictionary<State, int> Cost = new();
         internal readonly Dictionary<State, List<State>> Pred = new();
         internal readonly Dictionary<State, Risk> Risks = new();
@@ -147,7 +159,14 @@ public static class Steps
 
         /// <summary>Steps left after the cheapest way to <paramref name="cell"/>,
         /// or -1 when it cannot be reached.</summary>
-        public int Left(Vector2I cell) => Cells.TryGetValue(cell, out int c) ? Budget - c : -1;
+        public int Left(Vector2I cell)
+        {
+            int left = -1;
+            foreach ((State s, int cost) in Cost)
+                if (s.Pose.Cell == cell && Ends(s))
+                    left = Math.Max(left, (s.Paved ? Budget : Plain) - cost);
+            return left;
+        }
 
         private bool Ends(State s) =>
             s.Pose.Cell != Start.Cell && (s.Final || !Field.IsRamp(s.Pose.Cell));
@@ -219,10 +238,16 @@ public static class Steps
             int turns = Turning(route.End.Heading, heading);
             if (turns == 0)
                 return 0;
-            if (route.Final || route.Spent + turns > Budget)
+            if (route.Final || route.Spent + turns > Cap(route))
                 return null;
             return turns;
         }
+
+        /// <summary>The steps a route's way has: the road's one more only
+        /// when every cell it drives is road.</summary>
+        private int Cap(Route route) =>
+            Budget > Plain && route.Cells().All(c => Field.FoundationAt(c) == Foundation.Road)
+                ? Budget : Plain;
 
         private Route Build(List<State> backwards)
         {
@@ -252,6 +277,14 @@ public static class Steps
     public static int BudgetAt(HexField field, Vector2I cell, Mover mover) =>
         Stops(field, cell) ? Math.Min(1, mover.Speed) : mover.Speed;
 
+    /// <summary>
+    /// The road's step: one more when every cell the move passes, the start
+    /// and the end among them, lies on a road (GDD field.md, "дорога";
+    /// docs/map-format3-plan.md Ф6). Not on top of a start in mud or a wood -
+    /// those cells are no road.
+    /// </summary>
+    public const int Paved = 1;
+
     /// <summary>Whether entering <paramref name="cell"/> ends the move by the
     /// floor or the cover alone: mud, a wood in any state.</summary>
     public static bool Stops(HexField field, Vector2I cell) =>
@@ -270,8 +303,13 @@ public static class Steps
     /// </summary>
     public static Reach Plan(HexField field, Pose start, Mover mover)
     {
-        var reach = new Reach { Start = start, Budget = BudgetAt(field, start.Cell, mover), Field = field };
-        var first = new State(start, false);
+        int plain = BudgetAt(field, start.Cell, mover);
+        bool road = field.FoundationAt(start.Cell) == Foundation.Road;
+        var reach = new Reach
+        {
+            Start = start, Budget = road ? plain + Paved : plain, Plain = plain, Field = field,
+        };
+        var first = new State(start, false, road);
         reach.Cost[first] = 0;
         reach.Pred[first] = new List<State>();
         var open = new PriorityQueue<State, int>();
@@ -286,22 +324,26 @@ public static class Steps
 
             if (!onRamp)
             {
-                Offer(new State(new Pose(cell, Turn(heading, 60)), false), cost + 1, s, Risk.None);
-                Offer(new State(new Pose(cell, Turn(heading, -60)), false), cost + 1, s, Risk.None);
+                Offer(new State(new Pose(cell, Turn(heading, 60)), false, s.Paved), cost + 1, s, Risk.None);
+                Offer(new State(new Pose(cell, Turn(heading, -60)), false, s.Paved), cost + 1, s, Risk.None);
             }
             if (Enter(field, mover, cell, heading, forward: true) is { } ahead)
-                Offer(new State(new Pose(ahead.To, heading), ahead.Ends), cost + ahead.Price, s, ahead.Risk);
+                Offer(new State(new Pose(ahead.To, heading), ahead.Ends,
+                                s.Paved && field.FoundationAt(ahead.To) == Foundation.Road),
+                      cost + ahead.Price, s, ahead.Risk);
             // The step back: from the start pose only, the whole move.
             if (s == first && !onRamp
                 && Enter(field, mover, cell, HexField.Reverse(heading), forward: false) is { } behind
                 && !field.IsRamp(behind.To))
-                Offer(new State(new Pose(behind.To, heading), true), cost + behind.Price, s, behind.Risk);
+                Offer(new State(new Pose(behind.To, heading), true,
+                                s.Paved && field.FoundationAt(behind.To) == Foundation.Road),
+                      cost + behind.Price, s, behind.Risk);
         }
         return reach;
 
         void Offer(State next, int cost, State from, Risk risk)
         {
-            if (cost > reach.Budget)
+            if (cost > (next.Paved ? reach.Budget : reach.Plain))
                 return;
             if (!reach.Cost.TryGetValue(next, out int had) || cost < had)
             {

@@ -113,6 +113,11 @@ public sealed partial class Stage3D : Node3D
         {
             _showEdges = value;
             _edges.Visible = value && ShowBoard;
+            // the relief draws them in its shader (Stage3D.Relief)
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("hex_on", value ? 1.0f : 0.0f);
+            if (Relief is not null)
+                _deepInk?.Param("hex_on", value ? 1.0f : 0.0f);
         }
     }
 
@@ -338,6 +343,13 @@ public sealed partial class Stage3D : Node3D
     /// </summary>
     private const float Back = 1500.0f;
 
+    /// <summary>How far back the camera has to stand for a board deeper than
+    /// <see cref="Back"/> clears: nought keeps Back. The map editor sets it
+    /// off the ringed board (MapEditor.Relief) - ABBEY in its sea and frame
+    /// lost its near rows and its homes' tanks to the near plane. Range is
+    /// precision, so it is asked only where the board needs it.</summary>
+    public float Depth;
+
     public override void _Process(double delta)
     {
         using (Prof.Measure("stage"))
@@ -449,8 +461,10 @@ public sealed partial class Stage3D : Node3D
         // the stage draws everything meant no shake at all. Found when a
         // detonation's shake, on and measured in the spring, was not on screen.
         Vector3 pivot = World(Eye.Position + Eye.Offset, 0.0f);
+        float back = Mathf.Max(Back, Depth);
+        _camera.Far = back * 2.0f;
         _camera.Position = pivot
-                           + new Vector3(0.0f, Back * Squash, Back * RiseFactor).Rotated(Vector3.Up, Yaw);
+                           + new Vector3(0.0f, back * Squash, back * RiseFactor).Rotated(Vector3.Up, Yaw);
         _camera.Rotation = new Vector3(-Mathf.Asin(Squash), Yaw, 0.0f);
     }
 
@@ -1067,9 +1081,15 @@ void fragment() {{
     /// C#, and a run that came down with the panel attached reported leaked
     /// instances at exit while the same run without it did not - the difference
     /// being the ring, which is only built when there is a selection to mark.
-    /// Dropped on the way out rather than left to the engine's teardown.</summary>
+    /// Dropped on the way out rather than left to the engine's teardown.
+    ///
+    /// <b>Not when the editor is parked</b> (<see cref="Loading.Parking"/>):
+    /// its stage leaves the tree whole while its board is played and comes
+    /// back expecting its meshes.</summary>
     public override void _ExitTree()
     {
+        if (Loading.Parking)
+            return;
         _tops.Mesh = null;
         _sides.Mesh = null;
         _ring.Mesh = null;
@@ -2091,6 +2111,10 @@ void fragment() {{
 
     private void Glaze()
     {
+        // the glaze is a prism's top laid again over a hull; the relief has
+        // no prisms to lay (Stage3D.Relief)
+        if (Relief is not null)
+            return;
         // Framewise rather than a lerp on a stored target, which is the wood's
         // reason word for word: the same integration the rest of the bench uses,
         // so a paused frame does not step the fade. Read here rather than handed
@@ -2348,6 +2372,10 @@ void fragment() {{
         // a field nothing ever reads again, which is a control that does
         // nothing and says nothing.
         Mix(Deep ? 1 : 0);
+        // Which relief, not only whether: the editor hands a new one per
+        // stroke that moved the ground (MapEditor.Relief), and a floor painted
+        // sand moves nothing else this hashes.
+        Mix(Relief is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Relief) + 1L);
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
@@ -2418,6 +2446,8 @@ void fragment() {{
     /// answers it by letting the brick fall to whatever top is under it.</summary>
     public List<Vector3> GroundTriangles()
     {
+        if (Relief is not null && Field.Atlas is not null)
+            return ReliefTriangles(Relief);
         var outp = new List<Vector3>();
         if (Field.Atlas is null)
             return outp;
@@ -2721,6 +2751,27 @@ void fragment() {{
                 lowest = Mathf.Min(lowest, Field.BedAt(new Vector2I(q, r)));
         float floor = World(Vector2.Zero, lowest).Y;
         Vector3[] corner = Corners();
+
+        // One smooth ground instead of the prisms (Stage3D.Relief); the mud
+        // and the water are laid on it as on them.
+        if (Relief is not null)
+        {
+            // A route or an aim repaints cells and nothing else, and on the
+            // relief the paint is a texture: the mesh stays.
+            if (_reliefBuilt == Relief && _tops.MaterialOverride is ShaderMaterial built)
+            {
+                built.Param("cells", CellsTexture());
+                return;
+            }
+            _reliefBuilt = Relief;
+            BuildRelief(Relief, GroundArt());
+            Mire();
+            ((ImmediateMesh)_glaze.Mesh).ClearSurfaces();
+            BuildWater(corner);
+            return;
+        }
+        if (_frame is not null)
+            _frame.Mesh = null;
 
         var tops = new SurfaceTool();
         var sides = new SurfaceTool();
@@ -3358,9 +3409,9 @@ void fragment() {
             glaze.SetShaderParameter(key, value);
     }
 
-    private ShaderMaterial Turf(Texture2D? art, bool glass = false)
+    private ShaderMaterial Turf(Texture2D? art, bool glass = false, Shader? soil = null)
     {
-        var ink = new ShaderMaterial { Shader = glass ? Glass : Soil };
+        var ink = new ShaderMaterial { Shader = soil ?? (glass ? Glass : Soil) };
         if (art is not null)
             ink.Param("art", art);
         if (_heights is not null)
@@ -3405,7 +3456,8 @@ void fragment() {
         bool drawn = Surf is { Any: true };
         _pond.MaterialOverride = Deep ? DeepWater()
                                : drawn ? Swell() : Decal(WaterOrder);
-        if (!Field.HasWater)
+        // the relief has its sea round the board whether or not a cell is wet
+        if (!Field.HasWater && Relief is null)
         {
             _pond.Mesh = null;
             _flank.Mesh = null;
@@ -3426,6 +3478,14 @@ void fragment() {
         // rather than written down: the tile is a dial, and a reach in pixels
         // would be right on one setting of it.
         _pondReach = Mathf.Max(halfX, halfZ) * FoamReach;
+        _deepInk?.Param("hex_on", Relief is not null && ShowEdges ? 1.0f : 0.0f);
+        // on the relief a body of water is one sheet at its surface, and the
+        // ground's own crossing is the shore (Stage3D.Relief)
+        if (Relief is not null)
+        {
+            BuildReliefWater(Relief, corner, halfX, halfZ);
+            return;
+        }
         // Pulled in off its own boundary, exactly as the ground faces are - see
         // Bleed, which is this defect solved once already.
         Vector2 inset = drawn
@@ -3601,6 +3661,8 @@ void fragment() {
             _deepInk.Param("hub", hub);
             _deepInk.Param("rim_mask", mask);
             _deepInk.Param("sink", sink);
+            // the prisms' water is cut to its hexes: the slot's own share
+            _deepInk.Param("sink_smooth", 0.0f);
             _deepInk.Param("rim_n", normal);
             _deepInk.Param("rim_d", stand);
             _deepInk.Param("rim_span", inradius);
@@ -4787,6 +4849,29 @@ uniform float time = 0.0;
 uniform vec3 sun = vec3(0.0, 1.0, 0.0);
 uniform float wave_scale = 0.02;
 uniform float wave_speed = 1.0;
+// The relief's hex grid on the water too (Stage3D.Relief, ReliefHead's
+// hex_at): off on the prisms, whose water is cut to its hexes already.
+uniform float hex_on = 0.0;
+uniform float hex_r = 124.0;
+uniform vec2 hex_off = vec2(0.0);
+uniform vec3 hex_color : source_color = vec3(0.05, 0.04, 0.03);
+uniform float hex_opacity = 0.42;
+uniform float hex_w = 1.2;
+float hex_side(vec2 xz) {{
+    vec2 p = xz - hex_off;
+    float q = (2.0 / 3.0) * p.x / hex_r;
+    float r = (-p.x / 3.0 + 0.5773503 * p.y) / hex_r;
+    float s = -q - r;
+    float rq = round(q), rr = round(r), rs = round(s);
+    float dq = abs(rq - q), dr = abs(rr - r), ds = abs(rs - s);
+    if (dq > dr && dq > ds)
+        rq = -rr - rs;
+    else if (dr > ds)
+        rr = -rq - rs;
+    vec2 v = p - vec2(1.5 * hex_r * rq, 1.7320508 * hex_r * (rr + rq * 0.5));
+    float m = max(abs(v.y), max(abs(0.8660254 * v.x + 0.5 * v.y), abs(0.8660254 * v.x - 0.5 * v.y)));
+    return hex_r * 0.8660254 - m;
+}}
 uniform float relief = 0.30;
 uniform vec3 shallow : source_color = vec3(0.24, 0.52, 0.50);
 uniform vec3 deep : source_color = vec3(0.06, 0.22, 0.28);
@@ -4812,6 +4897,10 @@ uniform float murk = 26.0;
 uniform vec3 silt : source_color = vec3(0.055, 0.132, 0.115);
 // Which cells of the pond are that, one per cell, written by BuildWater.
 uniform float sink[{0}];
+// 1 on the relief: the share is each vertex's own (UV2.y, Stage3D.DeepShare),
+// smooth across the real hex edge, and not its cell's slot, which switched a
+// raster quad at a time. 0 on the prisms, whose water is cut to its hexes.
+uniform float sink_smooth = 0.0;
 uniform float refraction = 22.0;
 uniform float gloss = 210.0;
 uniform float sheen_gloss = 14.0;
@@ -5098,7 +5187,8 @@ void fragment() {{
     // here rather than where the shore is worked out, because the absorption
     // below is the first thing that needs it; the shore reads the same expression
     // again a few dozen lines down.
-    float murky = mix(clarity, murk, sink[int(UV2.x + 0.5)]);
+    float sunk = mix(sink[int(UV2.x + 0.5)], UV2.y, sink_smooth);
+    float murky = mix(clarity, murk, sunk);
     // How much of the last inch of the run is water at all - a film over wet sand
     // rather than a cut. It is also what keeps the fold from reading as a tooth
     // where this field's gradient beats the ground's: a hard edge shows a fold, a
@@ -5117,7 +5207,7 @@ void fragment() {{
     // what is left.
     float t = clamp(thick / max(murky, 0.001), 0.0, 1.0);
     vec3 through = bottom * exp(-thick * absorb / max(murky, 0.001));
-    vec3 body = mix(shallow, mix(deep, silt, sink[int(UV2.x + 0.5)]), t);
+    vec3 body = mix(shallow, mix(deep, silt, sunk), t);
     vec3 col = mix(through, body, t * 0.55);
 
     // One sun, worked out here. The camera is orthographic, so the view vector
@@ -5368,6 +5458,13 @@ void fragment() {{
     // the foam and the two highlights, which are added whatever the depth: so it
     // is those that fade, and `bottom` is where they fade to.
     col = mix(bottom, col, film);
+
+    if (hex_on > 0.5) {{
+        float hs = hex_side(world.xz);
+        float lw = max(hex_w, length(fwidth(world.xz)));
+        float line = 1.0 - smoothstep(lw, lw + max(fwidth(hs), 1e-4), hs);
+        col = mix(col, hex_color, line * hex_opacity);
+    }}
 
     ALBEDO = col;
     ALPHA = 1.0;

@@ -109,10 +109,14 @@ public sealed partial class Tank3DBench
     {
         afloat = false;
         float face = _field!.TopOn(cell, flat);
-        if (!_field.IsDeep(cell))
-            return face / RiseFactor;
         bool ramp = _field.RampHeading(cell) >= 0;
-        float bed = ramp ? face : _field.BedAt(cell);
+        if (!_field.IsDeep(cell))
+            // a ford beside deep water stands on its shelf, which the prisms
+            // draw over its level (HexField.Shelf); the relief's ground already
+            // is the shelf
+            return (_field.Surface is null && !ramp && _field.IsWater(cell)
+                ? Mathf.Max(face, _field.BedAt(cell)) : face) / RiseFactor;
+        float bed = ramp ? face : BedPx(cell, flat);
         float top = _field.WaterTop(cell);
         float swim = top - _deckPx * (float)_profile.Draught;
         float up = Mathf.Max(bed, swim);
@@ -188,7 +192,7 @@ public sealed partial class Tank3DBench
             // deck under it (TankTick's own exception, asked of the cell).
             if (!_field.IsDeep(to))
                 _celBurn?.Douse();
-            Log.Print($"tank3d: {_modelTag} into the water at {to} - the fire is out");
+            Log.Print($"tank3d: {_modelTag} into the water at {MapAt(to)} - the fire is out");
         }
         ClimbOut(from, to);
         if (_field.Drops(from, to))
@@ -245,7 +249,7 @@ public sealed partial class Tank3DBench
                            halfLen, might, Plunge.Style.Cinematic);
         _buoy.Jolt(TankTick.PlungeKick * share);
         Rings(way, halfLen, might);
-        Log.Print($"tank3d: {_modelTag} into the pond at {cell}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
+        Log.Print($"tank3d: {_modelTag} into the pond at {MapAt(cell)}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
                  + $"deck {_deckPx:F1} px, draught {_deckPx * _profile.Draught:F1} px, might {might:F2}"
                  + (_amphibious ? "" : " - no wading gear, the engine is drowned"));
         if (!_amphibious)
@@ -340,7 +344,7 @@ public sealed partial class Tank3DBench
         {
             _airTold = true;
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
-            Log.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+            Log.Print($"tank3d: {_modelTag} on the bed at {MapAt(cell)}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1})");
         }
     }
@@ -374,7 +378,7 @@ public sealed partial class Tank3DBench
         {
             _airTold = true;
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
-            Log.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+            Log.Print($"tank3d: {_modelTag} on the bed at {MapAt(cell)}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1}), air over {_field.FlatCellAt(Board(middle))}");
         }
     }
@@ -542,9 +546,19 @@ public sealed partial class Tank3DBench
             return Foot(w).Y;
         Vector2I cell = _field.FlatCellAt(Board(w));
         return _field.InBounds(cell) && _field.IsDeep(cell) && _field.RampHeading(cell) < 0
-            ? _field.BedAt(cell) / RiseFactor
+            ? BedPx(cell, Board(w)) / RiseFactor
             : Foot(w).Y;
     }
+
+    /// <summary>The drawn bed under deep water, lift px: the cell's own
+    /// (<see cref="HexField.BedAt"/>) on the prisms; on the relief the ground
+    /// at the point - its bed is cut there, shelving to the shore, and a
+    /// hull on the shelf stands on the shelf (BOT-11). The cell's middle when
+    /// no point is named.</summary>
+    private float BedPx(Vector2I cell, Vector2? flat = null) =>
+        _field!.Surface is not null
+            ? _field.TopAtPoint(flat ?? _field.FlatAnchor(cell) + _field.CentreOffset)
+            : _field.BedAt(cell);
 
     /// <summary>The hull's own water goes with a reset: afloat again, or dry.</summary>
     private void WaterReset()

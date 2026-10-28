@@ -241,7 +241,7 @@ void fragment() {
             _ways = _reach.RoutesTo(cell);
         }
         _lockFace = _ways.Count > 0 ? _ways[_wayIx % _ways.Count].End.Heading : null;
-        Log.Print($"tank3d: fixed {cell}: {(_ways.Count > 0 ? _ways[_wayIx % _ways.Count].ToString() : "no way")}");
+        Log.Print($"tank3d: fixed {MapAt(cell)}: {(_ways.Count > 0 ? MapAt(_ways[_wayIx % _ways.Count]) : "no way")}");
     }
 
     private void Unlock()

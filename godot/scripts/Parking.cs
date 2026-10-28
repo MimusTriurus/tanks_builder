@@ -12,14 +12,23 @@ namespace TankSpriteTest;
 /// <b>The class is a preference, not a roster.</b> Which tanks exist is the
 /// harness's - one per atlas that loaded, see <c>Main.Park</c> - so a class named
 /// here says where that one goes if it is on the board, and a parking that names
-/// nobody takes whoever is left. A board naming a class no build has, or naming
-/// one twice, is refused by <c>BoardMap.MustCrew</c>: both are statements the
-/// board cannot honour.
+/// nobody takes whoever is left. A board naming a class no build has is refused
+/// by <c>BoardMap.MustCrew</c>; one named twice is a board (the 3D line stands a
+/// model on each, the sprite harness leaves the second empty).
 ///
 /// <b>Null is silence, the rule <see cref="Masonry"/> holds over its four
 /// numbers.</b> A parking that said nothing is not a parking that asked for the
 /// first class; it takes what the pairing has left over, and the file writes it
 /// as the bare pair it always was.
+///
+/// <b>Side and facing are a match's, and silent the same way.</b>
+/// <see cref="Side"/> - <c>green</c> or <c>brown</c> - says which team stands
+/// here; a parking without one takes the side its order gives it (the first
+/// half green, the rest brown, <see cref="SidesOf"/>). <see cref="Facing"/>
+/// is an edge heading (<see cref="HexField.EdgeHeadings"/>) the tank starts
+/// facing; without one a green tank looks up the board, a brown one down it.
+/// A side fields a tank per home, of any classes - three heavies among them if
+/// it likes.
 ///
 /// <b>A home is two jobs and only one of them is the tank.</b> The other is that
 /// <see cref="MapRules.ReachFaults"/> measures the board from every parking -
@@ -28,16 +37,67 @@ namespace TankSpriteTest;
 /// is nothing to measure from. So a parking is worth declaring even where no
 /// tank will ever stand.
 /// </summary>
-public readonly record struct Parking(Vector2I Cell, string? Class = null)
+public readonly record struct Parking(Vector2I Cell, string? Class = null,
+                                     string? Side = null, int? Facing = null)
 {
+    public const string Green = "green";
+    public const string Brown = "brown";
+
+    /// <summary>The two sides a parking may name.</summary>
+    public static readonly string[] Sides = { Green, Brown };
+
+    /// <summary>The edge a side's tank faces when its home says none: green
+    /// up the board, brown down it.</summary>
+    public static int Way(string? side) =>
+        string.Equals(side, Brown, StringComparison.OrdinalIgnoreCase) ? 270 : 90;
+
     /// <summary>A parking that names nobody, which is what every board wrote
     /// before classes existed. Implicit so that a board's list of cells stays a
     /// list of cells in the source.</summary>
     public static implicit operator Parking(Vector2I cell) => new(cell);
 
-    public override string ToString() =>
-        Class is { Length: > 0 } tag
-            ? $"({Cell.X},{Cell.Y}) for {tag}" : $"({Cell.X},{Cell.Y})";
+    /// <summary>Nothing but the cell said: the file writes the bare pair.</summary>
+    public bool Plain => Class is null && Side is null && Facing is null;
+
+    public override string ToString()
+    {
+        string said = $"({Cell.X},{Cell.Y})";
+        if (Class is { Length: > 0 } tag)
+            said += $" for {tag}";
+        if (Side is { Length: > 0 } side)
+            said += $" {side}";
+        if (Facing is int facing)
+            said += $" facing {facing}";
+        return said;
+    }
+
+    /// <summary>
+    /// The side each parking plays in a match: its own when it names one, else
+    /// by order - the first half of the unsided parkings green (the odd one
+    /// too), the rest brown. A side fields as many as it has homes
+    /// (2026-10-26; it was five), and the ten-home boards still split five and
+    /// five. One rule for the editor's panel and the match
+    /// (<c>Tank3DBench.Match</c>), so the panel says what the match does.
+    /// </summary>
+    public static string[] SidesOf(IReadOnlyList<Parking> parked)
+    {
+        var sides = new string[parked.Count];
+        int all = 0;
+        for (int i = 0; i < parked.Count; i++)
+            if (parked[i].Side is not { Length: > 0 })
+                all++;
+        int greens = (all + 1) / 2, unsided = 0;
+        for (int i = 0; i < parked.Count; i++)
+            sides[i] = parked[i].Side is { Length: > 0 } side
+                ? side.ToLowerInvariant()
+                : unsided++ < greens ? Green : Brown;
+        return sides;
+    }
+
+    /// <summary>Two parkings on the same side: both unsided count as one side,
+    /// the board's only one before sides existed.</summary>
+    public bool SameSide(Parking other) =>
+        string.Equals(Side, other.Side, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Which parking each tank claims: the slot per entry of

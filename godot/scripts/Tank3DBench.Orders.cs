@@ -116,12 +116,12 @@ public sealed partial class Tank3DBench
             List<Vector2I> path = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes);
             if (path.Count == 0)
             {
-                _orderNote = $"к {cell} пути нет";
-                Log.Print($"tank3d: no route {here} -> {cell}");
+                _orderNote = $"к {MapAt(cell)} пути нет";
+                Log.Print($"tank3d: no route {MapAt(here)} -> {MapAt(cell)}");
                 return;
             }
-            Drive(path, ram: true, $"таран {OtherCell(_other!)}");
-            Log.Print($"tank3d: route {here} -> {cell} (ram): {string.Join(" ", path)}");
+            Drive(path, ram: true, $"таран {MapAt(OtherCell(_other!))}");
+            Log.Print($"tank3d: route {MapAt(here)} -> {MapAt(cell)} (ram): {MapAt(path, " ")}");
             return;
         }
 
@@ -137,8 +137,8 @@ public sealed partial class Tank3DBench
         if ((shown ?? reach.RouteTo(cell)) is not { } route)
         {
             bool anyWay = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes).Count > 0;
-            _orderNote = cell == here ? "" : anyWay ? $"до {cell} не хватает шагов ({reach.Budget})" : $"к {cell} пути нет";
-            Log.Print($"tank3d: no move {here} -> {cell}: {(anyWay ? $"over the budget of {reach.Budget}" : "no way")}");
+            _orderNote = cell == here ? "" : anyWay ? $"до {MapAt(cell)} не хватает шагов ({reach.Budget})" : $"к {MapAt(cell)} пути нет";
+            Log.Print($"tank3d: no move {MapAt(here)} -> {MapAt(cell)}: {(anyWay ? $"over the budget of {reach.Budget}" : "no way")}");
             return;
         }
         _routeBack = route.Back;
@@ -149,9 +149,9 @@ public sealed partial class Tank3DBench
         _routeGoal = (cell, _routeFace ?? route.End.Heading);
         string risk = route.Risk == Steps.Risk.None ? "" : $", {route.Risk}";
         Drive(route.Cells(), ram: false,
-              $"к {cell}: {route.Spent + turn} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}"
+              $"к {MapAt(cell)}: {route.Spent + turn} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}"
               + $"{(turn > 0 ? $", разворот {turn}" : "")}{risk}");
-        Log.Print($"tank3d: move {here} -> {cell}: {route}{(turn > 0 ? $" then t{face} (+{turn})" : "")} of {reach.Budget}{risk}"
+        Log.Print($"tank3d: move {MapAt(here)} -> {MapAt(cell)}: {MapAt(route)}{(turn > 0 ? $" then t{face} (+{turn})" : "")} of {reach.Budget}{risk}"
                  + $" ({reach.RoutesTo(cell).Count} way(s) of that cost)");
     }
 
@@ -435,7 +435,7 @@ public sealed partial class Tank3DBench
         if (RouteMoving)
         {
             _shotWaiting = cell;
-            _aimNote = $"выстрел по {cell} — после остановки";
+            _aimNote = $"выстрел по {MapAt(cell)} — после остановки";
             return;
         }
         AimCell(cell);

@@ -446,7 +446,7 @@ public sealed partial class Tank3DBench
     private void Lands(Vector3 at, bool wet, bool spent)
     {
         Log.Print($"tank3d: round into the {(wet ? "water" : "ground")} at "
-                 + $"{_field?.FlatCellAt(Board(at)).ToString() ?? "-"}, {at.DistanceTo(_rig.Position) / Mathf.Max(CellStep, 1.0f):F1} cells out"
+                 + $"{(_field is null ? "-" : MapAt(_field.FlatCellAt(Board(at))))}, {at.DistanceTo(_rig.Position) / Mathf.Max(CellStep, 1.0f):F1} cells out"
                  + (spent ? ", spent" : ""));
         if (spent)
             return;
@@ -657,7 +657,7 @@ public sealed partial class Tank3DBench
             _aim = null;
             _aimNote = why;
             MarkAt(ground, refused: true);
-            Log.Print($"tank3d: no shot at {cell}: {why}");
+            Log.Print($"tank3d: no shot at {MapAt(cell)}: {why}");
             return;
         }
         Vector3 want = ground;
@@ -667,7 +667,7 @@ public sealed partial class Tank3DBench
         // through the first brick one (its pass) and is laid past it.
         if (!_profile.Lobs && WallOnAxis(own, axis, cells, passOne: ShootsThrough) is { } wall)
         {
-            Aim(wall.At, Foot(wall.At), $"{cell}, axis {axis}: into the wall {wall.Cell}");
+            Aim(wall.At, Foot(wall.At), $"{MapAt(cell)}, axis {axis}: into the wall {MapAt(wall.Cell)}");
             return;
         }
         if (tank is not null)
@@ -678,7 +678,7 @@ public sealed partial class Tank3DBench
             else
                 want = tank.Rig.Position + tank.Up * (0.45f * tall);
         }
-        Aim(want, ground, $"{cell}, axis {axis}, {cells} cells");
+        Aim(want, ground, $"{MapAt(cell)}, axis {axis}, {cells} cells");
     }
 
     /// <summary>Why a shot from <paramref name="own"/> at <paramref name="cell"/>

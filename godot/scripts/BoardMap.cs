@@ -311,6 +311,111 @@ public sealed partial class BoardMap
     /// decision rather than a limit of the storage.</summary>
     public Cover[] Over { get; }
 
+    /// <summary>
+    /// What the rocks look like, a note a rock (format 3's <c>rocks</c>,
+    /// docs/map-format3-plan.md), by the cell the file wrote it at - any of
+    /// the rock's own.
+    ///
+    /// <b>Only the rocks that said something</b>, as <see cref="Walling"/>: a
+    /// rock with no note is the crag a bare <see cref="Rock"/> always was.
+    /// Look only - the rules read the letter, and a mesa stops a tank and a
+    /// round exactly as a crag does.
+    /// </summary>
+    public IReadOnlyDictionary<Vector2I, RockNote> Rocking { get; }
+
+    /// <summary>The board's wind and ice (format 3's <c>climate</c>), which
+    /// the yardangs and the moutonnees lie by.</summary>
+    public RockClimate Climate { get; }
+
+    /// <summary>The board's look for each floor (format 3's <c>soil.base</c>,
+    /// <see cref="Soil"/>): only the floors it named.</summary>
+    public IReadOnlyDictionary<Foundation, char> SoilBase { get; }
+
+    /// <summary>Each cell's own look (<c>soil.cells</c>), one a cell with
+    /// <see cref="Soil.As"/> where it said nothing; null when no cell did.</summary>
+    public char[]? SoilCells { get; }
+
+    /// <summary>The roads (format 3's <c>roads</c>, <see cref="Road"/>): every
+    /// cell they cross is <see cref="Foundation.Road"/> in <see cref="Ground"/>.</summary>
+    public IReadOnlyList<RoadPath> Roads { get; }
+
+    /// <summary>The board's mix of species (format 3's <c>wood</c>,
+    /// <see cref="Species"/>): a weight a species letter; null for oaks.</summary>
+    public IReadOnlyDictionary<char, int>? WoodMix { get; }
+
+    /// <summary>Each cell's own species (<c>trees</c>), one a cell with
+    /// <see cref="Species.As"/> where it said nothing; null when no cell did.
+    /// A letter on a cell with no wood is kept: the species waits for the cell
+    /// to be planted (<see cref="Unplanted"/>).</summary>
+    public char[]? TreeCells { get; }
+
+    /// <summary>The cells whose species letter stands on no wood - not wrong,
+    /// waiting (docs/map-format3-plan.md, <c>wood</c> и <c>trees</c>); the map
+    /// report names them.</summary>
+    public IEnumerable<Vector2I> Unplanted()
+    {
+        if (TreeCells is null)
+            yield break;
+        for (int at = 0; at < TreeCells.Length; at++)
+            if (TreeCells[at] != Species.As && Over[at] != Cover.Forest)
+                yield return new Vector2I(at % Columns, at / Columns);
+    }
+
+    /// <summary>Each cell's floor as its letter and the floor grid say it,
+    /// under the roads - what the file writes and the look is worn on; null
+    /// on a board with no road (<see cref="Ground"/> is the same then).</summary>
+    public Foundation[]? Unpaved { get; }
+
+    /// <summary>A cell's floor under any road on it.</summary>
+    public Foundation UnpavedAt(int at) => Unpaved?[at] ?? Ground[at];
+
+    /// <summary>The look every cell wears, the three layers resolved
+    /// (<see cref="Soil.Resolve"/>) - what <see cref="HexField.SetSoil"/> is
+    /// handed. Null when the board draws nothing apart from today's ground,
+    /// unless <paramref name="always"/>.</summary>
+    public char[]? Looks(bool always = false)
+    {
+        if (!always && SoilBase.Count == 0 && SoilCells is null)
+            return null;
+        var looks = new char[Columns * Rows];
+        for (int at = 0; at < looks.Length; at++)
+            looks[at] = Soil.Resolve(SoilCells?[at] ?? Soil.As, UnpavedAt(at), Water[at], SoilBase);
+        return looks;
+    }
+
+    /// <summary>
+    /// The board's rocks: the rock cells joined by their sides, each group in
+    /// reading order of its first cell and its cells in the order they were
+    /// reached - the order <see cref="ReliefRocks.Groups"/> deals looks in.
+    /// Asked of the cells alone, so the editor asks it of a draft.
+    /// </summary>
+    public static List<List<Vector2I>> RockGroups(int columns, int rows, Func<Vector2I, bool> rock)
+    {
+        var left = new HashSet<Vector2I>();
+        for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+                if (rock(new Vector2I(q, r)))
+                    left.Add(new Vector2I(q, r));
+        var groups = new List<List<Vector2I>>();
+        for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+            {
+                var start = new Vector2I(q, r);
+                if (!left.Remove(start))
+                    continue;
+                var cells = new List<Vector2I> { start };
+                for (int k = 0; k < cells.Count; k++)
+                    for (int h = 30; h < 360; h += 60)
+                    {
+                        Vector2I o = HexField.Step(cells[k], h);
+                        if (left.Remove(o))
+                            cells.Add(o);
+                    }
+                groups.Add(cells);
+            }
+        return groups;
+    }
+
     private BoardMap(string name, int columns, int rows,
                      IReadOnlyList<Parking> homes,
                      int[] levels, bool[] ramps, bool[] water,
@@ -318,8 +423,24 @@ public sealed partial class BoardMap
                      Foundation[] ground, Cover[] over,
                      IReadOnlySet<Vector2I>? plot,
                      string paint, bool height, int plinth = 0,
-                     IReadOnlyDictionary<Vector2I, Masonry>? walling = null)
+                     IReadOnlyDictionary<Vector2I, Masonry>? walling = null,
+                     IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
+                     RockClimate climate = default,
+                     IReadOnlyDictionary<Foundation, char>? soilBase = null,
+                     char[]? soilCells = null,
+                     IReadOnlyList<RoadPath>? roads = null,
+                     Foundation[]? unpaved = null,
+                     IReadOnlyDictionary<char, int>? wood = null,
+                     char[]? treeCells = null)
     {
+        WoodMix = wood;
+        TreeCells = treeCells;
+        Roads = roads ?? Array.Empty<RoadPath>();
+        Unpaved = unpaved;
+        Rocking = rocking ?? new Dictionary<Vector2I, RockNote>();
+        Climate = climate;
+        SoilBase = soilBase ?? new Dictionary<Foundation, char>();
+        SoilCells = soilCells;
         Name = name;
         Columns = columns;
         Rows = rows;
@@ -610,13 +731,25 @@ public sealed partial class BoardMap
                                         string paint, bool height,
                                         int plinth = 0,
                                         IReadOnlyDictionary<Vector2I, Masonry>?
-                                            walling = null)
+                                            walling = null,
+                                        IReadOnlyDictionary<Vector2I, RockNote>?
+                                            rocking = null,
+                                        RockClimate climate = default,
+                                        string[]? under = null,
+                                        IReadOnlyDictionary<Foundation, char>? soilBase = null,
+                                        string[]? soilCells = null,
+                                        IReadOnlyList<RoadPath>? roads = null,
+                                        IReadOnlyDictionary<char, int>? wood = null,
+                                        string[]? trees = null)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
         int columns = rows == 0 ? 0 : ground[0].Length;
         char[,] g = Read(name + " ground", ground, columns, rows);
         char[,] rr = Read(name + " ramps", ramps, columns, rows);
+        // format 3's floor grid: sand or mud under a letter that cannot say it
+        // (MapFile.Encode, docs/map-format3-plan.md Ф3)
+        char[,]? uu = under is null ? null : Read(name + " floor", under, columns, rows);
 
         var levels = new int[columns * rows];
         var water = new bool[columns * rows];
@@ -724,6 +857,25 @@ public sealed partial class BoardMap
                     break;
             }
 
+            // The floor grid, and each refusal is a mark that would otherwise
+            // quietly do nothing or say a cell twice.
+            if (uu is not null && uu[q, r] != Plain)
+            {
+                char u = uu[q, r];
+                if (MapFile.FloorUnder(u) is not Foundation laid)
+                    wrong.Add($"({q},{r}) has '{u}' in the floor grid, which says "
+                              + $"'{Sand}', '{Mud}' or '{Plain}'");
+                else if (c == Plain)
+                    wrong.Add($"({q},{r}) is {laid.ToString().ToLowerInvariant()} on plain "
+                              + $"ground, which is the letter '{u}' in the ground grid");
+                else if (!MapFile.TakesUnder(c))
+                    wrong.Add($"({q},{r}) is '{c}', whose floor its letter already says "
+                              + $"- the floor grid lays sand or mud only under a wood, "
+                              + "a trench, a mine, a hill or a hollow");
+                else
+                    floor[at] = laid;
+            }
+
             if (rr[q, r] != 'r')
                 continue;
             // A ramp off the board, or a ramp on a rock, is the map disagreeing
@@ -747,6 +899,100 @@ public sealed partial class BoardMap
                 wrong.Add($"the masonry at ({cell.X},{cell.Y}) is on a cell "
                           + "carrying no wall");
 
+        // A look on a floor it is not for - dunes on grass - is a look that
+        // quietly did nothing (Soil; the floor is the floor grid's too, so it
+        // is read after it)
+        char[]? looks = null;
+        if (soilBase is not null)
+            foreach ((Foundation laid, char look) in soilBase)
+                if (Soil.FloorOf(look) != laid)
+                    wrong.Add($"the soil's base lays '{look}' on {laid.ToString().ToLowerInvariant()}, "
+                              + "which is no look of that floor");
+        if (soilCells is not null)
+        {
+            char[,] ss = Read(name + " soil", soilCells, columns, rows);
+            looks = new char[columns * rows];
+            for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+            {
+                char look = ss[q, r];
+                looks[r * columns + q] = look;
+                if (look == Soil.As)
+                    continue;
+                Foundation lies = floor[r * columns + q];
+                if (Soil.FloorOf(look) is not Foundation wants)
+                    wrong.Add($"({q},{r}) has '{look}' in the soil grid, which is no look");
+                else if (g[q, r] == Off || water[r * columns + q] || wants != lies)
+                    wrong.Add($"({q},{r}) wears {Soil.Name(look)}, a look of "
+                              + $"{wants.ToString().ToLowerInvariant()}, and is "
+                              + (g[q, r] == Off ? "off the board"
+                                 : water[r * columns + q] ? "under water"
+                                 : lies.ToString().ToLowerInvariant()));
+            }
+        }
+
+        // The species of a cell: a letter that names none is refused; one on
+        // a cell with no wood waits for it (Unplanted), as the plan has it
+        char[]? treeCells = null;
+        if (trees is not null)
+        {
+            char[,] tt = Read(name + " trees", trees, columns, rows);
+            treeCells = new char[columns * rows];
+            for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+            {
+                char t = tt[q, r];
+                treeCells[r * columns + q] = t;
+                if (t != Species.As && Species.Of(t) < 0)
+                    wrong.Add($"({q},{r}) has '{t}' in the trees grid, and the species are "
+                              + string.Join(", ", Species.All.Select(s => $"{s.Letter} {s.Key}")));
+            }
+        }
+
+        // The roads, after the looks (a look is worn on the floor under the
+        // road, a swamp on either side of a log road): what a road may not
+        // cross, then the floor they lay (Road, docs/map-format3-plan.md Ф6)
+        Foundation[]? unpaved = null;
+        if (roads is { Count: > 0 })
+        {
+            wrong.AddRange(Road.Faults(roads, c =>
+                c.X < 0 || c.X >= columns || c.Y < 0 || c.Y >= rows ? "off the grid"
+                : g[c.X, c.Y] == Off ? "off the board"
+                : water[c.Y * columns + c.X] ? "under water - a ford or a bridge is not a road yet"
+                : floor[c.Y * columns + c.X] == Foundation.Rock ? "a rock"
+                : walls[c.Y * columns + c.X] ? "a wall"
+                : null));
+            unpaved = (Foundation[])floor.Clone();
+            foreach (Vector2I c in Road.Cells(roads))
+                if (c.X >= 0 && c.X < columns && c.Y >= 0 && c.Y < rows)
+                    floor[c.Y * columns + c.X] = Foundation.Road;
+        }
+
+        // A rock's note off a rock, or two on one rock, are the same
+        // disagreement: a look that quietly did nothing, or one that quietly
+        // lost to the other.
+        if (rocking is { Count: > 0 })
+        {
+            var rockOf = new Dictionary<Vector2I, int>();
+            List<List<Vector2I>> groups = RockGroups(columns, rows,
+                c => floor[c.Y * columns + c.X] == Foundation.Rock);
+            for (int k = 0; k < groups.Count; k++)
+                foreach (Vector2I c in groups[k])
+                    rockOf[c] = k;
+            var noted = new Dictionary<int, Vector2I>();
+            foreach (Vector2I cell in rocking.Keys.OrderBy(c => c.Y).ThenBy(c => c.X))
+            {
+                if (!rockOf.TryGetValue(cell, out int k))
+                    wrong.Add($"the rock note at ({cell.X},{cell.Y}) is on a cell "
+                              + "carrying no rock");
+                else if (noted.TryGetValue(k, out Vector2I first))
+                    wrong.Add($"the rock at ({first.X},{first.Y}) has a second note at "
+                              + $"({cell.X},{cell.Y}), and one of them would lose silently");
+                else
+                    noted[k] = cell;
+            }
+        }
+
         if (wrong.Count > 0)
             throw new InvalidOperationException(
                 name + ": " + string.Join("; ", wrong));
@@ -757,24 +1003,39 @@ public sealed partial class BoardMap
 
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
-                                   plot, paint, height, plinth, walling));
+                                   plot, paint, height, plinth, walling,
+                                   rocking, climate, soilBase, looks, roads, unpaved,
+                                   wood is { Count: > 0 } ? wood : null, treeCells));
     }
 
     /// <summary>
-    /// Every class a board's parkings ask for is a class this build has, and no
-    /// two ask for the same one.
+    /// Every class a board's parkings ask for is a class this build has, every
+    /// side is green or brown and every facing an edge.
     ///
-    /// <b>Both halves are a statement the board could not honour.</b> A tag
-    /// nothing answers to is a home that will silently take whoever is left -
-    /// <see cref="WallConfig.Strays"/>'s failure, one folder over - and two
-    /// homes asking for the same class is two parkings for one tank, which
-    /// leaves the second holding nobody however the pairing is written.
+    /// <b>Each is a statement the board could not honour.</b> A tag nothing
+    /// answers to is a home that will silently take whoever is left -
+    /// <see cref="WallConfig.Strays"/>'s failure, one folder over.
+    ///
+    /// <b>Two homes may ask for the same class</b> (2026-10-26): a side may
+    /// field three heavies. The 3D line stands a model per home, so both are
+    /// manned; the sprite harness has one tank of each and leaves the second
+    /// empty (<see cref="Parking.Pair"/>), which is the legacy line's limit and
+    /// not the board's.
     /// </summary>
     private static void MustCrew(string name, IReadOnlyList<Parking> homes)
     {
-        var asked = new List<string>();
         foreach (Parking home in homes)
         {
+            if (home.Side is { Length: > 0 } side
+                && !Parking.Sides.Contains(side, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"{name}: the home at ({home.Cell.X},{home.Cell.Y}) is on side "
+                    + $"{side}, and the sides are " + string.Join(", ", Parking.Sides));
+            if (home.Facing is int facing && !HexField.EdgeHeadings.Contains(facing))
+                throw new InvalidOperationException(
+                    $"{name}: the home at ({home.Cell.X},{home.Cell.Y}) faces "
+                    + $"{facing}, and a tank faces an edge - "
+                    + string.Join(", ", HexField.EdgeHeadings));
             if (home.Class is not { Length: > 0 } tag)
                 continue;
             if (!MovementProfile.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
@@ -782,12 +1043,6 @@ public sealed partial class BoardMap
                     $"{name}: the home at ({home.Cell.X},{home.Cell.Y}) asks for "
                     + $"class {tag}, and this build has "
                     + string.Join(", ", MovementProfile.Tags));
-            if (asked.Contains(tag, StringComparer.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    $"{name}: two homes ask for class {tag}, and there is one "
-                    + "tank of each - so the second would stand empty whatever "
-                    + "the pairing does");
-            asked.Add(tag);
         }
     }
 

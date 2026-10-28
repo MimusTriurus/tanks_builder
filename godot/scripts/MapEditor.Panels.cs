@@ -37,9 +37,13 @@ public sealed partial class MapEditor
 {
     // --- the left panel ------------------------------------------------------
 
-    private TabBar _tabs = null!;
+    private GridContainer _tabs = null!;
+    /// <summary>The bar's buttons, in <see cref="TabOrder"/>.</summary>
+    private readonly List<Button> _tabButtons = new();
     private VBoxContainer _choices = null!;
     private Label _brushSays = null!;
+    private readonly Dictionary<Instrument, Button> _toolButtons = new();
+    private OptionButton _symmetryPick = null!;
     private readonly List<Button> _picks = new();
     private readonly Dictionary<Layers, CheckBox> _switches = new();
 
@@ -55,7 +59,8 @@ public sealed partial class MapEditor
     /// with the mouse.</summary>
     private Vector2I _picked = new(-1, -1);
 
-    private const float LeftWide = 224.0f;
+    // the four tabs' width, unclipped: what the report and the readout start past
+    private const float LeftWide = 282.0f;
     private const float RightWide = 254.0f;
     private const float PanelTop = 44.0f;
 
@@ -71,19 +76,64 @@ public sealed partial class MapEditor
         var box = new VBoxContainer();
         frame.AddChild(box);
 
-        _tabs = new TabBar();
-        _tabs.AddThemeFontSizeOverride("font_size", 13);
-        foreach (MapEdit.Tab tab in Enum.GetValues<MapEdit.Tab>())
-            _tabs.AddTab(tab.ToString());
-        _tabs.CurrentTab = (int)_tab;
-        _tabs.TabChanged += index =>
+        // The toolbar first: how, over every tab; the tabs under it say with
+        // what (MapEditor.Tools).
+        var tools = new GridContainer { Columns = 3 };
+        var toolGroup = new ButtonGroup();
+        foreach ((Instrument tool, string face) in new[]
+                 {
+                     (Instrument.Brush, "brush"), (Instrument.Line, "line"), (Instrument.Box, "box  U"),
+                     (Instrument.Fill, "fill  G"), (Instrument.Select, "select  R"), (Instrument.Pick, "pick  I"),
+                 })
         {
-            if (_loading)
-                return;
-            _tab = (MapEdit.Tab)(int)index;
-            Refresh();
-            Say();
-        };
+            Instrument which = tool;
+            var button = new Button
+            {
+                Text = face, ToggleMode = true, ButtonGroup = toolGroup,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            button.AddThemeFontSizeOverride("font_size", 13);
+            button.Pressed += () =>
+            {
+                if (_loading)
+                    return;
+                Use(which);
+                Say();
+            };
+            _toolButtons[which] = button;
+            tools.AddChild(button);
+        }
+        box.AddChild(tools);
+
+        // Seven tabs in two rows of toggles, none scrolled off: a TabBar is one
+        // row, and seven names do not fit the panel's width in one (Look and
+        // Roads, 2026-10-28). Foundation as Floor - the readout's own word.
+        _tabs = new GridContainer { Columns = 4 };
+        _tabs.AddThemeConstantOverride("h_separation", 2);
+        _tabs.AddThemeConstantOverride("v_separation", 2);
+        var group = new ButtonGroup();
+        foreach (MapEdit.Tab tab in TabOrder)
+        {
+            MapEdit.Tab mine = tab;
+            var button = new Button
+            {
+                Text = tab == MapEdit.Tab.Foundation ? "Floor" : tab.ToString(),
+                ToggleMode = true, ButtonGroup = group, ButtonPressed = tab == _tab,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                FocusMode = Control.FocusModeEnum.None,
+            };
+            button.AddThemeFontSizeOverride("font_size", 12);
+            button.Pressed += () =>
+            {
+                if (_loading)
+                    return;
+                _tab = mine;
+                Refresh();
+                Say();
+            };
+            _tabButtons.Add(button);
+            _tabs.AddChild(button);
+        }
         box.AddChild(_tabs);
 
         _choices = new VBoxContainer();
@@ -102,16 +152,27 @@ public sealed partial class MapEditor
         brush.AddChild(_brushSays);
         brush.AddChild(Step("+", () => _radius = Math.Min(6, _radius + 1)));
         box.AddChild(brush);
+        // the symmetric brush, P on the keys (MapEditor.Symmetry)
+        // not as wide as its longest item, which pushed the panel over the board
+        _symmetryPick = new OptionButton { FitToLongestItem = false, ClipText = true };
+        _symmetryPick.AddThemeFontSizeOverride("font_size", 14);
+        foreach (MapEdit.Symmetry how in Enum.GetValues<MapEdit.Symmetry>())
+            _symmetryPick.AddItem("symmetry: " + Named(how) + (how == MapEdit.Symmetry.None ? "   P" : ""), (int)how);
+        _symmetryPick.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            SetSymmetry((MapEdit.Symmetry)_symmetryPick.GetItemId((int)index));
+        };
+        box.AddChild(_symmetryPick);
 
         box.AddChild(new HSeparator());
 
-        // The overlays, as the flags they are - see MapEditor.Layers, where
-        // reading a ramp fault means seeing the levels and the arrows at once.
+        // The overlays, as the flags they are - see MapEditor.Layers. No ramps
+        // and no ramp sites: the relief builds neither.
         foreach ((Layers flag, string name) in new[]
                  {
                      (Layers.Levels, "levels  L"),
-                     (Layers.Ramps, "ramps  R"),
-                     (Layers.Sites, "ramp sites  G"),
                      (Layers.Flood, "flood  B"),
                      (Layers.Homes, "homes"),
                  })
@@ -208,6 +269,26 @@ public sealed partial class MapEditor
                         () => { _plotBrush = true; _plotOn = false; _water = false; },
                         () => _plotBrush && !_plotOn),
                 };
+            case MapEdit.Tab.Look:
+                // the looks (format 3): the ground's, each only on the floor it
+                // is for and saying so on any other; then the woods' species,
+                // which a cell with no wood keeps until it is planted
+                return TankSpriteTest.Soil.Looks.Select(l =>
+                    ($"{l.Name}  ({TankSpriteTest.Soil.FloorOf(l.Letter)!.Value.ToString().ToLowerInvariant()})",
+                     (Action)(() => { _look = l.Letter; _speciesBrush = null; }),
+                     (Func<bool>)(() => _speciesBrush is null && _look == l.Letter)))
+                    .Concat(Species.All.Select(sp =>
+                        ($"trees: {sp.Key}",
+                         (Action)(() => _speciesBrush = sp.Letter),
+                         (Func<bool>)(() => _speciesBrush == sp.Letter))))
+                    .ToList();
+            case MapEdit.Tab.Roads:
+                // the roads (format 3): points on hexes, the road laid between
+                // them; a right click cuts
+                return Enum.GetValues<RoadType>().Select(t =>
+                    (Road.Say(t),
+                     (Action)(() => _roadBrush = t),
+                     (Func<bool>)(() => _roadBrush == t))).ToList();
             case MapEdit.Tab.Cover:
                 var covers = Enum.GetValues<Cover>().Select(over =>
                     (over.ToString().ToLowerInvariant(),
@@ -220,6 +301,29 @@ public sealed partial class MapEditor
                     () => { _cover = Cover.Walls; _bunker = true; },
                     () => _bunker));
                 return covers;
+            case MapEdit.Tab.Presets:
+                // off editor_presets.json (MapEditor.Tools); its own words beside each
+                if (_presets.Count == 0)
+                    return new (string, Action, Func<bool>)[]
+                    {
+                        ("(no presets - " + (_presetsSay.Length > 0 ? _presetsSay : "the file is empty") + ")",
+                            () => { }, () => false),
+                    };
+                return _presets.Select((p, i) => (p.Name,
+                    (Action)(() => _preset = i), (Func<bool>)(() => _preset == i))).ToList();
+            case MapEdit.Tab.Units:
+                // A side's five, then the other's: Lineup.Pairs' order, the
+                // roster's, so Q walks green LT to brown HM
+                var units = new List<(string, Action, Func<bool>)>();
+                foreach (string side in Parking.Sides)
+                    foreach ((string _, string cls, string name) in Lineup.Pairs)
+                    {
+                        string s = side, c = cls;
+                        units.Add(($"{s} {c[..2]}  {name}",
+                            () => { _unitSide = s; _unitClass = c; },
+                            () => _unitSide == s && _unitClass == c));
+                    }
+                return units;
             default:
                 var levels = new List<(string, Action, Func<bool>)>();
                 foreach (int level in new[] { 1, 0, -1 })
@@ -229,9 +333,8 @@ public sealed partial class MapEditor
                         () => { _level = want; _rampBrush = false; },
                         () => !_rampBrush && _level == want));
                 }
-                // Through RampBrush, which is where the sites come on - see
-                // its remarks, which carry why a ramp is one click and not two.
-                levels.Add(("ramp", () => RampBrush(true), () => _rampBrush));
+                // No ramp brush: the board is a relief, and its levels are
+                // joined by slopes from any side (MapEditor.Settle).
                 return levels;
         }
     }
@@ -253,6 +356,10 @@ public sealed partial class MapEditor
     /// <summary>Lay out the buttons for the tab that is up.</summary>
     private void Choices()
     {
+        // the presets file read again each time its tab is laid out, so an
+        // edit to it needs no build (MapEditor.Tools)
+        if (_tab == MapEdit.Tab.Presets)
+            ReadPresets();
         _laid = _tab;
         foreach (Node was in _choices.GetChildren())
         {
@@ -284,6 +391,10 @@ public sealed partial class MapEditor
                 if (_loading)
                     return;
                 chose();
+                // a brush picked is in hand: the select tool and the
+                // eyedropper give way, the line, box and fill keep it
+                if (_instrument is Instrument.Select or Instrument.Pick)
+                    _instrument = Instrument.Brush;
                 Say();
             };
             _picks.Add(button);
@@ -302,8 +413,9 @@ public sealed partial class MapEditor
     {
         _loading = true;
         // The bar is told where the tab is either way; setting it to what it
-        // already says emits nothing.
-        _tabs.CurrentTab = (int)_tab;
+        // already says emits nothing (and _loading holds the press off).
+        for (int i = 0; i < _tabButtons.Count; i++)
+            _tabButtons[i].SetPressedNoSignal(TabOrder[i] == _tab);
         IReadOnlyList<(string Name, Action Pick, Func<bool> On)> brushes =
             Brushes();
         // Rebuilt when the palette was laid out for another tab - the question
@@ -323,6 +435,9 @@ public sealed partial class MapEditor
             for (int i = 0; i < _picks.Count; i++)
                 _picks[i].ButtonPressed = brushes[i].On();
         _brushSays.Text = $"brush {_radius}";
+        foreach ((Instrument tool, Button button) in _toolButtons)
+            button.ButtonPressed = tool == _instrument;
+        _symmetryPick.Selected = _symmetryPick.GetItemIndex((int)_symmetry);
         foreach ((Layers which, CheckBox check) in _switches)
             check.ButtonPressed = _layers.HasFlag(which);
         _loading = false;
@@ -412,6 +527,12 @@ public sealed partial class MapEditor
 
         into.AddChild(Ticked("water", glyph.Water,
             wet => _edit.Water(_picked, wet, out string why) ? "" : why));
+        if (glyph.Floor == Foundation.Rock)
+            Stone(into);
+        else if (!glyph.Water && TankSpriteTest.Soil.Today(glyph.Floor) != TankSpriteTest.Soil.As)
+            Worn(into, glyph.Floor);
+        Grown(into);
+        Paved(into);
         into.AddChild(Does("take it off the board",
             () => _edit.Plot(_picked, false, out string why) ? "" : why));
 
@@ -436,16 +557,9 @@ public sealed partial class MapEditor
         level.ValueChanged += value => Wrote(() =>
             _edit.Level(_picked, (int)value, out string why) ? "" : why);
         into.AddChild(Field("level", level));
-
-        into.AddChild(Ticked("ramp", _edit.IsRamp(_picked),
-            on => _edit.Ramp(_picked, on, out string why) ? "" : why));
+        // A ramp the letters still carry is kept and not built (Settle).
         if (_edit.IsRamp(_picked))
-        {
-            int heading = _field.RampHeading(_picked);
-            into.AddChild(Note(heading >= 0
-                ? $"climbs towards {heading}"
-                : "no edge to climb - see the report"));
-        }
+            into.AddChild(Note("ramp in the file - the relief does not build it"));
 
         // --- home ------------------------------------------------------------
         into.AddChild(Heading("Home"));
@@ -454,6 +568,8 @@ public sealed partial class MapEditor
         {
             into.AddChild(Note($"home {slot + 1} of {_edit.Homes.Count}"));
             Crew(into, slot);
+            Team(into, slot);
+            Face(into, slot);
             into.AddChild(Does("drop this home",
                 () => _edit.DropHome(slot, out string why) ? "" : why));
         }
@@ -464,6 +580,84 @@ public sealed partial class MapEditor
                 () => _edit.Home(_picked, _edit.Homes.Count, out string why)
                     ? "" : why));
         }
+        Board(into);
+    }
+
+    /// <summary>The roads through the cell (format 3's <c>roads</c>): each its
+    /// look, and a button that cuts them all here (<see cref="MapEdit.Cut"/>).</summary>
+    private void Paved(VBoxContainer into)
+    {
+        List<int> roads = _edit.RoadsAt(_picked);
+        if (roads.Count == 0)
+            return;
+        RoadType[] types = Enum.GetValues<RoadType>();
+        foreach (int k in roads)
+        {
+            int road = k;
+            RoadPath path = _edit.Roads[road];
+            var pick = new OptionButton();
+            foreach (RoadType t in types)
+                pick.AddItem(Road.Say(t));
+            pick.Selected = Array.IndexOf(types, path.Type);
+            pick.ItemSelected += index =>
+            {
+                if (!_loading)
+                    Wrote(() =>
+                    {
+                        _edit.Retype(road, types[(int)index]);
+                        return "";
+                    });
+            };
+            into.AddChild(Field($"road {road + 1}", pick));
+            into.AddChild(Note($"{path.Cells.Count} cells, ({path.Cells[0].X},{path.Cells[0].Y}) to "
+                               + $"({path.Cells[^1].X},{path.Cells[^1].Y})"));
+        }
+        into.AddChild(Does("cut the roads here", () =>
+        {
+            _edit.Cut(_picked);
+            return "";
+        }));
+    }
+
+    /// <summary>The cell's own look (format 3's <c>soil.cells</c>): "as the
+    /// board" first, which is silence, then the looks of its floor.</summary>
+    private void Worn(VBoxContainer into, Foundation floor)
+    {
+        char[] looks = TankSpriteTest.Soil.Looks.Where(l => TankSpriteTest.Soil.FloorOf(l.Letter) == floor)
+            .Select(l => l.Letter).ToArray();
+        var pick = new OptionButton();
+        pick.AddItem($"as the board ({TankSpriteTest.Soil.Name(_edit.LookAt(_picked))})");
+        foreach (char l in looks)
+            pick.AddItem(TankSpriteTest.Soil.Name(l));
+        char own = _edit.SoilAt(_picked);
+        pick.Selected = own == TankSpriteTest.Soil.As ? 0 : Array.IndexOf(looks, own) + 1;
+        pick.ItemSelected += index =>
+        {
+            if (!_loading)
+                Wrote(() => _edit.Wear(_picked, index == 0 ? TankSpriteTest.Soil.As : looks[(int)index - 1],
+                                       out string why) ? "" : why);
+        };
+        into.AddChild(Field("look", pick));
+    }
+
+    /// <summary>The cell's own species (format 3's <c>trees</c>): "as the
+    /// board" first, which is the mix, then the species. Offered on any cell -
+    /// one with no wood keeps it until it is planted.</summary>
+    private void Grown(VBoxContainer into)
+    {
+        var pick = new OptionButton();
+        pick.AddItem("as the board");
+        foreach ((_, string key, _, _) in Species.All)
+            pick.AddItem(key);
+        char own = _edit.TreeAt(_picked);
+        pick.Selected = own == Species.As ? 0 : Species.Of(own) + 1;
+        pick.ItemSelected += index =>
+        {
+            if (!_loading)
+                Wrote(() => _edit.Plant(_picked, index == 0 ? Species.As : Species.All[(int)index - 1].Letter,
+                                        out string why) ? "" : why);
+        };
+        into.AddChild(Field("trees", pick));
     }
 
     /// <summary>
@@ -573,6 +767,192 @@ public sealed partial class MapEditor
         }
     }
 
+    /// <summary>
+    /// The rock group: type, palette, preset and seed of the whole rock the
+    /// cell is part of (format 3's <c>rocks</c>, docs/rocks-plan.md С5).
+    ///
+    /// <b>"crag" and "the type's" are the first entries and they are
+    /// silence</b>, as "anybody" is for a home's class: a rock nobody named is
+    /// the crag a bare letter always was, and naming one is the thing you go
+    /// and pick. The preset and the seed are a tick and a number, as a wall's
+    /// dials are, for the same reason.
+    /// </summary>
+    private void Stone(VBoxContainer into)
+    {
+        RockNote note = _edit.RockAt(_picked) ?? new RockNote();
+        IReadOnlyList<Vector2I> rock = _edit.RockOf(_picked);
+        into.AddChild(Note($"rock of {rock.Count} cell{(rock.Count == 1 ? "" : "s")}, "
+                           + $"from ({rock[0].X},{rock[0].Y}) - {note.Look}"));
+        void Put(RockNote next) =>
+            Wrote(() => _edit.Note(_picked, next, out string why) ? "" : why);
+
+        RockType[] types = Enum.GetValues<RockType>();
+        var type = new OptionButton();
+        foreach (RockType t in types)
+            type.AddItem(RockNote.Say(t));
+        type.Selected = Array.IndexOf(types, note.Type ?? RockType.Crag);
+        type.ItemSelected += index =>
+        {
+            if (!_loading)
+                Put(note with { Type = index == 0 ? null : types[(int)index] });
+        };
+        into.AddChild(Field("rock", type));
+
+        string[] names = RockPalette.Names.ToArray();
+        var palette = new OptionButton();
+        palette.AddItem($"the type's ({RockPalette.For(note.Type ?? RockType.Crag).Name})");
+        foreach (string name in names)
+            palette.AddItem(name);
+        palette.Selected = note.Palette is { } p ? Array.IndexOf(names, p) + 1 : 0;
+        palette.ItemSelected += index =>
+        {
+            if (!_loading)
+                Put(note with { Palette = index == 0 ? null : names[(int)index - 1] });
+        };
+        into.AddChild(Field("palette", palette));
+
+        foreach (bool seed in new[] { false, true })
+        {
+            bool isSeed = seed;
+            int? said = isSeed ? note.Seed : note.Preset;
+            var row = new HBoxContainer();
+            var own = new CheckBox
+            {
+                Text = isSeed ? "seed" : "preset",
+                ButtonPressed = said is not null,
+                CustomMinimumSize = new Vector2(94.0f, 0.0f),
+            };
+            own.AddThemeFontSizeOverride("font_size", 12);
+            var box = new SpinBox
+            {
+                MinValue = isSeed ? 0 : 1, MaxValue = isSeed ? 9999 : RockNote.Presets, Step = 1,
+                Value = said ?? (isSeed ? 0 : 1),
+                Editable = said is not null,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            RockNote With(int? v) => isSeed ? note with { Seed = v } : note with { Preset = v };
+            own.Toggled += on =>
+            {
+                if (_loading)
+                    return;
+                box.Editable = on;
+                Put(With(on ? (int)box.Value : null));
+            };
+            box.ValueChanged += value =>
+            {
+                if (!_loading && own.ButtonPressed)
+                    Put(With((int)value));
+            };
+            row.AddChild(own);
+            row.AddChild(box);
+            into.AddChild(row);
+        }
+        if (note.Type == RockType.Mesa && note.Look.Preset == 2 && rock.Count < RockGroup.BenchCells)
+            into.AddChild(Note($"preset 2 has a ledge, and a rock under {RockGroup.BenchCells} "
+                               + "cells is laid without it"));
+    }
+
+    /// <summary>
+    /// The board group, under every cell's: what is the whole board's and not
+    /// the cell's - the look each floor wears (format 3's <c>soil.base</c>) and
+    /// the climate (docs/map-format3-plan.md, Ф2 and Ф4). "today's" is the
+    /// first entry and it is silence: grass, rippled sand, puddled mud.
+    /// </summary>
+    private void Board(VBoxContainer into)
+    {
+        into.AddChild(Heading("Board"));
+        foreach ((Foundation floor, string key) in TankSpriteTest.Soil.Floors)
+        {
+            Foundation laid = floor;
+            char[] looks = TankSpriteTest.Soil.Looks.Where(l => TankSpriteTest.Soil.FloorOf(l.Letter) == laid)
+                .Select(l => l.Letter).ToArray();
+            var pick = new OptionButton();
+            foreach (char l in looks)
+                pick.AddItem(l == TankSpriteTest.Soil.Today(laid) ? $"{TankSpriteTest.Soil.Name(l)} (today's)"
+                                                                 : TankSpriteTest.Soil.Name(l));
+            pick.Selected = Math.Max(0, Array.IndexOf(looks,
+                _edit.SoilBase.TryGetValue(laid, out char now) ? now : TankSpriteTest.Soil.Today(laid)));
+            pick.ItemSelected += index =>
+            {
+                if (_loading)
+                    return;
+                Wrote(() =>
+                {
+                    _edit.Lay(laid, looks[(int)index]);
+                    return "";
+                });
+            };
+            into.AddChild(Field(key, pick));
+        }
+        // the wood (format 3): a weight a species, nought for none; all
+        // nought is oaks, as a board that never said
+        into.AddChild(Note("wood: a weight a species, 0 for none - all 0 is oaks"));
+        foreach ((char letter, string key, _, _) in Species.All)
+        {
+            char sp = letter;
+            var weight = new SpinBox
+            {
+                MinValue = 0, MaxValue = 9, Step = 1,
+                Value = _edit.Wood.TryGetValue(sp, out int w) ? w : 0,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            weight.ValueChanged += value =>
+            {
+                if (!_loading)
+                    Wrote(() =>
+                    {
+                        _edit.Weigh(sp, (int)value);
+                        return "";
+                    });
+            };
+            into.AddChild(Field(key, weight));
+        }
+        // the climate: one wind and one ice a board, the yardangs' and the
+        // dunes' wind and the moutonnees' ice
+        into.AddChild(Note("climate: degrees on the ground, 0 along +X"));
+        foreach (bool ice in new[] { false, true })
+        {
+            bool isIce = ice;
+            float? said = isIce ? _edit.Climate.SaidIce : _edit.Climate.SaidWind;
+            var row = new HBoxContainer();
+            var own = new CheckBox
+            {
+                Text = isIce ? "ice" : "wind",
+                ButtonPressed = said is not null,
+                CustomMinimumSize = new Vector2(94.0f, 0.0f),
+            };
+            own.AddThemeFontSizeOverride("font_size", 12);
+            var box = new SpinBox
+            {
+                MinValue = -180, MaxValue = 180, Step = 5,
+                Value = said ?? (isIce ? RockClimate.DefaultIce : RockClimate.DefaultWind),
+                Editable = said is not null,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            void Blow(float? v) => Wrote(() =>
+            {
+                _edit.Climate = isIce ? _edit.Climate with { SaidIce = v }
+                                      : _edit.Climate with { SaidWind = v };
+                return "";
+            });
+            own.Toggled += on =>
+            {
+                if (_loading)
+                    return;
+                box.Editable = on;
+                Blow(on ? (float)box.Value : null);
+            };
+            box.ValueChanged += value =>
+            {
+                if (!_loading && own.ButtonPressed)
+                    Blow((float)value);
+            };
+            row.AddChild(own);
+            row.AddChild(box);
+            into.AddChild(row);
+        }
+    }
+
     // --- the small parts -----------------------------------------------------
 
     private static Label Heading(string text)
@@ -643,6 +1023,75 @@ public sealed partial class MapEditor
             _loading = false;
         };
         into.AddChild(Field("class", pick));
+    }
+
+    /// <summary>The edges a home may face, in the panel's words: the board as
+    /// it opens, before a turn.</summary>
+    private static readonly (int Heading, string Name)[] Facings =
+    {
+        (90, "90 up"), (30, "30 up-right"), (330, "330 down-right"),
+        (270, "270 down"), (210, "210 down-left"), (150, "150 up-left"),
+    };
+
+    /// <summary>
+    /// Which side a parking is on in a match. "by order" first, Crew's reason:
+    /// a parking that says nothing takes the side its place in the list gives
+    /// it, which is what every board did before sides.
+    /// </summary>
+    private void Team(VBoxContainer into, int slot)
+    {
+        string? side = _edit.Homes[slot].Side;
+        var pick = new OptionButton();
+        // what its order would give it, the others as they are
+        var probe = _edit.Homes.ToList();
+        probe[slot] = probe[slot] with { Side = null };
+        pick.AddItem($"by order ({Parking.SidesOf(probe)[slot]})");
+        foreach (string s in Parking.Sides)
+            pick.AddItem(s);
+        pick.Selected = side is null ? 0 : Array.IndexOf(Parking.Sides, side) + 1;
+        Pick(pick, index => _edit.Team(slot, index == 0 ? null : Parking.Sides[index - 1], out string why) ? "" : why);
+        into.AddChild(Field("side", pick));
+    }
+
+    /// <summary>The edge a parking's tank starts facing; "across" is its side's
+    /// way over the board.</summary>
+    private void Face(VBoxContainer into, int slot)
+    {
+        int? facing = _edit.Homes[slot].Facing;
+        var pick = new OptionButton();
+        pick.AddItem("across the board");
+        foreach ((int _, string name) in Facings)
+            pick.AddItem(name);
+        pick.Selected = facing is int f ? Array.FindIndex(Facings, x => x.Heading == f) + 1 : 0;
+        Pick(pick, index => _edit.Face(slot, index == 0 ? null : Facings[index - 1].Heading, out string why) ? "" : why);
+        into.AddChild(Field("facing", pick));
+    }
+
+    /// <summary>A dropdown that writes through <paramref name="write"/> as one
+    /// stroke and goes back to what it was on a refusal - Crew's way.</summary>
+    private void Pick(OptionButton pick, Func<int, string> write)
+    {
+        int was = pick.Selected;
+        pick.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            bool ok = false;
+            Wrote(() =>
+            {
+                string why = write((int)index);
+                ok = why.Length == 0;
+                return why;
+            });
+            if (ok)
+            {
+                was = (int)index;
+                return;
+            }
+            _loading = true;
+            pick.Selected = was;
+            _loading = false;
+        };
     }
 
     /// <summary>A label and a control, the right panel's own - narrower

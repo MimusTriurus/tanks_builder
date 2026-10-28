@@ -99,8 +99,8 @@ public sealed partial class Tank3DBench
             RamLock(plan);
         ShowRam(plan);
         _judgedNote = plan.Allowed
-            ? $"таран {plan.Target} → {plan.Push.Legs[^1]}"
-              + (_ramWaiting is not null ? "" : plan.From != CellHere ? $" с {plan.From}: {plan.Steps} из {_reach?.Budget}" : plan.Steps > 0 ? $": разворот {plan.Steps}" : "")
+            ? $"таран {MapAt(plan.Target)} → {MapAt(plan.Push.Legs[^1])}"
+              + (_ramWaiting is not null ? "" : plan.From != CellHere ? $" с {MapAt(plan.From)}: {plan.Steps} из {_reach?.Budget}" : plan.Steps > 0 ? $": разворот {plan.Steps}" : "")
               + (_ramWaiting is null ? "; ПКМ — таранить" : "")
             : $"таран нельзя: {plan.Why}";
         return true;
@@ -122,9 +122,9 @@ public sealed partial class Tank3DBench
             _ramKey = key;
             _ramFound = FindRam(o, target);
             Log.Print(_ramFound is { } found
-                ? $"tank3d: ram {o.Tag} {target}: from {found.From} along {found.Side}, {found.Steps} steps"
-                  + (found.Allowed ? $", shoved to {found.Push.Legs[^1]}" : $" - refused: {found.Why}")
-                : $"tank3d: ram {o.Tag} {target}: no way to it");
+                ? $"tank3d: ram {o.Tag} {MapAt(target)}: from {MapAt(found.From)} along {found.Side}, {found.Steps} steps"
+                  + (found.Allowed ? $", shoved to {MapAt(found.Push.Legs[^1])}" : $" - refused: {found.Why}")
+                : $"tank3d: ram {o.Tag} {MapAt(target)}: no way to it");
         }
         return _ramFound;
     }
@@ -247,8 +247,8 @@ public sealed partial class Tank3DBench
         // the action of the turn, instead of the shot; the rammer takes the
         // target's hex, so the move is spent with it
         _fired = _drove = true;
-        _orderNote = $"таран {cell}";
-        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {cell} from {plan.From} along {plan.Side}");
+        _orderNote = $"таран {MapAt(cell)}";
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {MapAt(cell)} from {MapAt(plan.From)} along {plan.Side}");
         return true;
     }
 
@@ -264,10 +264,10 @@ public sealed partial class Tank3DBench
             || CellHere != plan.From)
         {
             _orderNote = "таран сорвался";
-            Log.Print($"tank3d: match: the ram on {plan.Target} fell through");
+            Log.Print($"tank3d: match: the ram on {MapAt(plan.Target)} fell through");
             return;
         }
-        Drive(new List<Vector2I> { CellHere, plan.Target }, ram: true, $"таран {plan.Target}");
+        Drive(new List<Vector2I> { CellHere, plan.Target }, ram: true, $"таран {MapAt(plan.Target)}");
     }
 
     private void RamCancel()

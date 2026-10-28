@@ -111,7 +111,7 @@ public sealed partial class Tank3DBench
         else if (fate == Fate.Knocked && !_chain.Exists(c => c.Cell == cell))
         {
             _chain.Add((cell, ChainBeat, false));
-            Log.Print($"tank3d: match: the blast reaches {SideName(side)} {tag} on {cell}, knocked - it goes up next");
+            Log.Print($"tank3d: match: the blast reaches {SideName(side)} {tag} on {MapAt(cell)}, knocked - it goes up next");
         }
     }
 
@@ -129,7 +129,7 @@ public sealed partial class Tank3DBench
         else if (_parked.Find(p => p.Cell == cell && p.Fate == Fate.Alive) is { } p)
             Ignite(p.Side, p.Tag, cell);
         else
-            Log.Print($"tank3d: --do ignite={cell.X},{cell.Y}: no unit fighting there");
+            Log.Print($"tank3d: --do ignite={cell.X - _moat.X},{cell.Y - _moat.Y}: no unit fighting there");
     }
 
     /// <summary>A unit set alight.</summary>
@@ -145,7 +145,7 @@ public sealed partial class Tank3DBench
         burn.Build(model.HullLength * model.PixelsPerUnit);
         _blazes.Add(new Blaze { Side = side, Tag = tag, Burn = burn, Since = _turnNo });
         _matchNote = $"{SideName(side)} {tag} горит";
-        Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} catches fire (turn {_turnNo})");
+        Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} catches fire (turn {_turnNo})");
     }
 
     /// <summary>A unit's fire gone: put out (the steam), or the unit knocked
@@ -218,7 +218,7 @@ public sealed partial class Tank3DBench
             p.Fate = Explode(p.Model, p.Tag, cell, p.Side);
         else
             return;
-        Log.Print($"tank3d: match: the unit on {cell} burnt out at the end of its side's turn");
+        Log.Print($"tank3d: match: the unit on {MapAt(cell)} burnt out at the end of its side's turn");
         MatchCheckEnd();
     }
 

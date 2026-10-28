@@ -36,6 +36,20 @@ public sealed class MapEdit
         Foundation,
         Cover,
         Level,
+        /// <summary>The homes as the tanks on them: a brush per side and class
+        /// (<see cref="Unit"/>), the eraser takes a home off.</summary>
+        Units,
+        /// <summary>The preset brushes (<see cref="MapPresets"/>), over the
+        /// four axes rather than instead of them: the eraser clears every axis
+        /// - plain ground at the datum, nothing on it.</summary>
+        Presets,
+        /// <summary>The looks (format 3): the ground's (<see cref="Soil"/>) and
+        /// the woods' species (<see cref="Species"/>) - what a cell wears,
+        /// never what it is. The eraser takes the ground's look off.</summary>
+        Look,
+        /// <summary>The roads (format 3, <see cref="Road"/>): laid by points
+        /// (MapEditor.Roads), the eraser cuts the roads in a cell.</summary>
+        Roads,
     }
 
     public string Name { get; set; } = "untitled";
@@ -53,6 +67,54 @@ public sealed class MapEdit
     public int Rows { get; private set; }
 
     private char[] _ground = Array.Empty<char>();
+
+    /// <summary>
+    /// Format 3's floor grid (docs/map-format3-plan.md, Ф3): <c>s</c> or
+    /// <c>u</c> where sand or mud lies under a letter that cannot say it - a
+    /// wood, a trench, a mine, a hill, a hollow - and a dot everywhere else.
+    /// Written only by <see cref="Put"/>, which takes the pair from
+    /// <see cref="MapFile.Encode"/>, and dropped by <see cref="Sync"/> under
+    /// a letter that says its own floor; read through <see cref="GlyphAt"/>,
+    /// so every brush and the rules' draft see the floor and not the letter.
+    /// </summary>
+    private char[] _under = Array.Empty<char>();
+
+    /// <summary>
+    /// Format 3's soil (docs/map-format3-plan.md, Ф4): each cell's own look,
+    /// <see cref="Soil.As"/> where it says nothing, and the board's look for
+    /// each floor beside it (<see cref="SoilBase"/>). Look only; a look on a
+    /// floor it is not for is dropped by <see cref="Sync"/>, as the masonry is
+    /// off a cell that stopped being a wall.
+    /// </summary>
+    private char[] _soil = Array.Empty<char>();
+
+    /// <summary>The board's look for each floor it names (<c>soil.base</c>).</summary>
+    public Dictionary<Foundation, char> SoilBase { get; private set; } = new();
+
+    /// <summary>
+    /// Format 3's species (docs/map-format3-plan.md, Ф5): each cell's own,
+    /// <see cref="Species.As"/> where it says nothing, and the board's mix
+    /// beside it (<see cref="Wood"/>). Look only, and kept on a cell with no
+    /// wood - unlike a look off its floor, it waits for the cell to be
+    /// planted, so felling and planting again does not lose it.
+    /// </summary>
+    private char[] _trees = Array.Empty<char>();
+
+    /// <summary>The board's mix of species (<c>wood</c>): a weight a letter;
+    /// empty for oaks.</summary>
+    public Dictionary<char, int> Wood { get; private set; } = new();
+
+    /// <summary>
+    /// The roads (format 3's <c>roads</c>, docs/map-format3-plan.md Ф6): paths
+    /// along the hex sides, beside the letters rather than in them - a letter
+    /// says the floor under the road. Written only through <see cref="Pave"/>,
+    /// which refuses a set of roads the map would refuse, and cut by
+    /// <see cref="Cut"/> where a cell stops carrying one.
+    /// </summary>
+    private List<RoadPath> _roads = new();
+
+    public IReadOnlyList<RoadPath> Roads => _roads;
+
     private bool[] _ramps = Array.Empty<bool>();
     private List<Parking> _homes = new();
 
@@ -68,6 +130,22 @@ public sealed class MapEdit
     /// and both of them end here.
     /// </summary>
     private Dictionary<Vector2I, Masonry> _walls = new();
+
+    /// <summary>
+    /// What the rocks look like (format 3's <c>rocks</c>), by <b>every</b> cell
+    /// of each rock that has a note rather than by the one cell the file
+    /// writes it at.
+    ///
+    /// <b>Kept by the cell because a stroke cuts and joins rocks</b>
+    /// (docs/rocks-plan.md С5): a rock cut in two leaves both halves holding the
+    /// note, two rocks joined keep the note most of their cells hold
+    /// (<see cref="Rocking"/>), and nothing has to know which stroke did it.
+    /// Dropped with the letter by <see cref="Sync"/>, as the masonry is.
+    /// </summary>
+    private Dictionary<Vector2I, RockNote> _rocks = new();
+
+    /// <summary>The board's wind and ice (format 3's <c>climate</c>).</summary>
+    public RockClimate Climate { get; set; }
 
     /// <summary>The parkings, cell and class each - see
     /// <see cref="Parking"/>.</summary>
@@ -116,6 +194,9 @@ public sealed class MapEdit
             // reads the same board.
             Plinth = 1,
             _ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
+            _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
+            _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
+            _trees = Enumerable.Repeat(Species.As, columns * rows).ToArray(),
             _ramps = new bool[columns * rows],
         };
         // One home, in the middle. A board with none is refused on the way out -
@@ -152,6 +233,7 @@ public sealed class MapEdit
     public static MapEdit Of(BoardMap map)
     {
         string[] ground = MapFile.Ground(map);
+        string[]? floors = MapFile.Floors(map);
         var edit = new MapEdit
         {
             Name = map.Name,
@@ -161,6 +243,14 @@ public sealed class MapEdit
             Columns = map.Columns,
             Rows = map.Rows,
             _ground = new char[map.Columns * map.Rows],
+            _under = Enumerable.Repeat(BoardMap.Plain, map.Columns * map.Rows).ToArray(),
+            _soil = map.SoilCells is { } looks ? (char[])looks.Clone()
+                : Enumerable.Repeat(Soil.As, map.Columns * map.Rows).ToArray(),
+            SoilBase = new Dictionary<Foundation, char>(map.SoilBase),
+            _trees = map.TreeCells is { } trees ? (char[])trees.Clone()
+                : Enumerable.Repeat(Species.As, map.Columns * map.Rows).ToArray(),
+            Wood = map.WoodMix is { } mix ? new Dictionary<char, int>(mix) : new(),
+            _roads = map.Roads.ToList(),
             _ramps = (bool[])map.Ramps.Clone(),
             _homes = map.Parked.ToList(),
             // Copied rather than referenced: the board a draft was opened from
@@ -168,12 +258,15 @@ public sealed class MapEdit
             // would be every scene in the session drawing the edit.
             _walls = map.Walling.ToDictionary(kv => kv.Key,
                                               kv => kv.Value.Copy()),
+            Climate = map.Climate,
         };
         for (int r = 0; r < map.Rows; r++)
         for (int q = 0; q < map.Columns; q++)
         {
             var cell = new Vector2I(q, r);
             edit._ground[edit.At(cell)] = ground[r][q];
+            if (floors is not null)
+                edit._under[edit.At(cell)] = floors[r][q];
             // And the entry every wall letter means, for the cells the board
             // said nothing about. A board that authored no shapes - which is
             // every compiled one - would otherwise open with masonry the letters
@@ -181,7 +274,103 @@ public sealed class MapEdit
             // the same board back without it.
             edit.Sync(cell);
         }
+        edit.Spread(map.Rocking);
         return edit;
+    }
+
+    /// <summary>A file's rock notes, each laid over every cell of its rock
+    /// (<see cref="_rocks"/>). A note off a rock is dropped: a draft is
+    /// allowed to be wrong, and the letter is what says what is a rock.</summary>
+    private void Spread(IReadOnlyDictionary<Vector2I, RockNote>? rocking)
+    {
+        if (rocking is null || rocking.Count == 0)
+            return;
+        foreach (List<Vector2I> rock in Rocks())
+            foreach (Vector2I c in rock)
+                if (rocking.TryGetValue(c, out RockNote? note))
+                {
+                    foreach (Vector2I d in rock)
+                        _rocks[d] = note;
+                    break;
+                }
+    }
+
+    // --- rocks ---------------------------------------------------------------
+
+    /// <summary>The draft's rocks, as <see cref="BoardMap.RockGroups"/> finds
+    /// them on a board.</summary>
+    public List<List<Vector2I>> Rocks() =>
+        BoardMap.RockGroups(Columns, Rows, c => GlyphAt(c).Floor == Foundation.Rock);
+
+    /// <summary>The rock a cell is part of, or empty off a rock.</summary>
+    public IReadOnlyList<Vector2I> RockOf(Vector2I cell)
+    {
+        if (!Inside(cell) || GlyphAt(cell).Floor != Foundation.Rock)
+            return Array.Empty<Vector2I>();
+        foreach (List<Vector2I> rock in Rocks())
+            if (rock.Contains(cell))
+                return rock;
+        return Array.Empty<Vector2I>();
+    }
+
+    /// <summary>The note the cell's rock holds there, or null - a crag, as a
+    /// bare letter always was.</summary>
+    public RockNote? RockAt(Vector2I cell) =>
+        _rocks.TryGetValue(cell, out RockNote? note) ? note : null;
+
+    /// <summary>
+    /// Give a whole rock one note, or none (null or <see cref="RockNote.Plain"/>
+    /// takes it back to a crag). Names and figures are the file's to judge -
+    /// the panel offers only what the file reads - so what is refused here is
+    /// a cell that is no rock.
+    /// </summary>
+    public bool Note(Vector2I cell, RockNote? note, out string why)
+    {
+        IReadOnlyList<Vector2I> rock = RockOf(cell);
+        if (rock.Count == 0)
+        {
+            why = $"({cell.X},{cell.Y}) is no rock";
+            return false;
+        }
+        why = "";
+        foreach (Vector2I c in rock)
+            if (note is null || note.Plain)
+                _rocks.Remove(c);
+            else
+                _rocks[c] = note;
+        return true;
+    }
+
+    /// <summary>
+    /// The rocks' notes as the file writes them: one a rock, at its first cell
+    /// in reading order of the walk, and the one most of its cells hold. A rock
+    /// two joined by a stroke keeps the larger one's; a tie with the cells
+    /// that hold none is a crag, so a stroke never gives a rock a look more
+    /// of it did not have.
+    /// </summary>
+    public Dictionary<Vector2I, RockNote> Rocking()
+    {
+        var said = new Dictionary<Vector2I, RockNote>();
+        if (_rocks.Count == 0)
+            return said;
+        foreach (List<Vector2I> rock in Rocks())
+        {
+            var count = new Dictionary<RockNote, int>();
+            int plain = 0;
+            foreach (Vector2I c in rock)
+                if (_rocks.TryGetValue(c, out RockNote? n))
+                    count[n] = count.GetValueOrDefault(n) + 1;
+                else
+                    plain++;
+            RockNote? best = null;
+            int most = 0;
+            foreach ((RockNote n, int k) in count)
+                if (k > most)
+                    (best, most) = (n, k);
+            if (best is not null && most > plain)
+                said[rock[0]] = best;
+        }
+        return said;
     }
 
     // --- reading -------------------------------------------------------------
@@ -198,8 +387,8 @@ public sealed class MapEdit
     /// the alphabet cannot get into the grid, because every write goes through
     /// <see cref="Put"/>.</summary>
     public MapFile.Glyph GlyphAt(Vector2I cell) =>
-        MapFile.Of(LetterAt(cell))
-        ?? MapFile.Of(BoardMap.Off)!.Value;
+        MapFile.Under(MapFile.Of(LetterAt(cell)) ?? MapFile.Of(BoardMap.Off)!.Value,
+                      Inside(cell) ? _under[At(cell)] : BoardMap.Plain);
 
     public bool OnBoard(Vector2I cell) =>
         Inside(cell) && _ground[At(cell)] != BoardMap.Off;
@@ -216,6 +405,238 @@ public sealed class MapEdit
         return rows;
     }
 
+    /// <summary>The floor grid as the file writes it, or null when no cell
+    /// needs one (<see cref="MapFile.Floors"/>).</summary>
+    public string[]? Floors()
+    {
+        if (_under.All(c => c == BoardMap.Plain))
+            return null;
+        var rows = new string[Rows];
+        for (int r = 0; r < Rows; r++)
+            rows[r] = new string(_under, r * Columns, Columns);
+        return rows;
+    }
+
+    /// <summary>The soil grid as the file writes it, or null when no cell
+    /// has a look of its own.</summary>
+    public string[]? SoilRows() => MapFile.Rows(_soil, Columns, Rows);
+
+    /// <summary>A cell's own look, <see cref="Soil.As"/> when it has none.</summary>
+    public char SoilAt(Vector2I cell) => Inside(cell) ? _soil[At(cell)] : Soil.As;
+
+    /// <summary>The look the cell wears, the three layers resolved
+    /// (<see cref="Soil.Resolve"/>).</summary>
+    public char LookAt(Vector2I cell)
+    {
+        MapFile.Glyph g = GlyphAt(cell);
+        return Soil.Resolve(SoilAt(cell), g.Floor, g.Water, SoilBase);
+    }
+
+    /// <summary>Every cell's look, resolved - <see cref="HexField.SetSoil"/>'s
+    /// array; null when the board draws nothing apart from today's ground.</summary>
+    public char[]? Looks()
+    {
+        if (SoilBase.Count == 0 && _soil.All(c => c == Soil.As))
+            return null;
+        var looks = new char[Columns * Rows];
+        for (int r = 0; r < Rows; r++)
+            for (int q = 0; q < Columns; q++)
+                looks[r * Columns + q] = LookAt(new Vector2I(q, r));
+        return looks;
+    }
+
+    /// <summary>
+    /// Give a cell a look of its own, or none (<see cref="Soil.As"/>, the
+    /// eraser's). A look not of the cell's floor is refused and named - dunes
+    /// want sand - rather than written to be dropped.
+    /// </summary>
+    public bool Wear(Vector2I cell, char look, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is off the board";
+            return false;
+        }
+        MapFile.Glyph g = GlyphAt(cell);
+        if (look != Soil.As && (g.Water || Soil.FloorOf(look) != g.Floor))
+        {
+            why = $"{Soil.Name(look)} is a look of {Soil.FloorOf(look)?.ToString().ToLowerInvariant()}, "
+                  + $"and ({cell.X},{cell.Y}) is " + (g.Water ? "water" : g.Floor.ToString().ToLowerInvariant());
+            return false;
+        }
+        _soil[At(cell)] = look;
+        return true;
+    }
+
+    /// <summary>The board's look for a floor, or none to take it back to
+    /// today's.</summary>
+    public void Lay(Foundation floor, char? look)
+    {
+        if (look is char l && Soil.FloorOf(l) == floor && l != Soil.Today(floor))
+            SoilBase[floor] = l;
+        else
+            SoilBase.Remove(floor);
+    }
+
+    // --- species --------------------------------------------------------------
+
+    /// <summary>The trees grid as the file writes it, or null when no cell
+    /// names a species.</summary>
+    public string[]? TreeRows() => MapFile.Rows(_trees, Columns, Rows);
+
+    /// <summary>A cell's own species, <see cref="Species.As"/> when it has none.</summary>
+    public char TreeAt(Vector2I cell) => Inside(cell) ? _trees[At(cell)] : Species.As;
+
+    /// <summary>Every cell's own species, <see cref="HexField.TreeCells"/>'s array;
+    /// null when none says one.</summary>
+    public char[]? Trees() => _trees.All(c => c == Species.As) ? null : (char[])_trees.Clone();
+
+    /// <summary>
+    /// Give a cell a species of its own, or none (<see cref="Species.As"/>,
+    /// the eraser's: back to the mix). Any cell on the board takes one - a
+    /// cell with no wood keeps it until it is planted; only the species is
+    /// written, never the cover.
+    /// </summary>
+    public bool Plant(Vector2I cell, char species, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is off the board";
+            return false;
+        }
+        if (species != Species.As && Species.Of(species) < 0)
+        {
+            why = $"'{species}' is no species";
+            return false;
+        }
+        _trees[At(cell)] = species;
+        return true;
+    }
+
+    /// <summary>The cells whose species stands on no wood - named, not
+    /// refused: it waits for the cell to be planted (<see cref="Plant"/>).</summary>
+    public IEnumerable<MapRules.Fault> Waiting()
+    {
+        for (int at = 0; at < _trees.Length; at++)
+        {
+            var cell = new Vector2I(at % Columns, at / Columns);
+            if (_trees[at] != Species.As && OnBoard(cell) && GlyphAt(cell).Over != Cover.Forest)
+                yield return new MapRules.Fault(cell, "trees.wait",
+                    $"({cell.X},{cell.Y}) names {Species.Name(_trees[at])} and grows no wood - "
+                    + "the species waits for the cell to be planted", false,
+                    $"({cell.X},{cell.Y}) {Species.Name(_trees[at])} waits for a wood");
+        }
+    }
+
+    /// <summary>A species' weight in the board's mix; nought takes it out.</summary>
+    public void Weigh(char species, int weight)
+    {
+        if (Species.Of(species) >= 0 && weight > 0)
+            Wood[species] = weight;
+        else
+            Wood.Remove(species);
+    }
+
+    // --- roads ----------------------------------------------------------------
+
+    /// <summary>Why no road may cross a cell, or null: the map's own
+    /// refusals (<see cref="BoardMap.FromGround"/>).</summary>
+    public string? RoadRefuses(Vector2I cell)
+    {
+        if (!OnBoard(cell))
+            return "off the board";
+        MapFile.Glyph g = GlyphAt(cell);
+        return g.Water ? "under water - a ford or a bridge is not a road yet"
+            : g.Floor == Foundation.Rock ? "a rock"
+            : g.Wall ? "a wall"
+            : null;
+    }
+
+    /// <summary>
+    /// Lay a road along <paramref name="cells"/>, in place of road
+    /// <paramref name="replace"/> or as a new one (-1). Answers its index, or
+    /// -1 with the reason when the roads that would result are ones the map
+    /// refuses (<see cref="Road.Faults"/>) - and then nothing changes.
+    /// </summary>
+    public int Pave(IReadOnlyList<Vector2I> cells, RoadType type, int replace, out string why)
+    {
+        var next = _roads.ToList();
+        var road = new RoadPath(type, cells.ToArray());
+        if (replace >= 0 && replace < next.Count)
+            next[replace] = road;
+        else
+            next.Add(road);
+        List<string> wrong = Road.Faults(next, RoadRefuses);
+        if (wrong.Count > 0)
+        {
+            why = wrong[0];
+            return -1;
+        }
+        why = "";
+        _roads = next;
+        return replace >= 0 && replace < next.Count ? replace : next.Count - 1;
+    }
+
+    /// <summary>Every road through <paramref name="cell"/> cut there: what is
+    /// left on either side stays a road if it still joins two cells. Answers
+    /// how many roads it touched.</summary>
+    public int Cut(Vector2I cell)
+    {
+        int touched = 0;
+        var kept = new List<RoadPath>();
+        foreach (RoadPath road in _roads)
+        {
+            if (!road.Cells.Contains(cell))
+            {
+                kept.Add(road);
+                continue;
+            }
+            touched++;
+            kept.AddRange(Pieces(road, c => c == cell));
+        }
+        _roads = kept;
+        return touched;
+    }
+
+    /// <summary>A road with the cells <paramref name="gone"/> says taken out:
+    /// the runs between, each of two cells or more.</summary>
+    private static IEnumerable<RoadPath> Pieces(RoadPath road, Func<Vector2I, bool> gone)
+    {
+        var run = new List<Vector2I>();
+        foreach (Vector2I c in road.Cells)
+        {
+            if (!gone(c))
+            {
+                run.Add(c);
+                continue;
+            }
+            if (run.Count >= 2)
+                yield return road with { Cells = run.ToArray() };
+            run.Clear();
+        }
+        if (run.Count >= 2)
+            yield return road with { Cells = run.ToArray() };
+    }
+
+    /// <summary>The roads through a cell, by index.</summary>
+    public List<int> RoadsAt(Vector2I cell)
+    {
+        var at = new List<int>();
+        for (int k = 0; k < _roads.Count; k++)
+            if (_roads[k].Cells.Contains(cell))
+                at.Add(k);
+        return at;
+    }
+
+    /// <summary>A road given another look.</summary>
+    public void Retype(int road, RoadType type)
+    {
+        if (road >= 0 && road < _roads.Count)
+            _roads[road] = _roads[road] with { Type = type };
+    }
+
     public string[] Ramps()
     {
         var rows = new string[Rows];
@@ -230,18 +651,33 @@ public sealed class MapEdit
     /// <summary>Everything a stroke can change, in one value. A named shape
     /// rather than a tuple written out five times: the day a fifth grid is
     /// added, a tuple is five places to add it and four to forget.</summary>
-    private readonly record struct Snap(char[] Ground, bool[] Ramps,
+    /// <remarks>The size is in it since the board could be resized
+    /// (<see cref="Reframe"/>): a stroke's grids are only read at the size
+    /// they were taken at.</remarks>
+    private readonly record struct Snap(char[] Ground, char[] Under, char[] Soil,
+                                        Dictionary<Foundation, char> SoilBase,
+                                        char[] Trees, Dictionary<char, int> Wood,
+                                        List<RoadPath> Roads, bool[] Ramps,
                                         List<Parking> Homes,
-                                        Dictionary<Vector2I, Masonry> Walls);
+                                        Dictionary<Vector2I, Masonry> Walls,
+                                        Dictionary<Vector2I, RockNote> Rocks,
+                                        RockClimate Climate,
+                                        int Columns, int Rows);
 
-    private Snap Taken() => new((char[])_ground.Clone(),
+    private Snap Taken() => new((char[])_ground.Clone(), (char[])_under.Clone(),
+                                (char[])_soil.Clone(), new Dictionary<Foundation, char>(SoilBase),
+                                (char[])_trees.Clone(), new Dictionary<char, int>(Wood),
+                                _roads.ToList(),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
-                                                    kv => kv.Value.Copy()));
+                                                    kv => kv.Value.Copy()),
+                                new Dictionary<Vector2I, RockNote>(_rocks), Climate,
+                                Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _ramps, _homes, _walls) =
-            (was.Ground, was.Ramps, was.Homes, was.Walls);
+        (_ground, _under, _soil, SoilBase, _trees, Wood, _roads, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+            (was.Ground, was.Under, was.Soil, was.SoilBase, was.Trees, was.Wood, was.Roads, was.Ramps, was.Homes, was.Walls,
+             was.Rocks, was.Climate, was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
 
@@ -276,10 +712,20 @@ public sealed class MapEdit
         if (_back.Count == 0)
             return false;
         Snap was = _back[^1];
-        bool same = was.Ground.SequenceEqual(_ground) && was.Ramps.SequenceEqual(_ramps)
+        bool same = was.Columns == Columns && was.Rows == Rows
+                    && was.Ground.SequenceEqual(_ground) && was.Under.SequenceEqual(_under)
+                    && was.Soil.SequenceEqual(_soil) && was.Roads.SequenceEqual(_roads)
+                    && was.SoilBase.Count == SoilBase.Count
+                    && was.SoilBase.All(kv => SoilBase.TryGetValue(kv.Key, out char now) && now == kv.Value)
+                    && was.Trees.SequenceEqual(_trees) && was.Wood.Count == Wood.Count
+                    && was.Wood.All(kv => Wood.TryGetValue(kv.Key, out int now) && now == kv.Value)
+                    && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
-                                           && now.Say() == kv.Value.Say());
+                                           && now.Say() == kv.Value.Say())
+                    && was.Climate == Climate && was.Rocks.Count == _rocks.Count
+                    && was.Rocks.All(kv => _rocks.TryGetValue(kv.Key, out RockNote? now)
+                                           && now == kv.Value);
         if (same)
             _back.RemoveAt(_back.Count - 1);
         return !same;
@@ -324,14 +770,16 @@ public sealed class MapEdit
             why = $"({cell.X},{cell.Y}) is off the grid";
             return false;
         }
-        char? letter = MapFile.Letter(floor, over, level, water, cliff);
-        if (letter is not char found)
+        // a letter, and the floor grid's mark where the letter cannot say the
+        // floor - sand under a wood, mud on a hill (MapFile.Encode)
+        if (MapFile.Encode(floor, over, level, water, cliff) is not { } found)
         {
             why = $"the alphabet has no letter for {Say(floor, over, level, water)}"
                   + $" - see MapFile.Alphabet, which is not a cross product";
             return false;
         }
-        _ground[At(cell)] = found;
+        _ground[At(cell)] = found.Letter;
+        _under[At(cell)] = found.Under;
         Sync(cell);
         return true;
     }
@@ -349,10 +797,23 @@ public sealed class MapEdit
     /// </summary>
     private void Sync(Vector2I cell)
     {
+        // a letter that says its own floor takes no mark under it - plain, sand,
+        // water, a rock, a wall, the edge
+        if (Inside(cell) && !MapFile.TakesUnder(LetterAt(cell)))
+            _under[At(cell)] = BoardMap.Plain;
+        // a road leaves a cell that stopped being one it may cross
+        if (_roads.Count > 0 && RoadRefuses(cell) is not null)
+            Cut(cell);
+        // a look stays only on the floor it is for
+        if (Inside(cell) && _soil[At(cell)] != Soil.As
+            && (GlyphAt(cell).Water || Soil.FloorOf(_soil[At(cell)]) != GlyphAt(cell).Floor))
+            _soil[At(cell)] = Soil.As;
         if (GlyphAt(cell).Wall)
             _walls.TryAdd(cell, new Masonry());
         else
             _walls.Remove(cell);
+        if (GlyphAt(cell).Floor != Foundation.Rock)
+            _rocks.Remove(cell);
     }
 
     private static string Say(Foundation floor, Cover over, int level, bool water)
@@ -543,8 +1004,175 @@ public sealed class MapEdit
     {
         Tab.Cover => Over(cell, Cover.None, out why),
         Tab.Foundation => Floor(cell, Foundation.Solid, out why),
+        Tab.Units => Unhome(cell, out why),
+        Tab.Presets => Wipe(cell, out why),
+        Tab.Look => Wear(cell, Soil.As, out why),
+        Tab.Roads => Uncut(cell, out why),
         _ => Ramp(cell, false, out why) && Level(cell, 0, out why),
     };
+
+    /// <summary>The Roads tab's eraser: the roads in a cell cut, or why not.</summary>
+    private bool Uncut(Vector2I cell, out string why)
+    {
+        int cut = Cut(cell);
+        why = cut > 0 ? "" : $"no road in ({cell.X},{cell.Y})";
+        return cut > 0;
+    }
+
+    /// <summary>Every axis of a cell back to plain ground at the datum - the
+    /// Presets tab's eraser. The home on it stays: tanks are the Units tab's.</summary>
+    private bool Wipe(Vector2I cell, out string why)
+    {
+        why = OnBoard(cell) ? "" : $"({cell.X},{cell.Y}) is not on the board";
+        return OnBoard(cell) && Clear(new[] { cell }, homes: false) >= 0;
+    }
+
+    /// <summary>
+    /// A copy to try a stroke on - the preset's ghost lays it here and draws
+    /// what changed. No history: it is thrown away the same frame.
+    /// </summary>
+    public MapEdit Fork() => new()
+    {
+        Name = Name, Paint = Paint, Height = Height, Plinth = Plinth,
+        Columns = Columns, Rows = Rows,
+        _ground = (char[])_ground.Clone(),
+        _under = (char[])_under.Clone(),
+        _soil = (char[])_soil.Clone(),
+        SoilBase = new Dictionary<Foundation, char>(SoilBase),
+        _trees = (char[])_trees.Clone(),
+        Wood = new Dictionary<char, int>(Wood),
+        _roads = _roads.ToList(),
+        _ramps = (bool[])_ramps.Clone(),
+        _homes = _homes.ToList(),
+        _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
+        _rocks = new Dictionary<Vector2I, RockNote>(_rocks),
+        Climate = Climate,
+    };
+
+    /// <summary>
+    /// The cells of a straight line from <paramref name="a"/> to
+    /// <paramref name="b"/>, both ends in - the line tool. Walked in axial
+    /// coordinates, a cell per step of hex distance, each point rounded to the
+    /// nearest hex, so the line has no gaps and no doubled cells on any
+    /// heading (the odd-q offset would bend it).
+    /// </summary>
+    public static IReadOnlyList<Vector2I> Line(Vector2I a, Vector2I b)
+    {
+        Vector2I from = Axial(a), to = Axial(b);
+        int dx = to.X - from.X, dz = to.Y - from.Y;
+        int n = (Math.Abs(dx) + Math.Abs(dz) + Math.Abs(dx + dz)) / 2;
+        var cells = new List<Vector2I>(n + 1);
+        for (int i = 0; i <= n; i++)
+        {
+            float t = n == 0 ? 0.0f : (float)i / n;
+            // nudged off the ties a line along an edge would land on
+            float x = from.X + dx * t + 1e-4f, z = from.Y + dz * t + 2e-4f, y = -x - z;
+            int rx = (int)MathF.Round(x), rz = (int)MathF.Round(z), ry = (int)MathF.Round(y);
+            float ex = MathF.Abs(rx - x), ey = MathF.Abs(ry - y), ez = MathF.Abs(rz - z);
+            if (ex > ey && ex > ez)
+                rx = -ry - rz;
+            else if (ez > ey)
+                rz = -rx - ry;
+            Vector2I cell = Offset(new Vector2I(rx, rz));
+            if (cells.Count == 0 || cells[^1] != cell)
+                cells.Add(cell);
+        }
+        return cells;
+    }
+
+    /// <summary>The home on a cell taken off, or a refusal when there is none
+    /// or it is the last.</summary>
+    public bool Unhome(Vector2I cell, out string why)
+    {
+        int slot = SlotAt(cell);
+        if (slot < 0)
+        {
+            why = $"no tank on ({cell.X},{cell.Y})";
+            return false;
+        }
+        // the others keep who they are as this one's place in the order goes
+        Freeze();
+        return DropHome(slot, out why);
+    }
+
+    /// <summary>
+    /// A tank of <paramref name="side"/> and class <paramref name="tag"/> on a
+    /// cell - the Units tab's click.
+    ///
+    /// <b>Put, or the tank on the cell made this one.</b> A side may field
+    /// several of a class (<see cref="BoardMap.MustCrew"/>), so a click puts a
+    /// new tank on an empty cell; on a cell with a tank it turns that tank into
+    /// the brush's, its facing kept. Moving one is a drag (<see cref="Move"/>).
+    /// </summary>
+    public bool Unit(Vector2I cell, string side, string tag, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is not on the board";
+            return false;
+        }
+        if (!Parking.Sides.Contains(side, StringComparer.OrdinalIgnoreCase))
+        {
+            why = $"{side} is not a side - " + string.Join(", ", Parking.Sides);
+            return false;
+        }
+        if (!MovementProfile.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+        {
+            why = $"{tag} is not a class this build has - " + string.Join(", ", MovementProfile.Tags);
+            return false;
+        }
+        side = side.ToLowerInvariant();
+        Freeze();
+        int here = SlotAt(cell);
+        if (here >= 0)
+            _homes[here] = _homes[here] with { Class = tag, Side = side };
+        else
+            _homes.Add(new Parking(cell, tag, side));
+        return true;
+    }
+
+    /// <summary>A home's tank carried to another cell, facing and all - the
+    /// Units tab's drag. Refused onto a cell another home stands on: two tanks
+    /// in one hex are one tank on screen.</summary>
+    public bool Move(int slot, Vector2I cell, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (SlotAt(cell) is int other && other >= 0 && other != slot)
+        {
+            why = $"home {other + 1} stands on ({cell.X},{cell.Y})";
+            return false;
+        }
+        // said out loud first, so the move shifts no one's order
+        Freeze();
+        return Home(cell, slot, out why);
+    }
+
+    /// <summary>
+    /// Every home the match fields says its side and class out loud - what
+    /// <see cref="Lineup.Of"/> gives it now.
+    ///
+    /// <b>Before the Units brush touches one, all of them.</b> A home that
+    /// names nothing takes its side and class from its order among the others
+    /// (<see cref="Parking.SidesOf"/>); naming one of them shifts that order,
+    /// and a brown tank five homes on would turn green. Said out loud, each
+    /// stays who it is whatever the brush does to its neighbours - and the
+    /// brush finds the tank it means by name. The facings stay as they were.
+    /// </summary>
+    private void Freeze()
+    {
+        foreach (Lineup.Unit u in Lineup.Of(_homes))
+        {
+            int pair = Lineup.PairAt(u.Model);
+            if (pair >= 0)
+                _homes[u.Slot] = _homes[u.Slot] with { Side = u.Side, Class = Lineup.Pairs[pair].Class };
+        }
+    }
 
     /// <summary>
     /// Put a home on a cell.
@@ -579,10 +1207,10 @@ public sealed class MapEdit
     /// <summary>
     /// Which class a parking asks for, or null for whoever is left over.
     ///
-    /// <b>Refused for a class this build has not got, and for one already
-    /// asked for.</b> Both are statements the board could not honour, and both
-    /// are what <see cref="BoardMap.MustCrew"/> would throw on at save - so they
-    /// are refused here, where the author is looking, rather than there.
+    /// <b>Refused for a class this build has not got</b> - what
+    /// <see cref="BoardMap.MustCrew"/> would throw on at save, refused here,
+    /// where the author is looking. Another home asking for the same class is
+    /// fine: a side may field several.
     /// </summary>
     public bool Crew(int slot, string? tag, out string why)
     {
@@ -601,19 +1229,56 @@ public sealed class MapEdit
                       + string.Join(", ", MovementProfile.Tags);
                 return false;
             }
-            for (int i = 0; i < _homes.Count; i++)
-                if (i != slot && string.Equals(_homes[i].Class, tag,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    why = $"home {i + 1} already asks for {tag}, and there is "
-                          + "one tank of each";
-                    return false;
-                }
         }
         _homes[slot] = _homes[slot] with
         {
             Class = tag is { Length: > 0 } ? tag : null,
         };
+        return true;
+    }
+
+    /// <summary>
+    /// Which side a parking is on in a match, or null for the one its order
+    /// gives it (see <see cref="Parking"/>).
+    /// </summary>
+    public bool Team(int slot, string? side, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (side is { Length: > 0 }
+            && !Parking.Sides.Contains(side, StringComparer.OrdinalIgnoreCase))
+        {
+            why = $"{side} is not a side - " + string.Join(", ", Parking.Sides);
+            return false;
+        }
+        string? to = side is { Length: > 0 } ? side.ToLowerInvariant() : null;
+        _homes[slot] = _homes[slot] with { Side = to };
+        return true;
+    }
+
+    /// <summary>
+    /// Which edge a parking's tank starts facing, or null for its side's way
+    /// across the board. Only the six edge headings: a tank on a hex faces an
+    /// edge.
+    /// </summary>
+    public bool Face(int slot, int? facing, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (facing is int f && !HexField.EdgeHeadings.Contains(f))
+        {
+            why = $"{f} is not an edge - " + string.Join(", ", HexField.EdgeHeadings);
+            return false;
+        }
+        _homes[slot] = _homes[slot] with { Facing = facing };
         return true;
     }
 
@@ -823,6 +1488,479 @@ public sealed class MapEdit
         return refused;
     }
 
+    // --- pieces: copy, cut, paste, move ----------------------------------------
+
+    /// <summary>One cell of a <see cref="Piece"/>: its letter, its ramp, its
+    /// masonry and its rock's note, on the cell it was taken from. A stamp
+    /// file keeps no notes (<see cref="MapFile.SaveStamp"/>), so a rock comes
+    /// out of one a crag.</summary>
+    public readonly record struct Bit(Vector2I Cell, char Letter, bool Ramp, Masonry? Wall,
+                                      RockNote? Rock = null, char Under = BoardMap.Plain,
+                                      char Soil = Soil.As);
+
+    /// <summary>
+    /// A part of a board lifted off it - the clipboard, a stamp, the selection
+    /// being dragged (stage 2 of docs/editor-ux-plan.md).
+    ///
+    /// <b>Cells where they were taken, and the cell it is held by.</b> Put down
+    /// elsewhere, every cell keeps its place relative to <see cref="Anchor"/>
+    /// on the hex grid rather than on the offset one - see <see cref="Shift"/>.
+    /// The homes on it carry their side and class said out loud, so a copied
+    /// tank stays who it was whatever order it lands in.
+    /// </summary>
+    public sealed record Piece(IReadOnlyList<Bit> Cells, IReadOnlyList<Parking> Homes, Vector2I Anchor);
+
+    /// <summary>
+    /// Where <paramref name="cell"/> lands when the piece held at
+    /// <paramref name="from"/> is put down at <paramref name="to"/>.
+    ///
+    /// <b>Through axial coordinates, not by adding the offset.</b> The grid is
+    /// odd-q: an odd column stands half a row lower than an even one
+    /// (<see cref="HexField.Step"/>), so a piece moved an odd number of
+    /// columns by adding (dq, dr) would change which cells touch - the moat's
+    /// problem (<see cref="BoardMap"/>.Moated). In axial terms a move is a
+    /// plain sum and neighbours stay neighbours; the price is that a
+    /// rectangle moved an odd number of columns lands as a slightly sheared
+    /// one, which is what the same hexes look like there.
+    /// </summary>
+    public static Vector2I Shift(Vector2I cell, Vector2I from, Vector2I to) =>
+        Offset(Axial(cell) - Axial(from) + Axial(to));
+
+    private static Vector2I Axial(Vector2I c) => new(c.X, c.Y - (c.X - (c.X & 1)) / 2);
+
+    private static Vector2I Offset(Vector2I a) => new(a.X, a.Y + (a.X - (a.X & 1)) / 2);
+
+    /// <summary>The cells of the board from one corner to the other, columns
+    /// and rows between them - the select tool's rectangle.</summary>
+    public IReadOnlyList<Vector2I> Box(Vector2I a, Vector2I b)
+    {
+        var cells = new List<Vector2I>();
+        for (int r = Math.Max(0, Math.Min(a.Y, b.Y)); r <= Math.Min(Rows - 1, Math.Max(a.Y, b.Y)); r++)
+        for (int q = Math.Max(0, Math.Min(a.X, b.X)); q <= Math.Min(Columns - 1, Math.Max(a.X, b.X)); q++)
+            cells.Add(new Vector2I(q, r));
+        return cells;
+    }
+
+    /// <summary>
+    /// The cells given, lifted into a piece held at <paramref name="anchor"/>.
+    ///
+    /// <b>Cells off the board are not in it</b>: put down, a piece leaves what
+    /// is under its holes alone, so a selection round a bend of a river does
+    /// not punch the board's edge into the next one.
+    /// </summary>
+    public Piece Copy(IEnumerable<Vector2I> cells, Vector2I anchor)
+    {
+        var bits = new List<Bit>();
+        var taken = new HashSet<Vector2I>();
+        foreach (Vector2I cell in cells)
+        {
+            if (!OnBoard(cell) || !taken.Add(cell))
+                continue;
+            bits.Add(new Bit(cell, LetterAt(cell), IsRamp(cell),
+                             _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null,
+                             RockAt(cell), _under[At(cell)], _soil[At(cell)]));
+        }
+        var homes = new List<Parking>();
+        foreach (Lineup.Unit u in Lineup.Of(_homes))
+        {
+            Parking home = _homes[u.Slot];
+            if (!taken.Contains(home.Cell))
+                continue;
+            // said out loud, as Freeze would say it, without touching the board
+            int pair = Lineup.PairAt(u.Model);
+            homes.Add(pair >= 0 ? home with { Side = u.Side, Class = Lineup.Pairs[pair].Class } : home);
+        }
+        return new Piece(bits, homes, anchor);
+    }
+
+    /// <summary>
+    /// The cells given cleared to plain ground at the datum: no cover, no
+    /// ramp, no wall - and with <paramref name="homes"/>, no home. Cut's
+    /// second half and Delete. Answers how many cells changed.
+    ///
+    /// <b>The last home goes too.</b> <see cref="DropHome"/> refuses it, for
+    /// a brush; a cut is usually half of a move whose paste brings it back,
+    /// and a board left with none says so in the problems panel and on save.
+    /// </summary>
+    public int Clear(IEnumerable<Vector2I> cells, bool homes = true)
+    {
+        var cleared = new HashSet<Vector2I>();
+        foreach (Vector2I cell in cells)
+        {
+            if (!OnBoard(cell) || !cleared.Add(cell))
+                continue;
+            _ground[At(cell)] = BoardMap.Plain;
+            _ramps[At(cell)] = false;
+            Sync(cell);
+        }
+        if (homes && _homes.Any(h => cleared.Contains(h.Cell)))
+        {
+            Freeze();
+            _homes.RemoveAll(h => cleared.Contains(h.Cell));
+        }
+        return cleared.Count;
+    }
+
+    /// <summary>
+    /// A piece put down with its anchor on <paramref name="at"/>; with
+    /// <paramref name="homes"/>, its tanks too, over any home already on the
+    /// cell. Answers the cells written and, in <paramref name="off"/>, how many
+    /// fell off the grid.
+    ///
+    /// <b>The letters go in as they are.</b> Every one came off a board, so
+    /// each is a letter the alphabet carries and nothing is asked again; the
+    /// ramps and walls come with them, the masonry copied so that the piece
+    /// can be put down twice.
+    /// </summary>
+    public int Paste(Piece piece, Vector2I at, bool homes, out int off)
+    {
+        off = 0;
+        int written = 0;
+        foreach (Bit bit in piece.Cells)
+        {
+            Vector2I to = Shift(bit.Cell, piece.Anchor, at);
+            if (!Inside(to))
+            {
+                off++;
+                continue;
+            }
+            _ground[At(to)] = bit.Letter;
+            _under[At(to)] = bit.Under;
+            _soil[At(to)] = bit.Soil;
+            _ramps[At(to)] = bit.Ramp;
+            _walls.Remove(to);
+            if (bit.Wall is { } wall && GlyphAt(to).Wall)
+                _walls[to] = wall.Copy();
+            _rocks.Remove(to);
+            if (bit.Rock is { } note)
+                _rocks[to] = note;
+            Sync(to);
+            written++;
+        }
+        if (homes && piece.Homes.Count > 0)
+        {
+            Freeze();
+            foreach (Parking home in piece.Homes)
+            {
+                Vector2I to = Shift(home.Cell, piece.Anchor, at);
+                if (!OnBoard(to))
+                    continue;
+                int here = SlotAt(to);
+                if (here >= 0)
+                    _homes[here] = home with { Cell = to };
+                else
+                    _homes.Add(home with { Cell = to });
+            }
+        }
+        return written;
+    }
+
+    // --- the board itself: size, shift, crop ------------------------------------
+
+    /// <summary>The largest board the editor makes, either way - the new-board
+    /// dialog's bound.</summary>
+    public const int Largest = 64;
+
+    /// <summary>The smallest.</summary>
+    public const int Smallest = 4;
+
+    /// <summary>
+    /// The board made <paramref name="columns"/> by <paramref name="rows"/>,
+    /// what was on cell (q, r) now on (q + dq, r + dr): the one move behind
+    /// resizing, shifting and cropping (stage 4 of docs/editor-ux-plan.md).
+    /// New cells are plain ground on the board; cells pushed past the edge are
+    /// gone, and so are the homes and walls on them. Answers how many homes
+    /// were lost, or a refusal.
+    ///
+    /// <b>The column shift is even, always.</b> An odd column stands half a
+    /// row lower (odd-q); moved an odd number of columns, every cell would sit
+    /// beside other cells than it did - the moat's problem
+    /// (<see cref="BoardMap"/>.Moated). Callers round; this refuses.
+    ///
+    /// <b>A board left with no home is refused</b>: every save would refuse it
+    /// after, and the way to keep one is to move it first.
+    /// </summary>
+    public bool Reframe(int columns, int rows, int dq, int dr, out int lost, out string why)
+    {
+        lost = 0;
+        why = "";
+        if (columns < Smallest || rows < Smallest || columns > Largest || rows > Largest)
+        {
+            why = $"a board is {Smallest} to {Largest} cells each way, and this would be {columns} x {rows}";
+            return false;
+        }
+        if ((dq & 1) != 0)
+        {
+            why = $"a shift of {dq} columns would move every odd column half a row against the even ones - shift by an even number";
+            return false;
+        }
+        Vector2I by = new(dq, dr);
+        bool Fits(Vector2I cell) => cell.X >= 0 && cell.X < columns && cell.Y >= 0 && cell.Y < rows;
+        List<Parking> homes = _homes.Where(h => Fits(h.Cell + by)).Select(h => h with { Cell = h.Cell + by }).ToList();
+        if (homes.Count == 0)
+        {
+            why = "no home would be left on the board - move one inside first";
+            return false;
+        }
+        Freeze();
+        homes = _homes.Where(h => Fits(h.Cell + by)).Select(h => h with { Cell = h.Cell + by }).ToList();
+        lost = _homes.Count - homes.Count;
+
+        var ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
+        var under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
+        var soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray();
+        var trees = Enumerable.Repeat(Species.As, columns * rows).ToArray();
+        var ramps = new bool[columns * rows];
+        var walls = new Dictionary<Vector2I, Masonry>();
+        var rocks = new Dictionary<Vector2I, RockNote>();
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var from = new Vector2I(q, r);
+            Vector2I to = from + by;
+            if (!Fits(to))
+                continue;
+            ground[to.Y * columns + to.X] = _ground[At(from)];
+            under[to.Y * columns + to.X] = _under[At(from)];
+            soil[to.Y * columns + to.X] = _soil[At(from)];
+            trees[to.Y * columns + to.X] = _trees[At(from)];
+            ramps[to.Y * columns + to.X] = _ramps[At(from)];
+            if (_walls.TryGetValue(from, out Masonry? wall))
+                walls[to] = wall;
+            if (_rocks.TryGetValue(from, out RockNote? note))
+                rocks[to] = note;
+        }
+        (Columns, Rows, _ground, _under, _soil, _trees, _ramps, _homes, _walls, _rocks) =
+            (columns, rows, ground, under, soil, trees, ramps, homes, walls, rocks);
+        // the roads moved with the cells, cut where they ran off the board
+        List<RoadPath> roads = _roads.Select(r => r.Moved(by)).ToList();
+        _roads = new List<RoadPath>();
+        foreach (RoadPath road in roads)
+            _roads.AddRange(Pieces(road, c => !Inside(c)));
+        return true;
+    }
+
+    /// <summary>The shift that keeps a board where <paramref name="anchor"/>
+    /// says when it grows or shrinks by <paramref name="grow"/>: 0 at the
+    /// start, all of it at the end, half in the middle - for the columns,
+    /// rounded to even (<see cref="Reframe"/>).</summary>
+    public static int Anchored(int grow, int anchor, bool columns)
+    {
+        int by = anchor switch { 0 => 0, 2 => grow, _ => grow / 2 };
+        return columns ? by - (by & 1) : by;
+    }
+
+    /// <summary>
+    /// A board straight from its grids, with no question asked but whether
+    /// each letter is one - the autosave's reader. A draft is usually illegal
+    /// (that is why <see cref="MapRules"/> returns a list), so it cannot come
+    /// back through <see cref="BoardMap.FromGround"/>, which would refuse it.
+    /// </summary>
+    public static MapEdit Raw(string name, string[] ground, string[] ramps, IReadOnlyList<Parking> homes,
+                              IReadOnlyDictionary<Vector2I, Masonry>? walls, string? paint, bool height, int plinth,
+                              IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
+                              RockClimate climate = default, string[]? floors = null,
+                              IReadOnlyDictionary<Foundation, char>? soilBase = null,
+                              string[]? soilCells = null, IReadOnlyList<RoadPath>? roads = null,
+                              IReadOnlyDictionary<char, int>? wood = null, string[]? trees = null)
+    {
+        int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
+        if (columns < 1 || ground.Any(row => row.Length != columns))
+            throw new InvalidOperationException($"{name}: the ground grid is not a rectangle");
+        var edit = new MapEdit
+        {
+            Name = name, Paint = paint, Height = height, Plinth = plinth,
+            Columns = columns, Rows = rows,
+            _ground = new char[columns * rows],
+            _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
+            _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
+            SoilBase = soilBase is null ? new() : new Dictionary<Foundation, char>(soilBase),
+            _trees = Enumerable.Repeat(Species.As, columns * rows).ToArray(),
+            Wood = wood is null ? new() : new Dictionary<char, int>(wood),
+            _roads = roads?.ToList() ?? new List<RoadPath>(),
+            _ramps = new bool[columns * rows],
+            _homes = homes.ToList(),
+            Climate = climate,
+        };
+        for (int r = 0; r < rows; r++)
+        for (int q = 0; q < columns; q++)
+        {
+            char letter = ground[r][q];
+            if (MapFile.Of(letter) is null)
+                throw new InvalidOperationException($"{name}: ({q},{r}) is '{letter}', which no map letter is");
+            var cell = new Vector2I(q, r);
+            edit._ground[edit.At(cell)] = letter;
+            // a mark the draft cannot hold is dropped by Sync, as a stray
+            // masonry entry is: a draft may be wrong, not unwritable
+            if (floors is not null && r < floors.Length && q < floors[r].Length
+                && MapFile.FloorUnder(floors[r][q]) is not null)
+                edit._under[edit.At(cell)] = floors[r][q];
+            if (soilCells is not null && r < soilCells.Length && q < soilCells[r].Length)
+                edit._soil[edit.At(cell)] = soilCells[r][q];
+            if (trees is not null && r < trees.Length && q < trees[r].Length
+                && Species.Of(trees[r][q]) >= 0)
+                edit._trees[edit.At(cell)] = trees[r][q];
+            edit._ramps[edit.At(cell)] = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
+            if (walls is not null && walls.TryGetValue(cell, out Masonry? wall) && edit.GlyphAt(cell).Wall)
+                edit._walls[cell] = wall.Copy();
+            edit.Sync(cell);
+        }
+        edit.Spread(rocking);
+        return edit;
+    }
+
+    // --- symmetry ---------------------------------------------------------------
+
+    /// <summary>How a board for two sides is drawn twice by one brush (stage 3
+    /// of docs/editor-ux-plan.md): turned half round its middle, or mirrored
+    /// left to right, or top to bottom.</summary>
+    public enum Symmetry
+    {
+        None,
+        /// <summary>Half a turn about the board's middle - two sides that face
+        /// each other across it, each with the other's ground.</summary>
+        Point,
+        /// <summary>Left and right swap; up stays up.</summary>
+        Across,
+        /// <summary>Top and bottom swap; left stays left.</summary>
+        Down,
+    }
+
+    /// <summary>
+    /// The cell a cell's twin is, or null when it has none on the grid.
+    ///
+    /// <b>In doubled rows, so the arithmetic is the hexes' and not the
+    /// array's.</b> An odd column stands half a row lower (odd-q), so a cell's
+    /// height on the board is <c>2r + (q &amp; 1)</c> half-rows. A reflection is
+    /// a grid symmetry only when it sends every column to one of the same
+    /// parity (a mirror across a column) or flips the parity together with the
+    /// half-row (half a turn) - so the centre is put where that holds, as near
+    /// the board's middle as it can go:
+    /// <list type="bullet">
+    /// <item><b>Point</b> on an even width turns about the edge between the two
+    /// middle columns and pairs every cell; on an odd width it turns about the
+    /// middle column, and that column's neighbours each leave their last row
+    /// without a twin.</item>
+    /// <item><b>Across</b> mirrors about a column: the middle one on an odd
+    /// width; on an even width the one left of the middle, and the last
+    /// column has no twin.</item>
+    /// <item><b>Down</b> mirrors about a row of the even columns: every odd
+    /// column leaves its last row without a twin, on any size.</item>
+    /// </list>
+    /// The naive (W-1-q, H-1-r) is exact only for the first case, and on an odd
+    /// width it parts neighbours.
+    /// </summary>
+    public Vector2I? Twin(Vector2I cell, Symmetry how)
+    {
+        int y2 = 2 * cell.Y + (cell.X & 1);
+        int q, y;
+        switch (how)
+        {
+            case Symmetry.Point:
+                q = Columns - 1 - cell.X;
+                y = ((Columns - 1) & 1) == 1 ? 2 * Rows - 1 - y2 : 2 * Rows - 2 - y2;
+                break;
+            case Symmetry.Across:
+                q = (((Columns - 1) & 1) == 0 ? Columns - 1 : Columns - 2) - cell.X;
+                y = y2;
+                break;
+            case Symmetry.Down:
+                q = cell.X;
+                y = 2 * Rows - 2 - y2;
+                break;
+            default:
+                return null;
+        }
+        if (q < 0 || q >= Columns || y < 0)
+            return null;
+        var twin = new Vector2I(q, (y - (q & 1)) / 2);
+        return Inside(twin) ? twin : null;
+    }
+
+    /// <summary>An edge heading as the twin sees it: half a turn, or the
+    /// mirror's flip (headings count anticlockwise from the right, 90 up).</summary>
+    public static int Turned(int heading, Symmetry how) => how switch
+    {
+        Symmetry.Point => Mathf.PosMod(heading + 180, 360),
+        Symmetry.Across => Mathf.PosMod(180 - heading, 360),
+        Symmetry.Down => Mathf.PosMod(360 - heading, 360),
+        _ => heading,
+    };
+
+    /// <summary>The other side.</summary>
+    public static string Opposite(string side) =>
+        string.Equals(side, Parking.Brown, StringComparison.OrdinalIgnoreCase) ? Parking.Green : Parking.Brown;
+
+    /// <summary>
+    /// The home on <paramref name="twin"/> made the twin of the one on
+    /// <paramref name="of"/>: the other side, the same class, the facing
+    /// turned - and left unsaid when the turn lands on the side's own way
+    /// across, as it does for half a turn and the top-bottom mirror.
+    /// </summary>
+    public bool Pair(Vector2I of, Vector2I twin, Symmetry how, out string why)
+    {
+        int from = SlotAt(of);
+        if (from < 0)
+        {
+            why = $"no tank on ({of.X},{of.Y})";
+            return false;
+        }
+        Freeze();
+        Parking home = _homes[from];
+        string side = Opposite(home.Side ?? Parking.Green);
+        if (!Unit(twin, side, home.Class ?? "MTP", out why))
+            return false;
+        int facing = Turned(home.Facing ?? Parking.Way(home.Side ?? Parking.Green), how);
+        return Face(SlotAt(twin), facing == Parking.Way(side) ? null : facing, out why);
+    }
+
+    /// <summary>What a board says about one symmetry.</summary>
+    public readonly record struct Asymmetry(int Cells, Vector2I? First, int Lone, Vector2I? FirstLone,
+                                            int Homes, Vector2I? FirstHome);
+
+    /// <summary>
+    /// Where the board breaks <paramref name="how"/>: cells whose twin carries
+    /// another letter or ramp (both of each pair counted), cells on the board
+    /// with no twin on the grid, and homes without a tank of the other side
+    /// on their twin. Masonry's edges are not compared; its letter is.
+    /// </summary>
+    public Asymmetry Audit(Symmetry how)
+    {
+        int cells = 0, lone = 0, homes = 0;
+        Vector2I? first = null, firstLone = null, firstHome = null;
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            if (Twin(cell, how) is not Vector2I twin)
+            {
+                if (OnBoard(cell))
+                {
+                    lone++;
+                    firstLone ??= cell;
+                }
+                continue;
+            }
+            if (LetterAt(twin) != LetterAt(cell) || IsRamp(twin) != IsRamp(cell))
+            {
+                cells++;
+                first ??= cell;
+            }
+        }
+        string[] sides = Parking.SidesOf(_homes);
+        for (int i = 0; i < _homes.Count; i++)
+        {
+            Vector2I cell = _homes[i].Cell;
+            int other = Twin(cell, how) is Vector2I twin ? SlotAt(twin) : -1;
+            if (other < 0 || other == i || sides[other] == sides[i])
+            {
+                homes++;
+                firstHome ??= cell;
+            }
+        }
+        return new Asymmetry(cells, first, lone, firstLone, homes, firstHome);
+    }
+
     // --- out ------------------------------------------------------------------
 
     /// <summary>
@@ -864,6 +2002,10 @@ public sealed class MapEdit
             draft.Cliffs[at] = glyph.Cliff;
         }
         draft.Plot = plot;
+        // the roads lay their floor over the letters', as the map does
+        foreach (Vector2I c in Road.Cells(_roads))
+            if (Inside(c))
+                draft.Ground[At(c)] = Foundation.Road;
         return draft;
     }
 
@@ -886,7 +2028,10 @@ public sealed class MapEdit
                                    Paint ?? MapFile.PaintFor(Ground()), Height,
                                    Plinth,
                                    _walls.ToDictionary(kv => kv.Key,
-                                                       kv => kv.Value.Copy()));
+                                                       kv => kv.Value.Copy()),
+                                   Rocking(), Climate, Floors(),
+                                   SoilBase.Count > 0 ? SoilBase : null, SoilRows(), _roads,
+                                   Wood.Count > 0 ? Wood : null, TreeRows());
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

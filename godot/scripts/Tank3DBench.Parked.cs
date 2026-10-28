@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -59,28 +60,38 @@ public sealed partial class Tank3DBench
 
     private bool ParkedOn => _handed || _parkedWanted;
 
-    /// <summary>A model on every parking past the first.</summary>
-    private void BuildParked()
+    /// <summary>A model on every parking past the first - a stage of the
+    /// build each (<see cref="TankStage"/>).</summary>
+    private async Task BuildParked()
     {
         if (!ParkedOn || _field is null || _parkings.Count < 2)
             return;
         if (Match)
         {
-            BuildSides();
+            await BuildSides();
             return;
         }
         var used = new List<string> { _modelTag };
-        foreach (Parking home in _parkings.Skip(1))
+        for (int i = 1; i < _parkings.Count; i++)
         {
+            Parking home = _parkings[i];
             if (!_field.InBounds(home.Cell) || home.Cell == CellHere)
                 continue;
             string tag = ModelFor(home.Class, used);
             used.Add(tag);
+            await TankStage(tag, i, _parkings.Count);
             Stand(tag, home.Cell, _heading);
         }
         Log.Print($"tank3d: {_parked.Count} tank(s) standing on the other parkings: "
-                 + string.Join(", ", _parked.Select(p => $"{p.Tag} {p.Cell}")));
+                 + string.Join(", ", _parked.Select(p => $"{p.Tag} {MapAt(p.Cell)}")));
     }
+
+    /// <summary>Loading a model is most of a bench's build (around 0.3 s a
+    /// tank, ten in a match), so every standing tank is a stage of its own,
+    /// <paramref name="k"/> of <paramref name="n"/> along the tanks' share of
+    /// the bar.</summary>
+    private Task TankStage(string tag, int k, int n) =>
+        Loading.Stage(this, $"tank {k + 1} of {n}: {tag}", 0.65f + 0.25f * k / Math.Max(n, 1));
 
     /// <summary>The model a parking asks for, or the first one on disk nobody
     /// has taken.</summary>
@@ -109,7 +120,7 @@ public sealed partial class Tank3DBench
         }
         catch (Exception e)
         {
-            Log.Print($"tank3d: parked {tag} on {cell}: {e.Message}");
+            Log.Print($"tank3d: parked {tag} on {MapAt(cell)}: {e.Message}");
             return;
         }
         Stand(model, tag, cell, heading, side, yaw, elevation);

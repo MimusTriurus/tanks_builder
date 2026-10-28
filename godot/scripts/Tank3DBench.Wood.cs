@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -44,7 +45,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private string[] _treeNames = BoardDress.Oaks;
+    private string[]? _treeNames;
     private int _woodCount = BoardDress.WoodCount;
     private float _wind = 1.0f, _weather;
 
@@ -150,14 +151,14 @@ public sealed partial class Tank3DBench
 
     /// <summary>The trees and then the grass round their trunks; after the
     /// camera, which carries the crowns' line.</summary>
-    private void BuildWood()
+    private async Task BuildWood()
     {
         if (_field is null || _tile is null)
             return;
         if (_show.Trees)
-            Plant();
+            await Plant();
         if (_show.Grass)
-            Lawn();
+            await Lawn();
     }
 
     /// <summary>
@@ -165,7 +166,7 @@ public sealed partial class Tank3DBench
     /// <see cref="BoardDress.Spots"/> lays them - the editor's board plants the
     /// same wood - each made a <see cref="Planted"/> with its fire and its fall.
     /// </summary>
-    private void Plant()
+    private async Task Plant()
     {
         List<Vector2I> wooded = BoardDress.Wooded(_field!);
         if (wooded.Count == 0)
@@ -182,9 +183,20 @@ public sealed partial class Tank3DBench
             _crowns.Build(_camera);
         }
         ulong t0 = Time.GetTicksMsec();
-        foreach (Vector2I cell in wooded)
-            foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field!, cell, _treeNames, _woodCount, Squash))
+        for (int i = 0; i < wooded.Count; i++)
+        {
+            // a stage every few cells, the lawn's reason (LawnStage): a
+            // wooded board stood a tree model at a time for three seconds
+            if (i % WoodStage == 0)
+            {
+                ulong held = Time.GetTicksMsec();
+                await Loading.Stage(this, $"trees on {i} of {wooded.Count} cells",
+                                    0.15f + 0.2f * i / wooded.Count);
+                t0 += Time.GetTicksMsec() - held;
+            }
+            foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field!, wooded[i], _treeNames, _woodCount, Squash))
                 Stand(spot);
+        }
         foreach (Vector2I cell in wooded)
             _woodMiddle += CellMiddle(cell) / wooded.Count;
         Log.Print($"tank3d: wood on {wooded.Count} cells, {_trees.Count} trees in {Time.GetTicksMsec() - t0} ms");
@@ -206,7 +218,7 @@ public sealed partial class Tank3DBench
         };
         tree.Stagger = tree.Hashed = TreeModel.StaggerOf(spot.Flat);
         TreeModel.Wind(holder, model.Burn, model.Leaves, phase, rate);
-        foreach (Vector3 seat in TreeModel.Seats)
+        foreach (Vector3 seat in model.Seats)
             tree.Seats.Add(new Vector3(seat.X * model.Width, seat.Y * model.Height, seat.Z * model.Depth));
         _trees.Add(tree);
     }
@@ -216,14 +228,14 @@ public sealed partial class Tank3DBench
     /// <see cref="BoardDress.Lawned"/> grows on - the tufts keeping off the
     /// trunks - at the trees' metre, and one press map over the board.
     /// </summary>
-    private void Lawn()
+    private async Task Lawn()
     {
         float r = _tile!.HexRect.Size.X * 0.5f;
         Rect2 span = BoardDress.LawnSpan(_field!, r, Squash, RiseFactor);
         var lay = new List<Vector2I>();
         for (int q = 0; q < _field!.Columns; q++)
         for (int w = 0; w < _field.Rows; w++)
-            if (BoardDress.Lawned(_field, new Vector2I(q, w)))
+            if (BoardDress.Lawned(_field, new Vector2I(q, w)) || ReliefLawned(new Vector2I(q, w)))
                 lay.Add(new Vector2I(q, w));
         _grass = new Grass3D
         {
@@ -231,11 +243,28 @@ public sealed partial class Tank3DBench
             Recover = GrassRecover,
             GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
         };
+        // on the relief the tufts root on the drawn ground, none under the
+        // water, and the shader paints the lawn under them (Grass3D.Ground)
+        if (_relief is { } relief)
+        {
+            _grass.Ground = w => BoardDress.ReliefGround(relief, Board(w), RiseFactor);
+            _grass.Shade = w => BoardDress.ReliefShade(relief, Board(w));
+        }
         AddChild(_grass);
         _grass.Map(span);
         ulong t0 = Time.GetTicksMsec();
         for (int i = 0; i < lay.Count; i++)
         {
+            // a stage every few cells: the lawn is the longest single piece
+            // of the build (about 15 ms a cell), and one stage of it was a
+            // bar standing still for a second and a half (Loading.Stage)
+            if (i % LawnStage == 0)
+            {
+                ulong held = Time.GetTicksMsec();
+                await Loading.Stage(this, $"grass {i} of {lay.Count} cells",
+                                    0.35f + 0.25f * i / lay.Count);
+                t0 += Time.GetTicksMsec() - held;
+            }
             Vector3 mid = CellMiddle(lay[i]);
             var trunks = new List<Vector3>();
             foreach (Planted t in _trees)
@@ -250,6 +279,19 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
     }
+
+    /// <summary>Wooded cells planted between two stages of the build.</summary>
+    private const int WoodStage = 1;
+
+    /// <summary>Cells of grass laid between two stages of the build.</summary>
+    private const int LawnStage = 16;
+
+    /// <summary>On the relief the grass grows over a minefield too: a mine is
+    /// a point in its cell (Mines), and a bare hexagon round it put one cell's
+    /// shape back on the smooth ground.</summary>
+    private bool ReliefLawned(Vector2I cell) =>
+        _relief is not null && _field!.InBounds(cell) && _field.CoverAt(cell) == Cover.Minefield
+        && _field.FoundationAt(cell) == Foundation.Solid && !_field.IsWater(cell);
 
     /// <summary>A frame of the wood: the wind on the crowns, and the grass
     /// pressed under the hulls.</summary>
@@ -346,7 +388,7 @@ public sealed partial class Tank3DBench
                 t.Bend = bend;
             t.Shiver = Mathf.Max(t.Shiver, BrushShiver * touch * pace);
             if (pace > 0.05f && _brushed.Add(t.Cell) && _brushing.Add(t.Cell))
-                Log.Print($"tank3d: {tag} pushes through the wood on {t.Cell}");
+                Log.Print($"tank3d: {tag} pushes through the wood on {MapAt(t.Cell)}");
         }
     }
 
@@ -439,7 +481,7 @@ public sealed partial class Tank3DBench
                 // given once; the trees go down as the hull gets to them.
                 _woodedCells.Remove(cell);
                 _razed.Add(cell);
-                Log.Print($"tank3d: the heavy is in the wood on {cell}: it is ground now");
+                Log.Print($"tank3d: the heavy is in the wood on {MapAt(cell)}: it is ground now");
             }
             foreach (Planted t in _trees)
             {
@@ -550,7 +592,7 @@ public sealed partial class Tank3DBench
             if (float.IsInfinity(when))
                 when = d / BlastSpeed;
             _lights.Add((_woodClock + when, next, new Vector2(edge.X, edge.Z)));
-            Log.Print($"tank3d: blast on {here} lights the wood on {next} in {when:F2} s");
+            Log.Print($"tank3d: blast on {MapAt(here)} lights the wood on {MapAt(next)} in {when:F2} s");
         }
     }
 

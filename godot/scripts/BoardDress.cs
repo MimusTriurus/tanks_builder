@@ -222,9 +222,23 @@ void light() {
     /// by a hash of where it stands - the crowns overlap as a wood's do. All of
     /// it hashed off the cell, so a cell planted again plants the same wood.
     /// </summary>
-    public static IEnumerable<TreeSpot> Spots(HexField field, Vector2I cell, string[] names, int count, float squash)
+    /// <remarks>Each tree's model is the board's (<see cref="HexField.TreeAt"/>,
+    /// <see cref="HexField.WoodMix"/>, <see cref="Species.Tree"/>), unless
+    /// <paramref name="names"/> overrides it - a bench's <c>--trees</c>.</remarks>
+    public static IEnumerable<TreeSpot> Spots(HexField field, Vector2I cell, string[]? names, int count, float squash)
     {
+        char own = field.TreeAt(cell);
         Vector2 flat = field.FlatAnchor(cell) + field.CentreOffset;
+        // a wood a road runs through stands back from it (Road, format 3):
+        // the axes in this method's own XZ, the board's origin left out
+        List<Road.Axis>? road = field.FoundationAt(cell) == Foundation.Road && field.Roads.Count > 0
+            ? Road.Axes(field.Roads, c =>
+            {
+                Vector2 m = field.FlatAnchor(c) + field.CentreOffset;
+                return new Vector2(m.X, m.Y / squash);
+            }, 4.0f)
+            : null;
+        float clear = (Road.Half + 0.12f) * (field.Atlas?.HexRect.Size.X ?? 248.0f) * 0.5f;
         for (int i = 0; i < count; i++)
         {
             Vector2 off = Vector2.Zero;
@@ -235,8 +249,12 @@ void light() {
                 off = new Vector2(Mathf.Cos(a) * d, Mathf.Sin(a) * d * squash);
             }
             Vector2 at = flat + off;
+            if (road is not null && Road.Distance(road, new Vector2(at.X, at.Y / squash)) < clear)
+                continue;
             int salt = cell.X * 97 + cell.Y * 31 + i;
-            yield return new TreeSpot(cell, i, names[(salt + i) % names.Length],
+            string name = names is { Length: > 0 }
+                ? names[(salt + i) % names.Length] : Species.Tree(own, field.WoodMix, salt + i);
+            yield return new TreeSpot(cell, i, name,
                                       new Vector3(at.X, 0.0f, at.Y / squash), Mathf.Tau * CelPuff.Hash(salt, 611), at);
         }
     }
@@ -301,7 +319,33 @@ void light() {
     public static bool Lawned(HexField field, Vector2I cell) =>
         field.InBounds(cell)
         && field.FoundationAt(cell) == Foundation.Solid && !field.IsRamp(cell) && !field.IsWater(cell)
-        && field.CoverAt(cell) is Cover.None or Cover.Forest;
+        && field.CoverAt(cell) is Cover.None or Cover.Forest
+        // bare earth and stones grow none (Soil, format 3)
+        && field.SoilAt(cell) is not (Soil.Earth or Soil.Stony);
+
+    /// <summary>The steepest ground a tuft roots on, as the slope's rise over
+    /// its run: a terrace's bank runs about 1, its flat top under 0.1.</summary>
+    public const float GrassSlope = 0.35f;
+
+    /// <summary>
+    /// Where a tuft roots on the relief (<see cref="Grass3D.Ground"/>), world
+    /// Y, at a flat point of the relief's own field: none under water, none on
+    /// the rock or up its wall, and none on a terrace's slope - grass on the
+    /// flats, earth on the banks. The bench's and the editor's one rule: the
+    /// editor's tufts stood on their cell's one height, and a pit's banks
+    /// stayed grassed over, the pit read as a mound (2026-10-26).
+    /// </summary>
+    public static float? ReliefGround(Relief relief, Vector2 flat, float rise) =>
+        relief.Sample(relief.Shore, flat.X, flat.Y / relief.Squash) < 0.0f
+        || relief.Sample(relief.Cliff, flat.X, flat.Y / relief.Squash) > 0.12f
+        || relief.Steepness(flat, rise) > GrassSlope
+            ? null : relief.HeightAt(flat) / rise;
+
+    /// <summary>The light a tuft keeps at a flat point of the relief's own
+    /// field (<see cref="Grass3D.Shade"/>): a hollow's shade, as its ground
+    /// takes it (<see cref="Relief.Hollow"/>).</summary>
+    public static float ReliefShade(Relief relief, Vector2 flat) =>
+        1.0f - Relief.HollowInk * relief.HollowAt(flat);
 
     /// <summary>The span the grass's press map covers - every cell's square of
     /// <paramref name="radius"/>, world XZ.</summary>

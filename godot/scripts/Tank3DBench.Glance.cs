@@ -73,15 +73,15 @@ public sealed partial class Tank3DBench
         public string Says => Ends switch
         {
             LegEnd.Edge => "уйдёт за край",
-            LegEnd.Wall => $"в стену {Cell}",
-            LegEnd.Wood => $"в {(Smoke ? "дым" : "лес")} {Cell}",
-            LegEnd.Ground => $"в склон {Cell}",
+            LegEnd.Wall => $"в стену {MapAt(Cell)}",
+            LegEnd.Wood => $"в {(Smoke ? "дым" : "лес")} {MapAt(Cell)}",
+            LegEnd.Ground => $"в склон {MapAt(Cell)}",
             _ => $"{Hull!.Tag} {FaceWord(Face)}: {(Pierces ? $"пробьёт ({Level})" : "не пробьёт")}",
         };
 
         public string Log => Ends == LegEnd.Tank
-            ? $"into {Hull!.Tag} on {Cell} {Face} ({Plate}), level {Level}"
-            : $"{Ends} at {Cell}";
+            ? $"into {Hull!.Tag} on {MapAt(Cell)} {Face} ({Plate}), level {Level}"
+            : $"{Ends} at {MapAt(Cell)}";
     }
 
     private static string FaceWord(string face) => face switch

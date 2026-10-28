@@ -60,7 +60,9 @@ public sealed partial class MapEditor
         Save,
         SaveAs,
         Run,
-        RunSprites,
+        RunMatch,
+        RunHere,
+        Board,
     }
 
     private void Menu(CanvasLayer layer)
@@ -95,18 +97,24 @@ public sealed partial class MapEditor
 
         var file = new PopupMenu { Name = "File" };
         file.AddThemeFontSizeOverride("font_size", 16);
-        file.AddItem("New board...      N", (int)Item.New);
-        file.AddItem("Open...           O", (int)Item.Open);
+        file.AddItem("New board...   ctrl+N", (int)Item.New);
+        file.AddItem("Open...        ctrl+O", (int)Item.Open);
+        // the last five opened or saved (MapEditor.Document)
+        RecentMenu(file);
         file.AddSeparator();
-        file.AddItem("Save              S", (int)Item.Save);
-        file.AddItem("Save as...  shift+S", (int)Item.SaveAs);
+        // name, size, shift, crop (MapEditor.Document)
+        file.AddItem("Board...", (int)Item.Board);
         file.AddSeparator();
-        // Under the saves and separated from them, because it is one of them:
-        // Run saves first and plays what is on disk - see MapEditor.Play.
+        file.AddItem("Save           ctrl+S", (int)Item.Save);
+        file.AddItem("Save as... ctrl+shift+S", (int)Item.SaveAs);
+        file.AddSeparator();
+        // Under the saves and separated from them: Run plays what is in
+        // memory, saved or not - see MapEditor.Play.
         file.AddItem("Run              F5", (int)Item.Run);
-        // The sprite harness, the legacy line's: kept while Main lives, under
-        // the 3D run rather than instead of it.
-        file.AddItem("Run sprites  shift+F5", (int)Item.RunSprites);
+        // Two sides of five off the board's homes (Match3D.tscn)
+        file.AddItem("Run match    ctrl+F5", (int)Item.RunMatch);
+        // the tank on the cell under the pointer, or the picked one
+        file.AddItem("Run from here  shift+F5", (int)Item.RunHere);
         file.IdPressed += id => Chose((Item)id);
         bar.AddChild(file);
         MoreMenus(bar);
@@ -156,22 +164,34 @@ public sealed partial class MapEditor
                 Guarded(() =>
                 {
                     _openList.Clear();
-                    foreach (string name in BoardMap.Names)
-                        _openList.AddItem(
-                            BoardMap.Compiled.Contains(
-                                name, StringComparer.OrdinalIgnoreCase)
-                                ? name + "   (built in)" : name);
+                    // Files only: a compiled board is a reference the editor cannot
+                    // save back under its name (MapFile.Save), so listing it only
+                    // led to "Not saved". --map still opens one, for Save As.
+                    foreach (string name in MapFile.Names())
+                        _openList.AddItem(name);
                     _openDialog.PopupCentered();
                 });
                 break;
             case Item.Save:
                 Keep();
                 break;
+            case Item.Board:
+                OpenBoard();
+                break;
             case Item.Run:
                 Play();
                 break;
-            case Item.RunSprites:
-                Play(sprites: true);
+            case Item.RunMatch:
+                Play(match: true);
+                break;
+            case Item.RunHere:
+                if (StartCell() is Vector2I here)
+                    Play(from: here);
+                else
+                {
+                    _said = "pick a cell on the board to run from";
+                    Say();
+                }
                 break;
             default:
                 _saveName.Text = _edit.Name;
@@ -254,19 +274,8 @@ public sealed partial class MapEditor
             int[] picked = _openList.GetSelectedItems();
             if (picked.Length == 0)
                 return;
-            string name = _openList.GetItemText(picked[0]).Split("   ")[0];
-            try
-            {
-                _edit = MapEdit.Of(BoardMap.ByName(name));
-                Opened("opened " + name);
-            }
-            catch (Exception e)
-            {
-                // The editor is the one tool that has to survive a board it
-                // cannot load, --map-report's exemption and for its reason: it
-                // is what the author fixes it with.
-                Tell($"{name} refused:\n{e.Message}");
-            }
+            // remembered and its autosave offered (MapEditor.Document)
+            OpenNamed(_openList.GetItemText(picked[0]).Split("   ")[0]);
         };
         _layer.AddChild(_openDialog);
 
@@ -303,6 +312,39 @@ public sealed partial class MapEditor
 
         _tellDialog = new AcceptDialog { Title = "The map editor" };
         _layer.AddChild(_tellDialog);
+
+        // --- a board built into the game --------------------------------------
+        _builtInDialog = new ConfirmationDialog
+        {
+            Title = "Built-in board", OkButtonText = "Save as...",
+        };
+        _builtInDialog.Confirmed += () =>
+        {
+            Chose(Item.SaveAs);
+            // a name the save takes, rather than the one it just refused
+            _saveName.Text = _edit.Name + "_copy";
+            _saveName.SelectAll();
+        };
+        _layer.AddChild(_builtInDialog);
+
+        // the board's own panel, the autosave's question, the close button's
+        // (MapEditor.Document)
+        BoardDialog();
+        RestoreDialog();
+        QuitDialog();
+    }
+
+    private ConfirmationDialog _builtInDialog = null!;
+
+    /// <summary>The author asked to save or run a board that is part of the
+    /// build (<see cref="BoardMap.Compiled"/>): say so plainly and offer the
+    /// copy, which is the only way forward.</summary>
+    private void BuiltIn(string then)
+    {
+        _builtInDialog.DialogText =
+            $"\"{_edit.Name}\" is built into the game and can't be overwritten.\n\n"
+            + $"Save a copy under another name, then {then}.";
+        _builtInDialog.PopupCentered();
     }
 
     private void Tell(string what)
@@ -318,6 +360,9 @@ public sealed partial class MapEditor
     {
         _sown = Array.Empty<string>();
         _stood = "";
+        Unmark();
+        // every board opens with the symmetric brush off (MapEditor.Symmetry)
+        _symmetry = MapEdit.Symmetry.None;
         _dirty = false;
         _said = said;
         Settle();

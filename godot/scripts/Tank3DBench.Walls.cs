@@ -286,7 +286,7 @@ public sealed partial class Tank3DBench
         WallBurst(at, Vector3.Up, concrete: true);
         _shake.Blast(_profile.ShotShake * 0.8);
         WoodBlast(Foot(at), 0.12f, 150.0f);
-        Log.Print($"tank3d: the bomb on the capon's roof on {prop.Cell}: the concrete comes down");
+        Log.Print($"tank3d: the bomb on the capon's roof on {MapAt(prop.Cell)}: the concrete comes down");
     };
 
     /// <summary>
@@ -372,7 +372,7 @@ public sealed partial class Tank3DBench
         WallBurst(at, -new Vector3(way.X, 0.0f, way.Z), prop.Concrete);
         _shake.Blast(_profile.ShotShake * 0.35);
         WoodBlast(Foot(at), 0.08f, 110.0f);
-        Log.Print($"tank3d: round on the {(prop.Concrete ? "capon" : "wall")} {prop.Cell} {(inside ? "from inside" : "from outside")}"
+        Log.Print($"tank3d: round on the {(prop.Concrete ? "capon" : "wall")} {MapAt(prop.Cell)} {(inside ? "from inside" : "from outside")}"
                  + (through ? ", through it" : prop.Concrete ? ", spent on the concrete" : ", spent on it"));
     };
 
@@ -440,7 +440,7 @@ public sealed partial class Tank3DBench
             }
         }
         if (blown > 0)
-            Log.Print($"tank3d: {what} on {cell} brings down {blown} wall side(s) round it");
+            Log.Print($"tank3d: {what} on {MapAt(cell)} brings down {blown} wall side(s) round it");
     }
 
     /// <summary>The first standing wall on the axis <paramref name="axis"/> out
@@ -499,6 +499,17 @@ public sealed partial class Tank3DBench
         _wallMap = map;
         if (!_show.Walls || _field is null || _stage is null)
             return;
+        // A wall stands on its cell's level, on a flat hexagon; the relief
+        // has neither (BOT-11) - out of the prototype, and said so.
+        if (_relief is not null)
+        {
+            int walled = 0;
+            foreach (Vector2I _ in map.Walled())
+                walled++;
+            if (walled > 0)
+                Log.Print($"tank3d: --relief: {walled} walled cells (walls, capon, bunker) not stood - they want a flat cell");
+            return;
+        }
         BunkerProp.Sizes? bunker = !_show.Bunkers ? null : BunkerProp.ReadSizes();
         foreach (Vector2I cell in map.Walled())
         {
@@ -510,7 +521,7 @@ public sealed partial class Tank3DBench
                 continue;
             _walls.Add(prop);
             WallRestate(prop, laying: true);
-            Log.Print($"tank3d: wall on {cell}, sides {Convert.ToString(_field.SidesAt(cell), 2).PadLeft(6, '0')}, "
+            Log.Print($"tank3d: wall on {MapAt(cell)}, sides {Convert.ToString(_field.SidesAt(cell), 2).PadLeft(6, '0')}, "
                      + $"clear {prop.Clearance():F2} m inside");
             if (prop.Concrete && bunker is not null)
                 StandBunker(prop);
@@ -524,11 +535,11 @@ public sealed partial class Tank3DBench
         if (BoardDress.Bunker(this, prop, WallRadius, _pbr, out string? problem) is not { } bunker)
         {
             if (problem is not null)
-                GD.PrintErr($"tank3d: bunker on {prop.Cell}: {problem}");
+                GD.PrintErr($"tank3d: bunker on {MapAt(prop.Cell)}: {problem}");
             return;
         }
         _bunkers[prop.Cell] = bunker;
-        Log.Print($"tank3d: bunker on {prop.Cell}, {bunker.Pieces} chunks, slit to {Mathf.RoundToInt(prop.Bearing)}");
+        Log.Print($"tank3d: bunker on {MapAt(prop.Cell)}, {bunker.Pieces} chunks, slit to {Mathf.RoundToInt(prop.Bearing)}");
     }
 
     /// <summary>The tanks standing in the capon on <paramref name="cell"/> -
@@ -572,7 +583,7 @@ public sealed partial class Tank3DBench
             if ((was & (1 << bit)) == 0 || (mask & (1 << bit)) != 0)
                 continue;
             if (_field.Breach(prop.Cell, Masonry.Headings[bit]))
-                Log.Print($"tank3d: wall {prop.Cell} side {Masonry.Headings[bit]} is down");
+                Log.Print($"tank3d: wall {MapAt(prop.Cell)} side {Masonry.Headings[bit]} is down");
         }
     }
 
@@ -647,7 +658,7 @@ public sealed partial class Tank3DBench
                             continue;
                         int face = prop.Rammed(foot, dir, Mathf.Abs(_speed), box);
                         if (face >= 0)
-                            Log.Print($"tank3d: {_modelTag} rams the wall on {prop.Cell} from {chain[leg - 1]} "
+                            Log.Print($"tank3d: {_modelTag} rams the wall on {MapAt(prop.Cell)} from {MapAt(chain[leg - 1])} "
                                      + $"at {Mathf.Abs(_speed):F0} px/s: section {face}");
                     }
                 }
@@ -787,8 +798,8 @@ public sealed partial class Tank3DBench
         Heading = HeadingOf(HexWay(here, heading));
         _driveScripted = 1.0f;
         _turnScripted = 0.0f;
-        _wallNote = $"таран стены: {here} -> {_wallRamTo}";
-        Log.Print($"tank3d: {_modelTag} rams through the wall between {here} and {_wallRamTo}, heading {heading}");
+        _wallNote = $"таран стены: {MapAt(here)} -> {MapAt(_wallRamTo)}";
+        Log.Print($"tank3d: {_modelTag} rams through the wall between {MapAt(here)} and {MapAt(_wallRamTo)}, heading {heading}");
         return true;
     }
 
@@ -850,7 +861,7 @@ public sealed partial class Tank3DBench
         // Braking from full speed takes speed² / 2a; off with the throttle that
         // far short, and the hull rolls to the middle.
         if (here == _wallRamTo && left <= _speed * _speed / (2.0f * Accel))
-            WallRamEnd($"проехал на {_wallRamTo}");
+            WallRamEnd($"проехал на {MapAt(_wallRamTo)}");
     }
 
     private void WallRamEnd(string why)

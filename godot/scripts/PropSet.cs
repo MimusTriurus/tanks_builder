@@ -284,6 +284,16 @@ public sealed class PropSet
     /// walk go through here, so neither can quietly disagree with the other
     /// about what order the filesystem is read in - which is the thing the
     /// undeclared salts are pinned to.</summary>
+    /// <summary>Whether <see cref="Load"/> would find art under
+    /// <paramref name="root"/> - a family folder with a PNG in it - without
+    /// decoding any: the map editor's question (its grove is asked, never
+    /// drawn), and the load it skips was five seconds of every open.</summary>
+    public static bool Present(string root) =>
+        Directory.Exists(root)
+        && Folders(root).Any(f => PropFamily.For(f.ToLowerInvariant()) is not null
+                                  && Directory.EnumerateFiles(Path.Combine(root, f), "*.png",
+                                                              SearchOption.AllDirectories).Any());
+
     private static IEnumerable<string> Folders(string of) =>
         Directory.GetDirectories(of)
                  .Select(Path.GetFileName)

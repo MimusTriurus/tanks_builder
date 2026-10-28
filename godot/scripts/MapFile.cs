@@ -53,8 +53,17 @@ public static class MapFile
     /// says 1 and carries a letter 1 never had - mislabelled, and a build that
     /// speaks only 1 would have stopped on that letter with no word about why.
     /// The point of the bump is that build: it now refuses a file by its number.
+    ///
+    /// <b>3 is 2 with room for the look of the board</b> - rocks, the floor
+    /// under a cover, soil, roads, tree species (docs/map-format3-plan.md) -
+    /// and the last bump those take. All their blocks are named at once in
+    /// <see cref="Shape"/>, a key no block answers to is refused rather than
+    /// skipped (<see cref="Reading"/>), and a block this build does not read yet
+    /// is refused by its name (<see cref="Unread"/>). A build that knows rocks
+    /// and not roads therefore stops on the roads, instead of showing the board
+    /// without them; the blocks can land in any order and none bumps again.
     /// </summary>
-    public const int Format = 2;
+    public const int Format = 3;
 
     /// <summary>The oldest format still read - the ones between it and
     /// <see cref="Format"/> are taken up by <see cref="Upgrade"/>.</summary>
@@ -134,15 +143,11 @@ public static class MapFile
         Shape? file;
         try
         {
-            file = JsonSerializer.Deserialize<Shape>(text, new JsonSerializerOptions
-            {
-                ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true,
-            });
+            file = JsonSerializer.Deserialize<Shape>(text, Reading);
         }
         catch (JsonException e)
         {
-            throw new InvalidOperationException($"{name}: {e.Message}");
+            throw new InvalidOperationException($"{name}: {Said(e)}");
         }
 
         if (file is null)
@@ -154,6 +159,7 @@ public static class MapFile
         if (file.Ground is null || file.Ground.Length == 0)
             throw new InvalidOperationException($"{name}: no ground grid");
         Upgrade(file, name);
+        Unread(file, name);
         if (file.Ramps is null)
             throw new InvalidOperationException(
                 $"{name}: no ramp grid - a board with no ramps writes one of "
@@ -188,7 +194,148 @@ public static class MapFile
 
         return BoardMap.FromGround(name, file.Ground, file.Ramps, homes, paint,
                                    file.Height ?? true, file.Plinth ?? 0,
-                                   Walling(file.Walls, name));
+                                   Walling(file.Walls, name),
+                                   Rocking(file.Rocks, name), Climate(file.Climate, name),
+                                   file.Floor, SoilBase(file.Soil, name), file.Soil?.Cells,
+                                   Paths(file.Roads, name), Wood(file.Wood, name), file.Trees);
+    }
+
+    /// <summary>
+    /// The wood block (format 3, Ф5): a weight a species, by its key
+    /// (<see cref="Species"/>). A key nothing answers to, or a weight under
+    /// one, is refused - a species weighed nought is one not said.
+    /// </summary>
+    private static IReadOnlyDictionary<char, int>? Wood(Dictionary<string, int>? said, string name)
+    {
+        if (said is not { Count: > 0 })
+            return null;
+        var mix = new Dictionary<char, int>();
+        foreach ((string key, int weight) in said)
+        {
+            int k = Species.Of(key);
+            if (k < 0)
+                throw new InvalidOperationException(
+                    $"{name}: the wood names \"{key}\", and the species are " + string.Join(", ", Species.Keys));
+            if (weight < 1)
+                throw new InvalidOperationException(
+                    $"{name}: the wood weighs {key} at {weight}, and a weight is a whole number from 1");
+            mix[Species.All[k].Letter] = weight;
+        }
+        return mix;
+    }
+
+    /// <summary>
+    /// The roads block (format 3, Ф6): a type and a path a road. What the
+    /// path crosses and how it steps is the map's to judge
+    /// (<see cref="BoardMap.FromGround"/>, <see cref="Road.Faults"/>); here a
+    /// type nothing answers to, or a cell that is not a pair, is refused.
+    /// </summary>
+    private static IReadOnlyList<RoadPath>? Paths(RoadShape[]? said, string name)
+    {
+        if (said is null || said.Length == 0)
+            return null;
+        var roads = new List<RoadPath>();
+        foreach (RoadShape shape in said)
+        {
+            RoadType type = shape.Type is { } t
+                ? Road.Named(t) ?? throw new InvalidOperationException(
+                    $"{name}: a road is \"{t}\", and the roads are " + string.Join(", ", Road.Names))
+                : throw new InvalidOperationException($"{name}: a road says no type");
+            var cells = new List<Vector2I>();
+            foreach (int[] at in shape.Path ?? Array.Empty<int[]>())
+            {
+                if (at is not { Length: 2 })
+                    throw new InvalidOperationException(
+                        $"{name}: a {Road.Say(type)} road's cell is a pair of numbers");
+                cells.Add(new Vector2I(at[0], at[1]));
+            }
+            roads.Add(new RoadPath(type, cells));
+        }
+        return roads;
+    }
+
+    /// <summary>
+    /// The soil block's <c>base</c> (format 3, Ф4): a look a floor, by the
+    /// floor's key. That a look lies on its floor is the map's to judge
+    /// (<see cref="BoardMap.FromGround"/>); here a key or a letter that is no
+    /// word at all is refused.
+    /// </summary>
+    private static IReadOnlyDictionary<Foundation, char>? SoilBase(SoilShape? said, string name)
+    {
+        if (said?.Base is not { Count: > 0 } laid)
+            return null;
+        var looks = new Dictionary<Foundation, char>();
+        foreach ((string key, string look) in laid)
+        {
+            int k = Array.FindIndex(Soil.Floors, f => f.Key == key);
+            if (k < 0)
+                throw new InvalidOperationException(
+                    $"{name}: the soil's base names \"{key}\", and its floors are "
+                    + string.Join(", ", Soil.Floors.Select(f => f.Key)));
+            if (look.Length != 1)
+                throw new InvalidOperationException(
+                    $"{name}: the soil's base lays \"{look}\" on {key}, and a look is one letter");
+            looks[Soil.Floors[k].Floor] = look[0];
+        }
+        return looks;
+    }
+
+    /// <summary>
+    /// The rocks block (format 3, docs/rocks-plan.md С3): a note a rock, at
+    /// any of its cells. Which cell is a rock and that no rock has two notes is
+    /// the map's to judge (<see cref="BoardMap.FromGround"/>), as for the
+    /// walls; here a name or a figure that means nothing is refused rather
+    /// than read as a crag.
+    /// </summary>
+    private static IReadOnlyDictionary<Vector2I, RockNote>? Rocking(RockShape[]? said, string name)
+    {
+        if (said is null || said.Length == 0)
+            return null;
+        var rocking = new Dictionary<Vector2I, RockNote>();
+        foreach (RockShape shape in said)
+        {
+            if (shape.At is not { Length: 2 })
+                throw new InvalidOperationException(
+                    $"{name}: a rock's at is a pair of numbers, and one of them "
+                    + $"has {shape.At?.Length ?? 0}");
+            var cell = new Vector2I(shape.At[0], shape.At[1]);
+            if (rocking.ContainsKey(cell))
+                throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) has two rock notes, and the "
+                    + "second would win silently");
+            RockType? type = null;
+            if (shape.Type is { } t)
+                type = RockNote.TypeNamed(t) ?? throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) is a \"{t}\", and a rock is a "
+                    + "crag, a mesa, a yardang or a moutonnee");
+            string? palette = null;
+            if (shape.Palette is { } p)
+                palette = RockPalette.Named(p.ToLowerInvariant())?.Name
+                          ?? throw new InvalidOperationException(
+                              $"{name}: ({cell.X},{cell.Y}) wears \"{p}\", and the "
+                              + "palettes are " + string.Join(", ", RockPalette.Names));
+            if (shape.Preset is int preset && (preset < 1 || preset > RockNote.Presets))
+                throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) asks for preset {preset}, and a "
+                    + $"rock has 1 to {RockNote.Presets}");
+            rocking[cell] = new RockNote
+            {
+                Type = type, Palette = palette, Preset = shape.Preset, Seed = shape.Seed,
+            };
+        }
+        return rocking;
+    }
+
+    /// <summary>The climate block: two headings, each said or silent.</summary>
+    private static RockClimate Climate(ClimateShape? said, string name)
+    {
+        if (said is null)
+            return default;
+        foreach ((string what, float? deg) in new[] { ("wind", said.Wind), ("ice", said.Ice) })
+            if (deg is float d && (d < -360.0f || d > 360.0f || float.IsNaN(d)))
+                throw new InvalidOperationException(
+                    $"{name}: the {what} runs at {d}, and a heading is -360 to 360 degrees");
+        return new RockClimate(said.Wind, said.Ice);
     }
 
     /// <summary>
@@ -211,6 +358,67 @@ public static class MapFile
             }
             file.Format = 2;
         }
+        if (file.Format == 2)
+        {
+            // 2 -> 3: nothing moves. A 2 that carries a block of 3 is not a 2.
+            if (Blocks(file).FirstOrDefault(b => b.Said) is { Key: { } key })
+                throw new InvalidOperationException(
+                    $"{name}: \"{key}\" came in format 3 and the file says 2");
+            file.Format = 3;
+        }
+    }
+
+    /// <summary>
+    /// How every map, draft and stamp is read.
+    ///
+    /// <b>A key no field answers to is refused, and that is what format 3 is
+    /// for.</b> The serializer's default skips it, so a build that does not
+    /// know a block would read the board without it and nobody would see the
+    /// difference - a road missing from the board is not an error anywhere
+    /// else. The refusal names the key.
+    /// </summary>
+    private static readonly JsonSerializerOptions Reading = new()
+    {
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    };
+
+    /// <summary>What the serializer refused, in the file's words: a stray key
+    /// by its path (<c>$.roadz</c>), anything else as the serializer says
+    /// it.</summary>
+    private static string Said(JsonException e) =>
+        e.Message.Contains("could not be mapped") && e.Path is { Length: > 0 } at
+            ? $"{at}: no such field in a map file"
+            : e.Message;
+
+    /// <summary>The blocks format 3 brought, by the key the file writes:
+    /// whether this file said each, and whether this build reads it.</summary>
+    private static IEnumerable<(string Key, bool Said, bool Read)> Blocks(Shape file)
+    {
+        yield return ("floor", file.Floor is not null, true);
+        yield return ("climate", file.Climate is not null, true);
+        yield return ("rocks", file.Rocks is not null, true);
+        yield return ("soil", file.Soil is not null, true);
+        yield return ("roads", file.Roads is not null, true);
+        yield return ("wood", file.Wood is not null, true);
+        yield return ("trees", file.Trees is not null, true);
+    }
+
+    /// <summary>
+    /// A block of format 3 this build does not read yet, refused by name.
+    ///
+    /// Each came off this list in the stage that reads it
+    /// (docs/map-format3-plan.md, Ф2-Ф6); since Ф5 every block is read, and
+    /// the check stays for the next block a format adds. A file that says a
+    /// block the build does not read is a board it would show wrong, so it is
+    /// not shown at all.
+    /// </summary>
+    private static void Unread(Shape file, string name)
+    {
+        if (Blocks(file).FirstOrDefault(b => b.Said && !b.Read) is { Key: { } key })
+            throw new InvalidOperationException(
+                $"{name}: \"{key}\" is a block of format 3 this build does not read yet");
     }
 
     /// <summary>
@@ -351,11 +559,32 @@ public static class MapFile
             if (!home.TryGetProperty("at", out JsonElement at))
                 throw new InvalidOperationException(
                     $"{name}: a home written as an object needs an \"at\"");
+            // read by hand, so Reading's refusal of a stray key is said here
+            foreach (JsonProperty field in home.EnumerateObject())
+                if (field.Name is not ("at" or "class" or "side" or "facing"))
+                    throw new InvalidOperationException(
+                        $"{name}: a home has no field \"{field.Name}\"");
             string? crew = home.TryGetProperty("class", out JsonElement said_)
                            && said_.ValueKind == JsonValueKind.String
                 ? said_.GetString() : null;
+            // a match's side and the edge it starts facing; the values are
+            // judged with the class, in BoardMap.MustCrew
+            string? side = home.TryGetProperty("side", out JsonElement team)
+                           && team.ValueKind == JsonValueKind.String
+                ? team.GetString()?.ToLowerInvariant() : null;
+            int? facing = null;
+            if (home.TryGetProperty("facing", out JsonElement face))
+            {
+                if (face.ValueKind != JsonValueKind.Number || !face.TryGetInt32(out int f))
+                    throw new InvalidOperationException(
+                        $"{name}: a home's \"facing\" is an edge heading, a number, "
+                        + $"and this is {face.ValueKind}");
+                facing = f;
+            }
             homes.Add(new Parking(Pair(at, name),
-                                  crew is { Length: > 0 } ? crew : null));
+                                  crew is { Length: > 0 } ? crew : null,
+                                  side is { Length: > 0 } ? side : null,
+                                  facing));
         }
         return homes;
     }
@@ -369,6 +598,23 @@ public static class MapFile
                 + (pair.ValueKind == JsonValueKind.Array
                     ? pair.GetArrayLength().ToString() : pair.ValueKind.ToString()));
         return new Vector2I(pair[0].GetInt32(), pair[1].GetInt32());
+    }
+
+    /// <summary>One home as the file writes it: the bare pair when it said
+    /// nothing else - see <see cref="Parkings"/>, where both shapes are argued -
+    /// else an object with only the fields it said.</summary>
+    private static string Home(Parking p)
+    {
+        if (p.Plain)
+            return $"[{p.Cell.X}, {p.Cell.Y}]";
+        var said = new List<string> { $"\"at\": [{p.Cell.X}, {p.Cell.Y}]" };
+        if (p.Class is { Length: > 0 } tag)
+            said.Add($"\"class\": {Quote(tag)}");
+        if (p.Side is { Length: > 0 } side)
+            said.Add($"\"side\": {Quote(side)}");
+        if (p.Facing is int facing)
+            said.Add($"\"facing\": {facing}");
+        return "{ " + string.Join(", ", said) + " }";
     }
 
     /// <summary>
@@ -445,11 +691,11 @@ public static class MapFile
         // against: on a board standing a level up, plain ground is at level 1
         // and writing its height out would come back as a hill. See
         // BoardMap.Plinth, which exists because the round trip found this.
-        char? letter = Letter(map.Ground[at], map.Over[at],
-                              map.Levels[at] - map.Plinth,
-                              map.Water[at], map.Cliffs[at]);
-        if (letter is char found)
-            return found;
+        // the floor grid says what this letter cannot (Encode, Floors)
+        // the floor under any road: a road is the roads block's, not a letter
+        if (Encode(map.UnpavedAt(at), map.Over[at], map.Levels[at] - map.Plinth,
+                   map.Water[at], map.Cliffs[at]) is { } found)
+            return found.Letter;
         throw new InvalidOperationException(
             $"{map.Name}: ({cell.X},{cell.Y}) is "
             + $"{map.Ground[at]}/{map.Over[at]} at level "
@@ -568,6 +814,91 @@ public static class MapFile
         return null;
     }
 
+    // --- the floor under a cover --------------------------------------------
+
+    /// <summary>
+    /// A cell as a letter and, where the letter cannot say its floor, the
+    /// format-3 <c>floor</c> grid's mark - or null where neither can
+    /// (docs/map-format3-plan.md, Ф3).
+    ///
+    /// <b>One way to say each cell.</b> A cell the alphabet has a letter for
+    /// takes it and leaves the floor grid a dot - plain sand is <c>s</c> in the
+    /// ground grid, as it always was. Only a cell the alphabet has no letter
+    /// for - sand or mud under a wood, a trench, a mine, on a hill or in a
+    /// hollow - is written as the solid letter with <c>s</c> or <c>u</c> under
+    /// it. Never under water, a rock or a wall: there the floor is said.
+    /// </summary>
+    public static (char Letter, char Under)? Encode(Foundation floor, Cover over, int level,
+                                                    bool water = false, bool cliff = false)
+    {
+        if (Letter(floor, over, level, water, cliff) is char own)
+            return (own, BoardMap.Plain);
+        if (UnderOf(floor) is char under && !water && !cliff && over != Cover.Walls
+            && Letter(Foundation.Solid, over, level) is char solid)
+            return (solid, under);
+        return null;
+    }
+
+    /// <summary>The floor grid's mark for a floor that may lie under a
+    /// letter: the floor's own letter, so the grid reads as the picture it
+    /// is.</summary>
+    private static char? UnderOf(Foundation floor) => floor switch
+    {
+        Foundation.Sand => BoardMap.Sand,
+        Foundation.Mud => BoardMap.Mud,
+        _ => null,
+    };
+
+    /// <summary>What a floor-grid mark lays, or null for one it does not
+    /// know.</summary>
+    public static Foundation? FloorUnder(char mark) => mark switch
+    {
+        BoardMap.Sand => Foundation.Sand,
+        BoardMap.Mud => Foundation.Mud,
+        _ => null,
+    };
+
+    /// <summary>Whether a letter leaves its floor for the floor grid to say:
+    /// solid ground with something on it or off the datum - a wood, a trench,
+    /// a mine, a hill, a hollow - and no water, rock or wall.</summary>
+    public static bool TakesUnder(char letter) =>
+        letter != BoardMap.Plain && Of(letter) is { Floor: Foundation.Solid, Water: false,
+                                                    Cliff: false, Wall: false };
+
+    /// <summary>A letter's glyph with the floor the grid laid under it.</summary>
+    public static Glyph Under(Glyph glyph, char mark) =>
+        FloorUnder(mark) is Foundation floor
+            ? new Glyph(glyph.Letter, floor, glyph.Over, glyph.Level, glyph.Water,
+                        glyph.Cliff, glyph.Wall, glyph.Wood)
+            : glyph;
+
+    /// <summary>The floor grid of a board, or null when no cell needs one -
+    /// the file then writes no block, as format 2 did.</summary>
+    public static string[]? Floors(BoardMap map)
+    {
+        var rows = new string[map.Rows];
+        bool any = false;
+        for (int r = 0; r < map.Rows; r++)
+        {
+            var row = new StringBuilder(map.Columns);
+            for (int q = 0; q < map.Columns; q++)
+            {
+                var cell = new Vector2I(q, r);
+                char mark = BoardMap.Plain;
+                if (map.OnBoard(cell))
+                {
+                    int at = map.At(cell);
+                    mark = Encode(map.UnpavedAt(at), map.Over[at], map.Levels[at] - map.Plinth,
+                                  map.Water[at], map.Cliffs[at])?.Under ?? BoardMap.Plain;
+                }
+                any |= mark != BoardMap.Plain;
+                row.Append(mark);
+            }
+            rows[r] = row.ToString();
+        }
+        return any ? rows : null;
+    }
+
     public static string[] Ramps(BoardMap map)
     {
         var rows = new string[map.Rows];
@@ -606,11 +937,7 @@ public static class MapFile
         // A parking that named nobody is written as the bare pair it always
         // was - see Parkings, where both shapes are argued.
         text.Append("  \"homes\": ["
-                    + string.Join(", ", map.Parked.Select(
-                        p => p.Class is { Length: > 0 } tag
-                            ? $"{{ \"at\": [{p.Cell.X}, {p.Cell.Y}], "
-                              + $"\"class\": {Quote(tag)} }}"
-                            : $"[{p.Cell.X}, {p.Cell.Y}]"))
+                    + string.Join(", ", map.Parked.Select(Home))
                     + "],\n");
         text.Append("\n");
         text.Append("  \"ground\": [\n");
@@ -619,6 +946,7 @@ public static class MapFile
         text.Append("  \"ramps\": [\n");
         text.Append(string.Join(",\n", ramps.Select(r => "    " + Quote(r))));
         text.Append("\n  ]");
+        Grid(text, "floor", Floors(map));
         // The masonry last, under the picture it annotates, and only for the
         // cells that said something - see Masonry.Plain. A line per walled cell
         // saying the ring its letter already says would be a block that grows
@@ -633,8 +961,127 @@ public static class MapFile
                 said.Select(c => "    " + Line(c, map.Walling[c]))));
             text.Append("\n  ]");
         }
+        Look(text, map.Rocking, map.Climate, map.SoilBase,
+             map.SoilCells is { } cells ? Rows(cells, map.Columns, map.Rows) : null);
+        Paved(text, map.Roads);
+        Wooded(text, map.WoodMix, map.TreeCells is { } trees ? Rows(trees, map.Columns, map.Rows) : null);
         text.Append("\n}\n");
         return text.ToString();
+    }
+
+    /// <summary>
+    /// Format 3's look blocks under the picture and the masonry, each only
+    /// when it said something: a board that never named a rock or a wind
+    /// writes as it did in format 2, bar the number.
+    /// </summary>
+    private static void Look(StringBuilder text, IReadOnlyDictionary<Vector2I, RockNote> rocking,
+                             RockClimate climate, IReadOnlyDictionary<Foundation, char> soilBase,
+                             string[]? soilCells)
+    {
+        Soiled(text, soilBase, soilCells);
+        Rocked(text, rocking, climate);
+    }
+
+    /// <summary>The wood block on one line, in <see cref="Species.All"/>'s
+    /// order, and the trees grid under it - each only when said.</summary>
+    private static void Wooded(StringBuilder text, IReadOnlyDictionary<char, int>? mix, string[]? cells)
+    {
+        if (mix is { Count: > 0 })
+            text.Append(",\n\n  \"wood\": { " + string.Join(", ", Species.All
+                .Where(s => mix.ContainsKey(s.Letter))
+                .Select(s => $"\"{s.Key}\": {mix[s.Letter]}")) + " }");
+        if (cells is not null)
+            text.Append((mix is { Count: > 0 } ? ",\n" : ",\n\n") + "  \"trees\": [\n"
+                        + string.Join(",\n", cells.Select(r => "    " + Quote(r))) + "\n  ]");
+    }
+
+    /// <summary>The roads block, a road a line, in the order drawn: a fork
+    /// after the road it leaves.</summary>
+    private static void Paved(StringBuilder text, IReadOnlyList<RoadPath> roads)
+    {
+        if (roads.Count == 0)
+            return;
+        text.Append(",\n\n  \"roads\": [\n" + string.Join(",\n", roads.Select(r =>
+            $"    {{ \"type\": {Quote(Road.Say(r.Type))}, \"path\": ["
+            + string.Join(", ", r.Cells.Select(c => $"[{c.X}, {c.Y}]")) + "] }")) + "\n  ]");
+    }
+
+    /// <summary>A board's grid of one char a cell as rows, or null when every
+    /// cell is <see cref="Soil.As"/>.</summary>
+    public static string[]? Rows(char[] cells, int columns, int rows)
+    {
+        if (Array.TrueForAll(cells, c => c == Soil.As))
+            return null;
+        var said = new string[rows];
+        for (int r = 0; r < rows; r++)
+            said[r] = new string(cells, r * columns, columns);
+        return said;
+    }
+
+    /// <summary>The soil block: the base on one line, the cells as a grid.</summary>
+    private static void Soiled(StringBuilder text, IReadOnlyDictionary<Foundation, char> laid,
+                               string[]? cells)
+    {
+        if (laid.Count == 0 && cells is null)
+            return;
+        var parts = new List<string>();
+        if (laid.Count > 0)
+            parts.Add("    \"base\": { " + string.Join(", ", Soil.Floors
+                .Where(f => laid.ContainsKey(f.Floor))
+                .Select(f => $"\"{f.Key}\": \"{laid[f.Floor]}\"")) + " }");
+        if (cells is not null)
+            parts.Add("    \"cells\": [\n"
+                      + string.Join(",\n", cells.Select(r => "      " + Quote(r))) + "\n    ]");
+        text.Append(",\n\n  \"soil\": {\n" + string.Join(",\n", parts) + "\n  }");
+    }
+
+    private static void Rocked(StringBuilder text, IReadOnlyDictionary<Vector2I, RockNote> rocking,
+                               RockClimate climate)
+    {
+        if (!climate.Plain)
+        {
+            var parts = new List<string>();
+            if (climate.SaidWind is float wind)
+                parts.Add($"\"wind\": {Number(wind)}");
+            if (climate.SaidIce is float ice)
+                parts.Add($"\"ice\": {Number(ice)}");
+            text.Append(",\n\n  \"climate\": { " + string.Join(", ", parts) + " }");
+        }
+        var notes = rocking.Where(kv => !kv.Value.Plain)
+                           .OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X).ToList();
+        if (notes.Count > 0)
+            text.Append(",\n\n  \"rocks\": [\n"
+                        + string.Join(",\n", notes.Select(kv => "    " + Line(kv.Key, kv.Value)))
+                        + "\n  ]");
+    }
+
+    /// <summary>A grid under the ramps, in the picture's own layout, when the
+    /// board has one to say.</summary>
+    private static void Grid(StringBuilder text, string key, string[]? rows)
+    {
+        if (rows is null)
+            return;
+        text.Append($",\n  \"{key}\": [\n");
+        text.Append(string.Join(",\n", rows.Select(r => "    " + Quote(r))));
+        text.Append("\n  ]");
+    }
+
+    private static string Number(float x) =>
+        x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>One rock's note on one line, only the fields it said.</summary>
+    private static string Line(Vector2I cell, RockNote note)
+    {
+        var parts = new List<string> { $"\"at\": [{cell.X}, {cell.Y}]" };
+        if (note.Type is { } type)
+            parts.Add($"\"type\": {Quote(RockNote.Say(type))}");
+        if (note.Palette is { } palette)
+            parts.Add($"\"palette\": {Quote(palette)}");
+        if (note.Preset is int preset)
+            parts.Add($"\"preset\": {preset}");
+        if (note.Seed is int seed)
+            parts.Add($"\"seed\": {seed}");
+        return "{ " + string.Join(", ", parts) + " }";
     }
 
     /// <summary>Write a board to <c>maps/</c> and return the path it went to.
@@ -716,6 +1163,210 @@ public static class MapFile
     private static string Quote(string raw) =>
         "\"" + raw.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
+    // --- drafts: the autosave ------------------------------------------------
+
+    /// <summary>
+    /// A board being drawn, as the file it would be - written from the letters,
+    /// not from a built board, because a draft is usually illegal and
+    /// <see cref="BoardMap.FromGround"/> would refuse it. The editor's
+    /// autosave (stage 4 of docs/editor-ux-plan.md), kept in
+    /// <c>user://autosave/</c> and never in <see cref="Dir"/>: a half-drawn
+    /// board there would break every scene that reads the folder.
+    /// </summary>
+    public static string WriteDraft(MapEdit edit)
+    {
+        var text = new StringBuilder();
+        text.Append("{\n");
+        text.Append($"  \"format\": {Format},\n");
+        text.Append($"  \"name\": {Quote(edit.Name)},\n");
+        text.Append($"  \"size\": [{edit.Columns}, {edit.Rows}],\n");
+        if (edit.Paint is { Length: > 0 } paint)
+            text.Append($"  \"paint\": {Quote(paint)},\n");
+        text.Append($"  \"height\": {(edit.Height ? "true" : "false")},\n");
+        if (edit.Plinth != 0)
+            text.Append($"  \"plinth\": {edit.Plinth},\n");
+        text.Append("  \"homes\": [" + string.Join(", ", edit.Homes.Select(Home)) + "],\n\n");
+        text.Append("  \"ground\": [\n");
+        text.Append(string.Join(",\n", edit.Ground().Select(r => "    " + Quote(r))));
+        text.Append("\n  ],\n");
+        text.Append("  \"ramps\": [\n");
+        text.Append(string.Join(",\n", edit.Ramps().Select(r => "    " + Quote(r))));
+        text.Append("\n  ]");
+        Grid(text, "floor", edit.Floors());
+        var said = edit.Walled().Where(c => edit.MasonryAt(c) is { Plain: false }).ToList();
+        if (said.Count > 0)
+            text.Append(",\n\n  \"walls\": [\n"
+                        + string.Join(",\n", said.Select(c => "    " + Line(c, edit.MasonryAt(c)!)))
+                        + "\n  ]");
+        Look(text, edit.Rocking(), edit.Climate, edit.SoilBase, edit.SoilRows());
+        Paved(text, edit.Roads);
+        Wooded(text, edit.Wood, edit.TreeRows());
+        text.Append("\n}\n");
+        return text.ToString();
+    }
+
+    /// <summary>A draft back off the disk (<see cref="WriteDraft"/>), letters
+    /// checked and nothing else.</summary>
+    public static MapEdit ReadDraft(string path)
+    {
+        string name = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+        Shape? file;
+        try
+        {
+            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), Reading);
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException($"{name}: {Said(e)}");
+        }
+        if (file?.Ground is not { Length: > 0 } ground)
+            throw new InvalidOperationException($"{name}: no ground grid");
+        Unread(file, name);
+        return MapEdit.Raw(file.Name is { Length: > 0 } said ? said : name, ground,
+                           file.Ramps ?? Array.Empty<string>(), Parkings(file.Homes, name),
+                           Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
+                           file.Height ?? true, file.Plinth ?? 0,
+                           Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor,
+                           SoilBase(file.Soil, name), file.Soil?.Cells, Paths(file.Roads, name),
+                           Wood(file.Wood, name), file.Trees);
+    }
+
+    // --- stamps ----------------------------------------------------------------
+
+    /// <summary>
+    /// Where the editor's stamps live: <c>maps/stamps/</c>, beside the maps
+    /// and out of their way - <see cref="Names"/> reads the top of
+    /// <see cref="Dir"/> only, so no scene and no self test ever opens one
+    /// as a board (stage 2 of docs/editor-ux-plan.md).
+    /// </summary>
+    public static string StampDir => Path.Combine(Dir, "stamps");
+
+    public static IReadOnlyList<string> StampNames()
+    {
+        if (!Directory.Exists(StampDir))
+            return Array.Empty<string>();
+        return Directory.GetFiles(StampDir, "*" + Extension)
+            .Select(f => Path.GetFileNameWithoutExtension(f).ToLowerInvariant())
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// A piece of a board as a file: the map's own shape - ground, ramps,
+    /// homes, walls - cut to the piece's box, with <c>-</c> where the piece has
+    /// no cell, plus the cell it is held by.
+    ///
+    /// <b>Moved to the box by an even number of columns</b>, so its odd
+    /// columns stay odd and the drawing in the file is the hexes as they
+    /// touched (<see cref="MapEdit.Shift"/>). <b>Not a board</b>: nothing here
+    /// goes through <see cref="BoardMap.FromGround"/>, because a piece has no
+    /// homes to audit and ramps whose neighbours it never took.
+    /// </summary>
+    public static string SaveStamp(string name, MapEdit.Piece piece)
+    {
+        if (piece.Cells.Count == 0)
+            throw new InvalidOperationException("an empty piece is not a stamp");
+        int left = piece.Cells.Min(b => b.Cell.X), top = piece.Cells.Min(b => b.Cell.Y);
+        var by = new Vector2I(left - (left & 1), top);
+        int columns = piece.Cells.Max(b => b.Cell.X) - by.X + 1;
+        int rows = piece.Cells.Max(b => b.Cell.Y) - by.Y + 1;
+        var ground = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string(BoardMap.Off, columns))).ToArray();
+        var ramps = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string('.', columns))).ToArray();
+        // the floor under a cover is the cell's rule, so a stamp keeps it
+        var under = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string('.', columns))).ToArray();
+        var walls = new List<string>();
+        foreach (MapEdit.Bit bit in piece.Cells)
+        {
+            Vector2I at = bit.Cell - by;
+            ground[at.Y][at.X] = bit.Letter;
+            under[at.Y][at.X] = bit.Under;
+            if (bit.Ramp)
+                ramps[at.Y][at.X] = 'r';
+            if (bit.Wall is { Plain: false } wall)
+                walls.Add("    " + Line(at, wall));
+        }
+        Vector2I anchor = piece.Anchor - by;
+        var text = new StringBuilder();
+        text.Append("{\n");
+        text.Append($"  \"format\": {Format},\n");
+        text.Append($"  \"name\": {Quote(name)},\n");
+        text.Append($"  \"size\": [{columns}, {rows}],\n");
+        text.Append($"  \"anchor\": [{anchor.X}, {anchor.Y}],\n");
+        text.Append("  \"homes\": ["
+                    + string.Join(", ", piece.Homes.Select(h => Home(h with { Cell = h.Cell - by })))
+                    + "],\n\n");
+        text.Append("  \"ground\": [\n");
+        text.Append(string.Join(",\n", ground.Select(r => "    " + Quote(r.ToString()))));
+        text.Append("\n  ],\n");
+        text.Append("  \"ramps\": [\n");
+        text.Append(string.Join(",\n", ramps.Select(r => "    " + Quote(r.ToString()))));
+        text.Append("\n  ]");
+        Grid(text, "floor", piece.Cells.Any(b => b.Under != BoardMap.Plain)
+            ? under.Select(r => r.ToString()).ToArray() : null);
+        if (walls.Count > 0)
+            text.Append(",\n\n  \"walls\": [\n" + string.Join(",\n", walls) + "\n  ]");
+        text.Append("\n}\n");
+
+        Directory.CreateDirectory(StampDir);
+        string path = Path.Combine(StampDir, name + Extension);
+        File.WriteAllText(path, text.ToString());
+        // read back, as a map is, before the author is told it was kept
+        LoadStamp(name);
+        return path;
+    }
+
+    /// <summary>A stamp off the disk, held where it was saved held.</summary>
+    public static MapEdit.Piece LoadStamp(string name)
+    {
+        string path = Path.Combine(StampDir, name.Trim().ToLowerInvariant() + Extension);
+        if (!File.Exists(path))
+            throw new InvalidOperationException($"no stamp at {path}");
+        Shape? file;
+        try
+        {
+            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), Reading);
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException($"stamp {name}: {Said(e)}");
+        }
+        if (file?.Ground is not { Length: > 0 } ground)
+            throw new InvalidOperationException($"stamp {name}: no ground grid");
+        Unread(file, "stamp " + name);
+        // a piece carries cells, not a board's look: a note in one would be
+        // read and dropped
+        if (file.Rocks is not null || file.Climate is not null || file.Soil is not null
+            || file.Roads is not null || file.Wood is not null || file.Trees is not null)
+            throw new InvalidOperationException(
+                $"stamp {name}: a stamp carries no rocks, climate, soil, roads, wood or trees block");
+        string[] ramps = file.Ramps ?? Array.Empty<string>();
+        IReadOnlyDictionary<Vector2I, Masonry> walling =
+            Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
+        var bits = new List<MapEdit.Bit>();
+        for (int r = 0; r < ground.Length; r++)
+        for (int q = 0; q < ground[r].Length; q++)
+        {
+            char letter = ground[r][q];
+            if (letter == BoardMap.Off)
+                continue;
+            if (Of(letter) is null)
+                throw new InvalidOperationException(
+                    $"stamp {name}: ({q},{r}) is '{letter}', which no map letter is");
+            var cell = new Vector2I(q, r);
+            bool ramp = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
+            char mark = file.Floor is { } fl && r < fl.Length && q < fl[r].Length
+                        && FloorUnder(fl[r][q]) is not null && TakesUnder(letter)
+                ? fl[r][q] : BoardMap.Plain;
+            bits.Add(new MapEdit.Bit(cell, letter, ramp,
+                                     walling.TryGetValue(cell, out Masonry? wall) ? wall : null,
+                                     Under: mark));
+        }
+        if (bits.Count == 0)
+            throw new InvalidOperationException($"stamp {name}: not one cell on it");
+        Vector2I anchor = file.Anchor is { Length: 2 } a ? new Vector2I(a[0], a[1]) : bits[0].Cell;
+        return new MapEdit.Piece(bits, Parkings(file.Homes, "stamp " + name), anchor);
+    }
+
     // --- file shape ----------------------------------------------------------
 
     private sealed class Shape
@@ -730,6 +1381,46 @@ public static class MapFile
         [JsonPropertyName("ground")] public string[]? Ground { get; set; }
         [JsonPropertyName("ramps")] public string[]? Ramps { get; set; }
         [JsonPropertyName("walls")] public WallShape[]? Walls { get; set; }
+        /// <summary>A stamp's only: the cell it is held by (SaveStamp).</summary>
+        [JsonPropertyName("anchor")] public int[]? Anchor { get; set; }
+
+        // format 3 (docs/map-format3-plan.md): named so that a file saying one
+        // is refused by Unread rather than read without it; each gets its own
+        // shape in the stage that reads it
+        [JsonPropertyName("floor")] public string[]? Floor { get; set; }
+        [JsonPropertyName("climate")] public ClimateShape? Climate { get; set; }
+        [JsonPropertyName("rocks")] public RockShape[]? Rocks { get; set; }
+        [JsonPropertyName("soil")] public SoilShape? Soil { get; set; }
+        [JsonPropertyName("roads")] public RoadShape[]? Roads { get; set; }
+        [JsonPropertyName("wood")] public Dictionary<string, int>? Wood { get; set; }
+        [JsonPropertyName("trees")] public string[]? Trees { get; set; }
+    }
+
+    private sealed class RockShape
+    {
+        [JsonPropertyName("at")] public int[]? At { get; set; }
+        [JsonPropertyName("type")] public string? Type { get; set; }
+        [JsonPropertyName("palette")] public string? Palette { get; set; }
+        [JsonPropertyName("preset")] public int? Preset { get; set; }
+        [JsonPropertyName("seed")] public int? Seed { get; set; }
+    }
+
+    private sealed class RoadShape
+    {
+        [JsonPropertyName("type")] public string? Type { get; set; }
+        [JsonPropertyName("path")] public int[][]? Path { get; set; }
+    }
+
+    private sealed class SoilShape
+    {
+        [JsonPropertyName("base")] public Dictionary<string, string>? Base { get; set; }
+        [JsonPropertyName("cells")] public string[]? Cells { get; set; }
+    }
+
+    private sealed class ClimateShape
+    {
+        [JsonPropertyName("wind")] public float? Wind { get; set; }
+        [JsonPropertyName("ice")] public float? Ice { get; set; }
     }
 
     private sealed class WallShape

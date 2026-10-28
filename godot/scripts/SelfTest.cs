@@ -17592,10 +17592,15 @@ public static class SelfTest
                 deepWalk > fordWalk * 4.0,
                 $"x{deepWalk / fordWalk:F1} - a ford shows the stones it runs "
                 + "over, and a hollow you would drown in does not show its floor");
+            // The fork is one share, sunk: the cell's slot on the prisms, and on
+            // the relief each vertex's own, smooth across the hex edge
+            // (Stage3D.DeepShare, 2026-10-26) - and both reads of it, the light's
+            // length and the body's colour, take that one share.
             Check("and the fork is per cell, read where the light is spent",
                 Stage3D.DeepShader.Contains("uniform float sink[{0}]")
-                && Stage3D.DeepShader.Contains("mix(clarity, murk, sink[")
-                && Stage3D.DeepShader.Contains("mix(deep, silt, sink["),
+                && Stage3D.DeepShader.Contains("float sunk = mix(sink[int(UV2.x + 0.5)], UV2.y, sink_smooth)")
+                && Stage3D.DeepShader.Contains("mix(clarity, murk, sunk)")
+                && Stage3D.DeepShader.Contains("mix(deep, silt, sunk)"),
                 "one uniform per water cell, written by BuildWater beside the "
                 + "shore mask - the surface could see everything about a cell but "
                 + "how deep it was");
@@ -17603,11 +17608,14 @@ public static class SelfTest
             // picture in this bench was signed off on the shallow board; a change
             // that moved it would be re-judging all of them under cover of a new
             // feature. Both forks end at the old constant when the cell is not
-            // deep, so the old expression is what a ford still evaluates.
+            // deep, so the old expression is what a ford still evaluates - and
+            // the per-vertex share is off unless the relief turns it on, so the
+            // prisms read the slot exactly as before.
             Check("a ford evaluates exactly what it evaluated before",
                 Mathf.IsEqualApprox(Mathf.Lerp(fordClear, deepClear, 0.0f),
                                     fordClear)
-                && Stage3D.DeepShader.Contains("mix(clarity, murk, sink[")
+                && Stage3D.DeepShader.Contains("mix(clarity, murk, sunk)")
+                && Stage3D.DeepShader.Contains("uniform float sink_smooth = 0.0;")
                 && !Stage3D.DeepShader.Contains("uniform float clarity = 26.0"),
                 "measured as well: the all-shallow board is bit for bit what it "
                 + "was, 0 pixels changed");
@@ -20225,8 +20233,10 @@ public static class SelfTest
             $"deep {slots.WaterRiseAt(new Vector2I(4, 3)):F1}, "
             + $"ford {slots.WaterRiseAt(new Vector2I(1, 3)):F1}, lift {slots.Lift:F1}");
 
-        // And a ford beside deep water in one hollow is two surfaces, which the
-        // waterfall guard refuses in the same breath as two levels.
+        // And a ford beside deep water in one hollow is one body: the surface is
+        // the body's, the deep water's, and the ford's bed rises under it to stay
+        // a ford (MapRules.Brimmed, HexField.Shelf; 2026-10-26). It used to be
+        // refused as a step in the surface.
         {
             var mixed = new MapRules.Draft
             {
@@ -20238,12 +20248,14 @@ public static class SelfTest
                 Cliffs = new bool[3],
             };
             List<MapRules.Fault> step = MapRules.StepFaults(mixed);
-            Check("a ford beside deep water is a step in the surface",
-                step.Count > 0 && step.All(f => f.Rule == "water.step"),
-                string.Join("; ", step.Select(f => f.Brief)));
-            mixed.Ground[0] = Foundation.Deep;
-            Check("and two deep cells side by side are one surface",
-                MapRules.StepFaults(mixed).Count == 0,
+            bool[] brim = MapRules.Brimmed(mixed);
+            Check("a ford beside deep water is one body at the deep water's surface",
+                step.Count == 0 && brim[0] && brim[1] && !brim[2],
+                string.Join("; ", step.Select(f => f.Brief))
+                + $" brim {string.Join(",", brim)}");
+            mixed.Levels[0] = 0;
+            Check("and two levels of water side by side are still a waterfall",
+                MapRules.StepFaults(mixed).Any(f => f.Rule == "water.step"),
                 string.Join("; ", MapRules.StepFaults(mixed).Select(f => f.Brief)));
         }
 
@@ -21759,6 +21771,167 @@ public static class SelfTest
                 Refusal(good.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test")
                     .Length == 0,
                 Refusal(good.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test"));
+
+            // Format 3 (docs/map-format3-plan.md, Ф1) is 2 with room for the
+            // look of the board, and its point is the refusals: a key nothing
+            // answers to, a block of 3 under a 2, and a block of 3 this build
+            // does not read yet - each would otherwise be a board shown
+            // without what the file said.
+            string With(string text, string field) =>
+                text[..text.LastIndexOf('}')].TrimEnd() + ",\n  " + field + "\n}\n";
+            string second = good.Replace($"\"format\": {MapFile.Format}", "\"format\": 2");
+            Check("a format-2 file still reads, as the same board",
+                Refusal(second, "test").Length == 0
+                && MapFile.Ground(MapFile.Parse(second, "test"))
+                    .SequenceEqual(MapFile.Ground(BoardMap.Test)),
+                Refusal(second, "test"));
+            Check("a format-2 file carrying a block of 3 is refused by its number",
+                Refusal(With(second, "\"rocks\": []"), "test").Contains("format 3"),
+                Refusal(With(second, "\"rocks\": []"), "test"));
+            Check("a block of 3 this build does not read is refused by its name",
+                Refusal(With(good, "\"roads\": []"), "test").Contains("\"roads\""),
+                Refusal(With(good, "\"roads\": []"), "test"));
+            Check("a key no field answers to is refused, not skipped",
+                Refusal(With(good, "\"roadz\": []"), "test").Contains("roadz"),
+                Refusal(With(good, "\"roadz\": []"), "test"));
+            // The rocks and the climate (Ф2, docs/rocks-plan.md С3): rocktest
+            // carries three notes and a climate, and both writers - the map's
+            // and the editor's draft built back into a map - must give its text
+            // back letter for letter; then what the map refuses.
+            if (MapFile.Has("rocktest"))
+            {
+                string rockText = System.IO.File.ReadAllText(MapFile.PathOf("rocktest"))
+                    .Replace("\r\n", "\n");
+                BoardMap rocky = MapFile.Load("rocktest");
+                Check("rocktest reads its three rock notes and its climate",
+                    rocky.Rocking.Count == 3 && rocky.Climate.SaidWind == 25.0f,
+                    $"{rocky.Rocking.Count} notes, wind {rocky.Climate.SaidWind}");
+                Check("and writes them back letter for letter",
+                    MapFile.Write(rocky) == rockText, "the map's writer moved rocktest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(rocky).Build()) == rockText,
+                    "the editor's round trip moved rocktest");
+                string RockRefusal(string from, string to) =>
+                    Refusal(rockText.Replace(from, to), "rocktest");
+                Check("a rock note off a rock is refused",
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [0, 0]").Contains("no rock"),
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [0, 0]"));
+                Check("and a second note on one rock",
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [3, 1]").Contains("second note"),
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [3, 1]"));
+                Check("and a type, a palette or a preset nothing answers to",
+                    RockRefusal("\"yardang\"", "\"butte\"").Length > 0
+                    && RockRefusal("\"ochre\"", "\"teal\"").Length > 0
+                    && RockRefusal("\"preset\": 2", "\"preset\": 4").Length > 0,
+                    "a rock note that means nothing was read");
+            }
+
+            // The floor under a cover (Ф3): floortest's sand and mud under a
+            // wood, a mine, a trench, on a hill and in a hollow read as those
+            // floors, write back letter for letter through both writers, and a
+            // mark that says a cell twice or under nothing is refused.
+            if (MapFile.Has("floortest"))
+            {
+                string floorText = System.IO.File.ReadAllText(MapFile.PathOf("floortest"))
+                    .Replace("\r\n", "\n");
+                BoardMap floored = MapFile.Load("floortest");
+                Foundation FloorAt(int q, int r) => floored.Ground[floored.At(new Vector2I(q, r))];
+                Check("floortest's floor grid lays sand under a wood and mud under a mine",
+                    FloorAt(1, 1) == Foundation.Sand && floored.Over[floored.At(new Vector2I(1, 1))] == Cover.Forest
+                    && FloorAt(6, 4) == Foundation.Mud
+                    && floored.Over[floored.At(new Vector2I(6, 4))] == Cover.Minefield,
+                    $"(1,1) {FloorAt(1, 1)}, (6,4) {FloorAt(6, 4)}");
+                Check("and writes back letter for letter",
+                    MapFile.Write(floored) == floorText, "the map's writer moved floortest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(floored).Build()) == floorText,
+                    "the editor's round trip moved floortest");
+                string row7 = "    \"..........\"\n  ]\n}";
+                Check("sand marked under plain ground is refused - that is the letter",
+                    Refusal(floorText.Replace(row7, "    \"s.........\"\n  ]\n}"), "floortest")
+                        .Contains("letter 's'"),
+                    "a cell said two ways was read");
+                Check("and so is a mark under a letter that says its own floor",
+                    Refusal(floorText.Replace("    \"..uu......\",\n    \"..........\"\n  ]\n}",
+                                              "    \"..uu....s.\",\n    \"..........\"\n  ]\n}"), "floortest")
+                        .Contains("already says"),
+                    "a mark under sand was read");
+            }
+
+            // The soil's looks (Ф4): soiltest's base and cells read and resolve
+            // - sand to dunes by the base, mud to swamp by the cell - write back
+            // letter for letter through both writers, and a look on a floor it
+            // is not for is refused.
+            if (MapFile.Has("soiltest"))
+            {
+                string soilText = System.IO.File.ReadAllText(MapFile.PathOf("soiltest"))
+                    .Replace("\r\n", "\n");
+                BoardMap soiled = MapFile.Load("soiltest");
+                char[] looks = soiled.Looks()!;
+                char LookAt(int q, int r) => looks[r * soiled.Columns + q];
+                Check("soiltest's sand wears the base's dunes, its marked mud a swamp",
+                    LookAt(2, 1) == Soil.Dunes && LookAt(1, 3) == Soil.Ripple
+                    && LookAt(8, 1) == Soil.Swamp && LookAt(8, 3) == Soil.Puddles
+                    && LookAt(5, 7) == Soil.Stony && LookAt(0, 0) == Soil.Grass,
+                    $"(2,1) {LookAt(2, 1)}, (8,1) {LookAt(8, 1)}, (5,7) {LookAt(5, 7)}");
+                Check("and writes back letter for letter",
+                    MapFile.Write(soiled) == soilText, "the map's writer moved soiltest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(soiled).Build()) == soilText,
+                    "the editor's round trip moved soiltest");
+                Check("a look on a floor it is not for is refused",
+                    Refusal(soilText.Replace("      \"............\",\n      \"........bbb.\"",
+                                             "      \"n...........\",\n      \"........bbb.\""), "soiltest")
+                        .Contains("a look of sand"),
+                    "dunes on grass were read");
+                Check("and so is a base look on the wrong floor",
+                    Refusal(soilText.Replace("\"sand\": \"n\"", "\"sand\": \"b\""), "soiltest")
+                        .Contains("no look of that floor"),
+                    "a swamp laid on the sand was read");
+            }
+
+            // The roads (Ф6): roadtest's seven read, lay Foundation.Road on the
+            // cells they cross and the letter's floor under it, write back
+            // letter for letter through both writers, and what a road may not
+            // do is refused; a turn begun on a road has one more step.
+            if (MapFile.Has("roadtest"))
+            {
+                string roadText = System.IO.File.ReadAllText(MapFile.PathOf("roadtest"))
+                    .Replace("\r\n", "\n");
+                BoardMap paved = MapFile.Load("roadtest");
+                int corduroy = paved.At(new Vector2I(3, 7));
+                Check("roadtest's seven roads lay road over the swamp and keep the mud under it",
+                    paved.Roads.Count == 7 && paved.Ground[corduroy] == Foundation.Road
+                    && paved.UnpavedAt(corduroy) == Foundation.Mud
+                    && paved.Looks()![corduroy] == Soil.Swamp,
+                    $"{paved.Roads.Count} roads, (3,7) {paved.Ground[corduroy]} over {paved.UnpavedAt(corduroy)}");
+                Check("and writes back letter for letter",
+                    MapFile.Write(paved) == roadText, "the map's writer moved roadtest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(paved).Build()) == roadText,
+                    "the editor's round trip moved roadtest");
+                Check("a road that skips a cell is refused",
+                    Refusal(roadText.Replace("[[9, 1], [10, 1], [11, 1]", "[[9, 1], [11, 1]"), "roadtest")
+                        .Contains("no neighbour"),
+                    "a road jumped a cell");
+                Check("and one drawn twice over the same stretch",
+                    Refusal(roadText.Replace("[[0, 2], [1, 1], [2, 1], [3, 0]]",
+                                             "[[1, 4], [2, 4], [3, 3]]"), "roadtest")
+                        .Contains("share"),
+                    "two roads on one stretch were read");
+                Check("and one across water",
+                    Refusal(roadText.Replace("\"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"uuuu",
+                                             "\"..............\",\n    \".w............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"uuuu"), "roadtest")
+                        .Contains("under water"),
+                    "a road across water was read");
+            }
+
+            Vector2I stray = BoardMap.Test.Homes[0];
+            Check("and so is a stray field on a home",
+                Refusal(good.Replace($"[{stray.X}, {stray.Y}]",
+                                     $"{{ \"at\": [{stray.X}, {stray.Y}], \"colour\": \"red\" }}"),
+                        "test").Contains("colour"),
+                "a home's unknown field was skipped");
             Check("a board with no homes is refused",
                 Refusal(good.Replace(
                     "\"homes\": [" + string.Join(", ",
@@ -22287,7 +22460,6 @@ public static class SelfTest
             foreach ((string tag, string wrong, string what) in new[]
                      {
                          ("NOPE", "class NOPE", "a class no build has"),
-                         (loaded[0], "two homes ask", "one class twice"),
                      })
             {
                 var homes = new Parking[]
@@ -22308,6 +22480,20 @@ public static class SelfTest
                 Check($"a board asking for {what} is refused",
                     said.Contains(wrong), said.Length == 0 ? "it was taken" : said);
             }
+            // A side may field several of a class (2026-10-26): two homes asking
+            // for one are a board, not a refusal.
+            string twiceSaid = "";
+            try
+            {
+                BoardMap.FromGround("crew", new[] { "...", "..." }, new[] { "...", "..." },
+                    new Parking[] { new(new Vector2I(1, 1), loaded[0]), new(new Vector2I(2, 1), loaded[0]) },
+                    TerrainSet.Mixed, true);
+            }
+            catch (Exception e)
+            {
+                twiceSaid = e.Message;
+            }
+            Check("a board asking for one class twice is taken", twiceSaid.Length == 0, twiceSaid);
 
             // --- the file ------------------------------------------------
             var draw = MapEdit.Blank("parked", 6, 5);
@@ -22319,10 +22505,10 @@ public static class SelfTest
                 !draw.Crew(1, "NOPE", out string nope)
                 && nope.Contains("not a class"), nope);
             string twice = "";
-            Check("and one another home already asked for, by which home",
+            Check("and one another home already asked for is taken too",
                 draw.Crew(0, loaded[0], out _)
-                && !draw.Crew(1, loaded[0], out twice)
-                && twice.Contains("home 1"), twice);
+                && draw.Crew(1, loaded[0], out twice)
+                && draw.Crew(1, null, out _), twice);
             Check("moving a home keeps the class it asked for",
                 draw.Home(new Vector2I(2, 2), 0, out _)
                 && draw.Homes[0] == new Parking(new Vector2I(2, 2), loaded[0]),

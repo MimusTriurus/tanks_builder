@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -63,6 +64,35 @@ public sealed partial class Tank3DBench : Node3D
     private string _modelTag = "LTR";
     private string _mapName = "events";
     private bool _flat;
+    /// <summary><c>--relief</c>: the board as one smooth ground (BOT-11,
+    /// <see cref="Relief"/>) - for now its fields, to <c>out/relief/</c>.</summary>
+    private bool _reliefOn;
+
+    /// <summary>The rocks' looks on the relief (<c>--rock</c>, docs/rocks-plan.md):
+    /// one look for every rock or a list dealt out in reading order, dressed
+    /// over what the map's notes say - the look changes, not the map. Null -
+    /// the map's own (<see cref="RockStyles.Of"/>).</summary>
+    private RockStyles? _rocks;
+    /// <summary><c>--rock-wind</c>, <c>--ice</c>: over the map's climate; null
+    /// - the map's.</summary>
+    private float? _rockWind, _rockIce;
+    /// <summary>The ice the relief was built by, for the shader's striae.</summary>
+    private float _iceBuilt = RockClimate.DefaultIce;
+    /// <summary>The wind it was built by, for the dunes' ripples.</summary>
+    private float _windBuilt = RockClimate.DefaultWind;
+    /// <summary><c>--soil e|k|n|b</c>: every floor that look is for dressed in
+    /// it, over the map's soil - for pictures, as <c>--rock</c>.</summary>
+    private char? _soilAll;
+    /// <summary><c>--brow</c>: the relief's brow lines on from the start
+    /// (off by default, the user's call; the panel switches them).</summary>
+    private bool _browOn;
+    /// <summary><c>--lawn</c>: the lawn photograph on the flats, not the
+    /// relief's painted grass (<see cref="Stage3D.ShowLawn"/>).</summary>
+    private bool _lawnOn;
+    /// <summary><c>--no-turf</c>: no grass on the relief's ground texture; with
+    /// it the ground is bare soil everywhere (<see cref="Stage3D.ShowTurf"/>).</summary>
+    private bool _turfOn = true;
+    private Relief? _relief;
     /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
     /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
     private bool _pbr;
@@ -129,57 +159,18 @@ public sealed partial class Tank3DBench : Node3D
 
     // --- the tanks ---------------------------------------------------------
 
-    /// <summary>
-    /// Which class each model drives as, and what the panel calls it.
-    ///
-    /// <b>Written down, because the sidecar does not say it</b> (see
-    /// docs/tank3d.md). The class gives the tank its speed and its size - no
-    /// sprite set is read for either.
-    /// </summary>
-    private static readonly (string Model, string Class, string Name)[] Pairs =
-    {
-        ("LTR", "LTP", "лёгкий"),
-        ("MTR", "MTP", "средний"),
-        ("HTR", "HTP", "тяжёлый"),
-        ("TDR", "TDP", "ПТ-САУ"),
-        ("HMR", "HMP", "мортира"),
-    };
+    /// <summary>Which class each model drives as - <see cref="Lineup.Pairs"/>,
+    /// shared with the editor, which stands the same tanks on its homes.</summary>
+    private static (string Model, string Class, string Name)[] Pairs => Lineup.Pairs;
 
-    private static int PairAt(string model) =>
-        Array.FindIndex(Pairs, p => string.Equals(p.Model, model, StringComparison.OrdinalIgnoreCase));
+    private static int PairAt(string model) => Lineup.PairAt(model);
 
-    /// <summary>The pair's class, or the medium's for a model not in the table:
-    /// the medium is the class every other figure is read against.</summary>
-    private static MovementProfile ClassFor(string model)
-    {
-        string want = PairAt(model) is int i and >= 0 ? Pairs[i].Class : "MTP";
-        MovementProfile? medium = null;
-        foreach (MovementProfile p in MovementProfile.All)
-        {
-            if (string.Equals(p.Tag, want, StringComparison.OrdinalIgnoreCase))
-                return p;
-            if (p.Tag == "MTP")
-                medium = p;
-        }
-        return medium ?? MovementProfile.Light;
-    }
+    private static MovementProfile ClassFor(string model) => Lineup.ClassFor(model);
 
-    /// <summary>
-    /// How long the medium's hull is against the hex it stands on.
-    ///
-    /// <b>The sprite bench's own proportion, taken once and then left to the
-    /// hex</b>: MTP draws its 0.883-unit hull at 167.7 px a unit, 148 px on a
-    /// 248 px hex - 0.60. Every model's hull is brought to this, then scaled by
-    /// its class's <see cref="MovementProfile.Size"/>, which is how the 2D
-    /// benches size theirs (<see cref="Fleet.Resize"/>): the generator makes
-    /// every tank about one unit long, so its own length says nothing about
-    /// which is the heavy.
-    /// </summary>
-    private const float HullOfHex = 0.60f;
-
-    /// <summary>World px a model unit, for this model in this class.</summary>
+    /// <summary>World px a model unit, for this model in this class
+    /// (<see cref="Lineup.PixelsFor"/>).</summary>
     private float PixelsFor(TankModel model, MovementProfile profile) =>
-        HullOfHex * HexWidth * (float)profile.Size / Mathf.Max(model.HullLength, 1e-3f);
+        Lineup.PixelsFor(model, profile, HexWidth);
 
     /// <summary>The models on disk - a folder under <c>Models/</c> with both
     /// files in it - in the pairs' order, then any others by name.</summary>
@@ -246,8 +237,35 @@ public sealed partial class Tank3DBench : Node3D
     private const float SlewDeg = 240.0f;
     private const float ElevDeg = 20.0f;
 
-    public override void _Ready()
+    public override void _Ready() => _ = Build();
+
+    /// <summary>The bench is built: until then the frame and the input wait.
+    /// Only ever false across frames under the editor's veil
+    /// (<see cref="Loading.Stage"/>); launched straight, the build is over
+    /// before <c>_Ready</c> returns.</summary>
+    private bool _built;
+
+    /// <summary>The bench, built in stages the editor's veil shows a bar for
+    /// (<see cref="Loading"/>).</summary>
+    private async Task Build()
     {
+        try
+        {
+            await Building();
+        }
+        catch (Exception e)
+        {
+            // An async build throws into its task, where nobody looks: said
+            // here, and the veil let go of, rather than a black screen.
+            GD.PrintErr($"tank3d: the build threw: {e}");
+        }
+        _built = true;
+        Loading.Built(this);
+    }
+
+    private async Task Building()
+    {
+        await Loading.Stage(this, "tile and world", 0.0f);
         ReadFlags();
         _models = ModelsOnDisk();
         _rig = new Node3D { Name = "Rig" };
@@ -258,6 +276,7 @@ public sealed partial class Tank3DBench : Node3D
 
         GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
         BuildWorld();
+        await Loading.Stage(this, "board", 0.04f);
         if (!_flat)
             BuildBoard();
         // After the board: the stage makes its own camera current as it enters
@@ -265,12 +284,15 @@ public sealed partial class Tank3DBench : Node3D
         BuildCamera();
         if (_field is null)
             BuildGround();
-        BuildWood();
+        await Loading.Stage(this, "trees", 0.12f);
+        await BuildWood();
+        await Loading.Stage(this, "mines and marks", 0.6f);
         BuildMines();
         BuildMarks();
+        await Loading.Stage(this, $"tank: {_modelTag}", 0.62f);
         Park();
         Mount(_modelTag);
-        BuildParked();
+        await BuildParked();
         if (_otherWanted)
         {
             if (_otherCell is Vector2I at)
@@ -282,6 +304,7 @@ public sealed partial class Tank3DBench : Node3D
         else if (_targetDefault)
             StandTarget();
 
+        await Loading.Stage(this, "panels", 0.9f);
         var layer = new CanvasLayer();
         AddChild(layer);
         _hud = new Label { Position = new Vector2(12, 8), Modulate = new Color(1, 1, 1, 0.85f), Visible = !_noUi };
@@ -290,7 +313,13 @@ public sealed partial class Tank3DBench : Node3D
         BuildCourse(layer);
         BuildAim(layer);
         if (!_noUi)
+        {
             BuildPanel(layer);
+            // the bench's tuning, not the board's: folded for a board the
+            // editor sent, Tab opens it
+            if (_handed)
+                _panel?.Flip();
+        }
         BuildBack(layer);
         BuildMatchUi(layer);
         BuildPerf(layer);
@@ -346,6 +375,14 @@ public sealed partial class Tank3DBench : Node3D
     {
         _bareNode?.Free();
         _bareNode = null;
+        // a quit from the bench: the editor parked behind it goes too
+        // (Session.Parked), or the run ends on Godot's leak report. Not on a
+        // restart, and on the way back Loading.Back has already taken it.
+        if (!_keepEditor && Session.Parked is { } parked && IsInstanceValid(parked))
+        {
+            Session.Parked = null;
+            parked.Free();
+        }
         // a quit leaves the tree: the run's last lines out before the process goes
         Log.Drain();
     }
@@ -459,6 +496,10 @@ public sealed partial class Tank3DBench : Node3D
     /// its noise (<c>Stage3D.Back</c>).</summary>
     private const float Back = 1500.0f;
 
+    /// <summary>Depth kept past the board's ground either way, for what
+    /// stands on it and for the frame (<see cref="FrameCamera"/>).</summary>
+    private const float DepthSpare = 600.0f;
+
     private void BuildCamera()
     {
         _camera = new Camera3D
@@ -566,6 +607,14 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (lo.X > hi.X)
             return null;
+        // the relief's sea and frame round the cells (Relief.Frame), in flat
+        // space: rows squashed
+        if (_reliefOn && _relief is not null)
+        {
+            Rect2 frame = _relief.Frame.Grow(Stage3D.FrameWide * half.X);
+            lo = new Vector2(Mathf.Min(lo.X, frame.Position.X), Mathf.Min(lo.Y, frame.Position.Y * Squash));
+            hi = new Vector2(Mathf.Max(hi.X, frame.End.X), Mathf.Max(hi.Y, frame.End.Y * Squash));
+        }
         _boardBox = new Rect2(lo, hi - lo);
         return _boardBox;
     }
@@ -640,7 +689,23 @@ public sealed partial class Tank3DBench : Node3D
         }
         else
             _viewNow = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
-        _camera.Position = pivot + new Vector3(0.0f, back * Squash, back * RiseFactor);
+        // Along its own axis the camera stands back from the board's middle,
+        // not from the tank - orthographic, the picture is the same - and
+        // further where the board is deeper than the view's 3000: with the
+        // tank on the near row the relief's near frame fell in front of the
+        // near plane and the far one past the far plane (BOT-11).
+        var axis = new Vector3(0.0f, Squash, RiseFactor);
+        float dist = back;
+        if (BoardBox() is { } deep)
+        {
+            Vector3 u = axis.Normalized();
+            float mid = (deep.Position.Y + 0.5f * deep.Size.Y) / Squash;
+            pivot += u * (new Vector3(pivot.X, 0.0f, mid) - pivot).Dot(u);
+            float half = 0.5f * deep.Size.Y / Squash * u.Z + DepthSpare;
+            dist = Mathf.Max(back, half / axis.Length());
+        }
+        _camera.Far = 2.0f * dist * axis.Length();
+        _camera.Position = pivot + axis * dist;
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
         _camera.Position += _camera.Basis.X * shake.X - _camera.Basis.Y * shake.Y;
@@ -724,6 +789,22 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (MapToPlay() is not BoardMap map)
             return;
+        // --relief: the board in a sea of deep water cells, at least one hex
+        // between the land and the frame for a rammed tank to go into
+        // (BoardMap.Moated); the cells the flags name are the map's, moved
+        _shownMoat = Vector2I.Zero;
+        if (_reliefOn)
+        {
+            map = map.Moated();
+            _moat = map.Shift;
+            _shownMoat = _moat;
+            if (_startCell is Vector2I start)
+                _startCell = start + _moat;
+            if (_hoverFixed is Vector2I hover)
+                _hoverFixed = hover + _moat;
+            if (_otherCell is Vector2I other)
+                _otherCell = other + _moat;
+        }
         TankFromBoard(map);
         _parkings = map.Parked;
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
@@ -734,17 +815,35 @@ public sealed partial class Tank3DBench : Node3D
             Paint = map.Paint,
             Trees = false,
             Columns = map.Columns, Rows = map.Rows, Plot = map.Plot,
+            Sea = map.Sea,
         };
         _field.SetKinds(map.Kinds);
         _field.SetGround(map.Ground);
-        _field.SetCover(map.Over);
-        _field.SetRelief(map.Levels, map.Ramps);
+        // no walls on the relief (BuildWalls), so none in the cover either:
+        // an unseen wall is an obstacle nothing explains
+        _field.SetCover(_reliefOn ? Array.ConvertAll(map.Over, c => c == Cover.Walls ? Cover.None : c) : map.Over);
+        // --relief joins the levels by slopes: no ramps, a level up or down
+        // is one step from any side (HexField.Slopes; BOT-11, a departure
+        // from the GDD's ramp kept to the flag)
+        _field.SetRelief(map.Levels, _reliefOn ? null : map.Ramps);
+        _field.Slopes = _reliefOn;
         // After the relief - the tank bench's reason: the water's guards are
         // asked about levels and ramps.
         _field.SetWater(map.Water);
+        _field.SetSoil(Dressed(map));
+        // the roads' way through each cell, for the drawing; the rule is the
+        // floor the map already laid (Foundation.Road)
+        _field.Roads = map.Roads;
+        // which trees its woods grow (format 3's wood and trees, Species)
+        _field.WoodMix = map.WoodMix;
+        _field.TreeCells = map.TreeCells;
         AddChild(_field);
         _field.Atlas = _tile;
+        if (_reliefOn)
+            BuildRelief(map);
         _home = _startCell ?? (map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2));
+        // a match: who stands where, and which of them rides the rig
+        LineUpSides();
 
         // What the stage aims its own camera by: it mirrors a 2D camera, and
         // this scene has none - its camera is its own (BuildCamera), current
@@ -764,6 +863,13 @@ public sealed partial class Tank3DBench : Node3D
             // the relief in the models' look: the sides stepped by the sun
             // (Stage3D.CelRelief)
             CelRelief = !_pbr && !_flatRelief,
+            // --relief: one smooth ground for the prisms (BOT-11)
+            Relief = _relief,
+            RockIce = _iceBuilt,
+            SoilWind = _windBuilt,
+            ShowBrow = _browOn,
+            ShowLawn = _lawnOn,
+            ShowTurf = _turfOn,
         };
         AddChild(_stage);
         _field.ShowField = false;
@@ -776,6 +882,81 @@ public sealed partial class Tank3DBench : Node3D
 
     /// <summary>The cell the tank opens on: the map's first parking.</summary>
     private Vector2I _home;
+
+    /// <summary>How far the map's cells moved on the board (the sea of
+    /// <c>--relief</c>, <see cref="BoardMap.Moated"/>): a cell a flag or a
+    /// <c>--do</c> names is the map's, and this is added to it.</summary>
+    private Vector2I _moat;
+
+    /// <summary>A cell a flag or a <c>--do</c> names, on the board.</summary>
+    private Vector2I MapCell(int q, int r) => new Vector2I(q, r) + _moat;
+
+    /// <summary><see cref="_moat"/> for what prints a cell, the bench's nested
+    /// records among them (Leg): static, one bench at a time.</summary>
+    private static Vector2I _shownMoat;
+
+    /// <summary>A cell as the HUD and the log say it: the map's, without the
+    /// sea's shift (the user's call, 2026-10-25), so it is the cell a flag
+    /// names and the editor shows.</summary>
+    private static string MapAt(Vector2I cell) => (cell - _shownMoat).ToString();
+
+    private static string MapAt(Vector2I? cell) => cell is Vector2I c ? MapAt(c) : "-";
+
+    private static string MapAt(IEnumerable<Vector2I> cells, string between)
+    {
+        var said = new List<string>();
+        foreach (Vector2I c in cells)
+            said.Add(MapAt(c));
+        return string.Join(between, said);
+    }
+
+    private static string MapAt(Steps.Route route) => route.ToString(_shownMoat);
+
+    /// <summary>The map's soil looks, every cell's resolved
+    /// (<see cref="BoardMap.Looks"/>), with <c>--soil</c> dressed over the
+    /// floor its look is for.</summary>
+    private char[]? Dressed(BoardMap map)
+    {
+        char[]? looks = map.Looks();
+        if (_soilAll is not char all)
+            return looks;
+        looks ??= map.Looks(always: true)!;
+        for (int at = 0; at < looks.Length; at++)
+            if (!map.Water[at] && map.Ground[at] == Soil.FloorOf(all))
+                looks[at] = all;
+        return looks;
+    }
+
+    /// <summary>The board's smooth fields (<c>--relief</c>), and their
+    /// pictures, looked at before anything stands on them.</summary>
+    private void BuildRelief(BoardMap map)
+    {
+        string name = map.Name;
+        // the map's rocks and climate (format 3, docs/rocks-plan.md С4), the
+        // flags dressed over them
+        RockStyles? rocks = _rocks ?? RockStyles.Of(map.Rocking, map.Climate);
+        if (rocks is null && (_rockWind is not null || _rockIce is not null))
+            rocks = new RockStyles();
+        if (rocks is not null)
+        {
+            rocks.Wind = _rockWind ?? map.Climate.Wind;
+            rocks.Ice = _rockIce ?? map.Climate.Ice;
+        }
+        _iceBuilt = rocks?.Ice ?? map.Climate.Ice;
+        _windBuilt = rocks?.Wind ?? map.Climate.Wind;
+        _relief = Relief.Build(_field!, rocks: rocks);
+        if (_relief is null)
+            return;
+        foreach (RockGroup g in _relief.Rocks)
+            Log.Print($"tank3d: rock {g.Index} at {MapAt(g.Cells[0])}, {g.Cells.Count} cells, {g.Look}");
+        string path = _relief.SavePictures(_field!, AssetRoot.Out + "/relief", name);
+        // from here on the tank, its effects and what stands on the board
+        // stand on the drawn ground (HexField.Surface); the relief itself was
+        // read off the prisms before this
+        _field!.Surface = _relief.HeightAt;
+        Log.Print($"tank3d: relief {_relief.Nx}x{_relief.Ny} points, step {_relief.Cell:0.0} px, "
+                  + $"{_relief.Seconds * 1000:0} ms; {path}");
+    }
 
     /// <summary>Where the model's shadow falls - <see cref="BoardDress.Shadows"/>,
     /// the skin over the board's tops.</summary>
@@ -1057,6 +1238,33 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--wind" && more) _wind = F(args[++i], _wind);
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
+            else if (a == "--relief") _reliefOn = true;
+            // --rock mesa:ochre,yardang,moutonnee: the rocks' looks, dealt out
+            // in reading order (RockStyles); the relief comes with them
+            else if (a == "--rock" && more)
+            {
+                string said = args[++i];
+                _rocks = RockStyles.Parse(said, out string bad);
+                if (_rocks is null)
+                    GD.PrintErr($"tank3d: --rock {said}: no such look '{bad}' "
+                                + "(type crag|mesa|yardang|moutonnee, :palette, :preset 1-3)");
+                else
+                    _reliefOn = true;
+            }
+            // --soil n: every sand a dune field (Soil, format 3)
+            else if (a == "--soil" && more)
+            {
+                string said = args[++i];
+                if (said.Length == 1 && Soil.FloorOf(said[0]) is not null)
+                    _soilAll = said[0];
+                else
+                    GD.PrintErr($"tank3d: --soil {said}: no such look (g e k on solid, r n on sand, p b on mud)");
+            }
+            else if (a == "--rock-wind" && more) _rockWind = F(args[++i], RockClimate.DefaultWind);
+            else if (a == "--ice" && more) _rockIce = F(args[++i], RockClimate.DefaultIce);
+            else if (a == "--brow") _browOn = true;
+            else if (a == "--lawn") _lawnOn = true;
+            else if (a == "--no-turf") _turfOn = false;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
             else if (a == "--zoom" && more) { _zoom = F(args[++i], _zoom); _zoomFit = false; }
@@ -1182,11 +1390,11 @@ public sealed partial class Tank3DBench : Node3D
                     {
                         if (_rules)
                         {
-                            if (!RamOrder(new Vector2I(q, r)))
-                                ShotOrder(new Vector2I(q, r));
+                            if (!RamOrder(MapCell(q, r)))
+                                ShotOrder(MapCell(q, r));
                         }
                         else
-                            AimCell(new Vector2I(q, r));
+                            AimCell(MapCell(q, r));
                     }
                 }
                 else if (what.StartsWith("pan=", StringComparison.Ordinal))
@@ -1210,7 +1418,7 @@ public sealed partial class Tank3DBench : Node3D
                     // middle - the mouse's own path, PickAt and all.
                     string[] qr = what[6..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        OrderClick(_camera.UnprojectPosition(CellWorld(new Vector2I(q, r))), false);
+                        OrderClick(_camera.UnprojectPosition(CellWorld(MapCell(q, r))), false);
                 }
                 else if (what.StartsWith("take=", StringComparison.Ordinal))
                 {
@@ -1218,7 +1426,7 @@ public sealed partial class Tank3DBench : Node3D
                     // through the same screen test the pointer gets.
                     string[] qr = what[5..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r)
-                        && _parked.Find(p => p.Cell == new Vector2I(q, r)) is { } standing)
+                        && _parked.Find(p => p.Cell == MapCell(q, r)) is { } standing)
                         OrderClick(_camera.UnprojectPosition(standing.Rig.Position
                             + Vector3.Up * (standing.Model.Size.Y * standing.Model.PixelsPerUnit * 0.4f)), false);
                 }
@@ -1227,14 +1435,14 @@ public sealed partial class Tank3DBench : Node3D
                 {
                     string[] qr = what[7..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        IgniteAt(new Vector2I(q, r));
+                        IgniteAt(MapCell(q, r));
                 }
                 // lock=Q,R: the first click on a cell in reach; face=S: the rose's disc
                 else if (what.StartsWith("lock=", StringComparison.Ordinal))
                 {
                     string[] qr = what[5..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        Lock(new Vector2I(q, r));
+                        Lock(MapCell(q, r));
                 }
                 else if (what.StartsWith("face=", StringComparison.Ordinal))
                     FaceTo((int)F(what[5..], 90));
@@ -1245,7 +1453,7 @@ public sealed partial class Tank3DBench : Node3D
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                     {
                         SetRules(true, " (--do go)");
-                        OrderTo(new Vector2I(q, r));
+                        OrderTo(MapCell(q, r));
                     }
                 }
                 else if (what.StartsWith("aim=", StringComparison.Ordinal))
@@ -1512,6 +1720,9 @@ public sealed partial class Tank3DBench : Node3D
 
     public override void _Process(double delta)
     {
+        // a bench still building under the editor's veil (Build)
+        if (!_built)
+            return;
         // the frame before closed (Prof), before anything of this one is measured
         PerfTick(delta);
         // The way back, before the capture - the harness's order: the picture
@@ -1745,11 +1956,11 @@ public sealed partial class Tank3DBench : Node3D
     private void HudText()
     {
         string where = _field is null ? "flat ground"
-            : $"{_mapName} {_field.FlatCellAt(Board(_rig.Position))}";
+            : $"{_mapName} {MapAt(_field.FlatCellAt(Board(_rig.Position)))}";
         string fate = Drowning ? "Drowned" : _fate.ToString();
         if (_fate == Fate.Alive && Swimming)
             fate = "Afloat";
-        string ram = (_other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
+        string ram = (_other is null ? "" : $"  target {_other.Tag} {MapAt(_other.Cell)}"
                       + (_ramNote.Length > 0 ? $"  {_ramNote}" : ""))
                      + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
         string order = (_rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "")
@@ -1888,6 +2099,8 @@ public sealed partial class Tank3DBench : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (!_built)
+            return;
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } click)
         {
             AimAt(click.Position);
@@ -1973,6 +2186,10 @@ public sealed partial class Tank3DBench : Node3D
             // in a match: the ram on or off (Tank3DBench.RamPlan)
             case Key.Tab: if (Match) RamToggle(); else if (!NextWay()) _panel?.Flip(); break;
             case Key.Home: FollowTank(); break;
+            // the relief's hex grid on and off (Stage3D.Relief); no free single key left
+            case Key.G when key.ShiftPressed && _stage?.Relief is not null:
+                _stage.ShowEdges = !_stage.ShowEdges;
+                break;
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;
             case Key.F5: Edit(); break;
@@ -2026,6 +2243,21 @@ public sealed partial class Tank3DBench : Node3D
             $"класс {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F1} px на единицу"
             + (_model.Turreted ? "" : ", без башни"));
         _panel.Expand("tank3d.tank", true);
+        // The relief's lines (Stage3D.Relief): the brow off by default
+        if (_stage?.Relief is not null)
+        {
+            _panel.Heading("tank3d.relief", "рельеф");
+            _panel.Toggle("tank3d.relief.brow", "бровка уступов  (--brow)",
+                          () => _stage.ShowBrow, v => _stage.ShowBrow = v);
+            _panel.Toggle("tank3d.relief.grid", "гекс-сетка  (Shift+G)",
+                          () => _stage.ShowEdges, v => _stage.ShowEdges = v);
+            _panel.Toggle("tank3d.relief.turf", "трава на земле  (--no-turf — почва)",
+                          () => _stage.ShowTurf, v => _stage.ShowTurf = v);
+            if (Stage3D.Lawn() is not null)
+                _panel.Toggle("tank3d.relief.lawn", "  трава фото, а не пятнами  (--lawn)",
+                              () => _stage.ShowLawn, v => _stage.ShowLawn = v);
+            _panel.Expand("tank3d.relief", true);
+        }
         // Whether the pond is swum or drowned in - see TankTick.Amphibious.
         _panel.Heading("tank3d.water", "вода");
         _panel.Toggle("tank3d.water.amphibious", "ОПВТ: плывёт, без него тонет",

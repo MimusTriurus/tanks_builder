@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -85,6 +86,25 @@ public sealed partial class MapEditor : SceneRoot
     private Cover _cover = Cover.Forest;
     private bool _water;
     private bool _plotBrush;
+    /// <summary>The Look tab's ground brush (<see cref="Soil"/>, format 3): it
+    /// paints the look a floor wears and never the floor.</summary>
+    private char _look = TankSpriteTest.Soil.Grass;
+    /// <summary>The Look tab's species brush (<see cref="Species"/>, format 3),
+    /// or null for the ground's looks: it paints which trees a cell grows and
+    /// never the wood itself; the eraser gives the cell back to the mix.</summary>
+    private char? _speciesBrush;
+    /// <summary>The Roads tab's road (<see cref="Road"/>, format 3): points on
+    /// hexes, the road laid between them (MapEditor.Roads).</summary>
+    private RoadType _roadBrush = RoadType.Dirt;
+
+    /// <summary>The tabs in the bar's order, which is also the number keys':
+    /// the floor and what lies on it, then the rest. The enum keeps the order
+    /// they came in, which nothing on the bar is.</summary>
+    private static readonly MapEdit.Tab[] TabOrder =
+    {
+        MapEdit.Tab.Foundation, MapEdit.Tab.Look, MapEdit.Tab.Roads, MapEdit.Tab.Cover,
+        MapEdit.Tab.Level, MapEdit.Tab.Units, MapEdit.Tab.Presets,
+    };
 
     /// <summary>Which way the board's-edge brush writes: a cell on to the plot
     /// or off it. Two statements rather than one toggle, because "empty" and
@@ -118,7 +138,6 @@ public sealed partial class MapEditor : SceneRoot
     private string _said = "";
 
     private Label _hud = null!;
-    private RichTextLabel _report = null!;
 
     // --- overlays ------------------------------------------------------------
 
@@ -137,12 +156,40 @@ public sealed partial class MapEditor : SceneRoot
         Homes = 32,
     }
 
-    private Layers _layers = Layers.Ramps | Layers.Faults | Layers.Homes;
+    private Layers _layers = Layers.Faults | Layers.Homes;
 
     // --- setup ---------------------------------------------------------------
 
-    public override void _Ready()
+    public override void _Ready() => _ = Build();
+
+    /// <summary>The editor is built: until then the frame and the input
+    /// wait. Only ever false across frames under the bench's veil
+    /// (<see cref="Loading.Stage"/>); opened straight, the build is over
+    /// before <c>_Ready</c> returns. The veil lifts later still, when the
+    /// first dressing has laid its grass (MapEditor.Dress, <c>LawnMore</c>).</summary>
+    private bool _built;
+
+    /// <summary>The editor, built in stages the veil shows a bar for
+    /// (<see cref="Loading"/>).</summary>
+    private async Task Build()
     {
+        try
+        {
+            await Building();
+        }
+        catch (Exception e)
+        {
+            // An async build throws into its task, where nobody looks: said
+            // here, and the veil let go of, rather than a dark window.
+            GD.PrintErr($"editor: the build threw: {e}");
+            Loading.Built(this);
+        }
+        _built = true;
+    }
+
+    private async Task Building()
+    {
+        await Loading.Stage(this, "map", 0.0f);
         int newColumns = 0, newRows = 0;
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
@@ -190,6 +237,10 @@ public sealed partial class MapEditor : SceneRoot
                 {
                     "cover" => MapEdit.Tab.Cover,
                     "level" => MapEdit.Tab.Level,
+                    "units" => MapEdit.Tab.Units,
+                    "presets" => MapEdit.Tab.Presets,
+                    "look" => MapEdit.Tab.Look,
+                    "roads" => MapEdit.Tab.Roads,
                     _ => MapEdit.Tab.Foundation,
                 };
             else if (args[i] == "--radius" && i + 1 < args.Length
@@ -251,6 +302,7 @@ public sealed partial class MapEditor : SceneRoot
             _open = "";
         }
 
+        await Loading.Stage(this, "terrain and tile", 0.05f);
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         AtlasSet? tile = null;
         try
@@ -268,11 +320,25 @@ public sealed partial class MapEditor : SceneRoot
         {
             _edit = MapEdit.Blank("untitled", newColumns, newRows);
         }
+        else if (Map.Length > 0
+                 && !BoardMap.Names.Contains(Map.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            // ByName answers a name nobody wrote with the harness's bench, and
+            // the editor opened that as if asked for it - `--map events` from
+            // the run args drew on bench and could not save it. Said instead,
+            // on a blank board (stage 0 of docs/editor-ux-plan.md).
+            GD.Print($"editor: no map named {Map}");
+            _edit = MapEdit.Blank("untitled", MapEdit.DefaultColumns,
+                                  MapEdit.DefaultRows);
+            _said = $"no map named \"{Map}\" - a blank board instead (File > Open lists the maps)";
+        }
         else if (Map.Length > 0)
         {
             try
             {
                 _edit = MapEdit.Of(BoardMap.ByName(Map));
+                // on File > Recent (MapEditor.Document)
+                Remember(_edit.Name);
             }
             catch (Exception e)
             {
@@ -292,24 +358,43 @@ public sealed partial class MapEditor : SceneRoot
                                       MapEdit.DefaultRows);
         }
 
-        PropSet props = PropSet.Load(AssetRoot.Props);
-        GD.Print("editor: props " + props.Note);
+        await Loading.Stage(this, "board", 0.1f);
+        // The 2D props are not loaded, only looked for: the wood on this board
+        // is MapEditor.Dress's models and the grove below is asked, never
+        // drawn - and decoding its sprite art was five of the seven seconds
+        // the editor took to open (2026-10-26). Whether there is any still
+        // matters: the field's Trees reads it.
+        bool props = PropSet.Present(AssetRoot.Props);
 
         _field = new HexField
         {
             Atlas = tile,
             Terrain = terrain,
-            Trees = props.Any,
+            Trees = props,
             Columns = _edit.Columns,
             Rows = _edit.Rows,
             Ink = Painted,
         };
         AddChild(_field);
+        // The board the stage draws: the map in its sea, as Run plays it
+        // (MapEditor.Relief). The map's own field above stays the one every
+        // rule, mark and pick asks.
+        _board = new HexField
+        {
+            Atlas = tile,
+            Terrain = terrain,
+            Trees = false,
+            Columns = _edit.Columns,
+            Rows = _edit.Rows,
+            Ink = cell => Painted(cell - (_ring?.Shift ?? Vector2I.Zero)),
+            ShowField = false,
+        };
+        AddChild(_board);
 
         _grove = new Grove
         {
-            Field = _field, Props = props, Origin = Vector2.Zero,
-            Enabled = props.Any,
+            Field = _field, Props = null, Origin = Vector2.Zero,
+            Enabled = props,
         };
         AddChild(_grove);
         // After the wood, because what can catch is what is standing - see
@@ -328,16 +413,22 @@ public sealed partial class MapEditor : SceneRoot
             _surf = WaterArt.Load(AssetRoot.Water, tile.HexRect);
             GD.Print("editor: water " + _surf.Note);
         }
-        _sea = new Swell { Field = _field };
+        _sea = new Swell { Field = _board };
 
+        await Loading.Stage(this, "stage", 0.2f);
         _stage = new Stage3D
         {
-            Field = _field, Origin = Vector2.Zero, Eye = _camera,
+            Field = _board, Origin = Vector2.Zero, Eye = _camera,
             // No Wood: the trees are the models MapEditor.Dress stands, as on
             // the 3D bench; the grove is only asked, never drawn.
             Blaze = _fire, Surf = _surf, Sea = _sea,
             // the 3D bench's water and relief (Tank3DBench.BuildBoard)
             CelWater = true, CelRelief = true,
+            // the brow at each terrace's rim: the bench keeps it off (--brow),
+            // but a board being drawn wants its levels read at a glance - a
+            // pit's near bank faces away from the camera, and the line runs
+            // close under the rim to close round it there too (2026-10-26)
+            ShowBrow = true, BrowBelow = 0.04f, BrowPx = 0.5f,
         };
         AddChild(_stage);
         Dress();
@@ -358,10 +449,15 @@ public sealed partial class MapEditor : SceneRoot
         _marks = new Overlay { Editor = this };
         marking.AddChild(_marks);
 
+        await Loading.Stage(this, "panels and rules", 0.3f);
         SettleForProof(CapturePath is not null);
         Ui();
         Settle();
         Home();
+        // work the last session left in the autosave, offered back
+        // (MapEditor.Document); a return from the bench has its own
+        if (!returned)
+            OfferAutosave();
 
         // A dialog opened from the command line, --layers' reason word for word:
         // a capture of the menu has to be takeable, and a capture run has nobody
@@ -372,6 +468,11 @@ public sealed partial class MapEditor : SceneRoot
             case "open": Chose(Item.Open); break;
             case "saveas": Chose(Item.SaveAs); break;
             case "sheet": Act(More.Sheet); break;
+            // the board grown and its dialog up, for a capture (MapEditor.Document)
+            case "boarddialog":
+                Resize(14, 12, 4);
+                OpenBoard();
+                break;
         }
         if (_turnSides != 0)
         {
@@ -403,8 +504,39 @@ public sealed partial class MapEditor : SceneRoot
     /// </summary>
     public override void _Process(double delta)
     {
+        // an editor still building under the veil (Build)
+        if (!_built)
+            return;
         _stage?.Place(Array.Empty<Vehicle>());
+        // --hover held for a capture: the real pointer's first move would take
+        // it back, wherever the desktop left the mouse (the bench's _hoverFixed)
+        if (CapturePath is not null && _hovered is Vector2I held && _under != held && _held is null)
+        {
+            _under = held;
+            _marks.QueueRedraw();
+            Say();
+        }
         Redress();
+        LawnMore();
+        // the problems panel's height and place, after the layout pass that
+        // sized its wrapped rows (MapEditor.Problems)
+        Problems();
+        ProbeProblems();
+        Tanks();
+        TurnProbe();
+        UnitsProbe();
+        ClipProbe();
+        SymmetryProbe();
+        BoardProbe();
+        RockProbe();
+        FloorProbe();
+        SoilProbe();
+        WoodProbe();
+        IconsProbe();
+        RoadProbe();
+        RoadToolProbe();
+        ToolsProbe();
+        AutosaveTick(delta);
         CrownsFollow();
         Turn((float)delta);
         _frame++;
@@ -456,9 +588,9 @@ public sealed partial class MapEditor : SceneRoot
         if (_open == "overlay" && _frame is 4 or 8)
         {
             bool stop = _frame == 4;
-            _report.MouseFilter = stop
+            _hud.MouseFilter = stop
                 ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
-            Vector2 at = _report.GetGlobalRect().GetCenter();
+            Vector2 at = _hud.GetGlobalRect().GetCenter();
             _clicks = 0;
             foreach (bool down in new[] { true, false })
                 Input.ParseInputEvent(new InputEventMouseButton
@@ -471,7 +603,7 @@ public sealed partial class MapEditor : SceneRoot
             _probeStop = stop;
         }
         if (_open == "overlay" && _frame is 5 or 9)
-            GD.Print($"overlay: the report is {_report.GetGlobalRect()} on "
+            GD.Print($"overlay: the readout is {_hud.GetGlobalRect()} on "
                      + $"filter {(_probeStop ? "Stop" : "Ignore")}, and a click at "
                      + $"its middle reached the board {_clicks} time(s)");
         // Taking up the ramp brush shows where a ramp can go. Keys rather than
@@ -507,8 +639,7 @@ public sealed partial class MapEditor : SceneRoot
                 8 => (int)MapEdit.Tab.Foundation,
                 _ => (int)MapEdit.Tab.Level,
             };
-            Vector2 at = ((TabBar)_tabs).GetGlobalRect().Position
-                         + _tabs.GetTabRect(want).GetCenter();
+            Vector2 at = _tabButtons[Array.IndexOf(TabOrder, (MapEdit.Tab)want)].GetGlobalRect().GetCenter();
             foreach (bool down in new[] { true, false })
                 Input.ParseInputEvent(new InputEventMouseButton
                 {
@@ -520,7 +651,7 @@ public sealed partial class MapEditor : SceneRoot
         }
         if (_open == "tabs" && _frame is 6 or 10 or 14)
             GD.Print($"tabs: clicked to {_tab}, the bar says "
-                     + $"{_tabs.GetTabTitle(_tabs.CurrentTab)}, the palette says "
+                     + $"{_tabButtons.FirstOrDefault(t => t.ButtonPressed)?.Text}, the palette says "
                      + string.Join("/", _picks.Select(b => b.Text)));
         // Taking a wall off takes its bricks off. The risky half of standing
         // props from a map: a stale wall left on the board after the cover was
@@ -635,8 +766,24 @@ public sealed partial class MapEditor : SceneRoot
         // probe worth having: after it, --capture and --capture-at are read
         // again by Main, so the frame that lands on disk is the harness playing
         // the board the editor just drew.
-        if (_open is "run" or "run2d" && _frame == 20)
-            Play(sprites: _open == "run2d");
+        // tryrun: Play-in-Editor's whole promise in one run - a stroke nobody
+        // saved (sand on --hover's cell), then shift+F5 from that cell; with
+        // --edit-at the way back says how much undo came with it, and the file
+        // on disk must not have moved
+        if (_open == "tryrun" && _frame == 10 && _hovered is Vector2I tried && _edit.Inside(tried))
+        {
+            _edit.Begin();
+            _edit.Floor(tried, Foundation.Sand, out string _);
+            _edit.End();
+            _dirty = true;
+            Settle();
+        }
+        if (_open == "tryrun" && _frame == 20)
+            Play(from: _hovered ?? StartCell());
+        // runhere: shift+F5 off --hover's cell, the start a capture run has
+        // nobody to point at
+        if (_open is "run" or "runmatch" or "runhere" && _frame == 20)
+            Play(match: _open == "runmatch", from: _open == "runhere" ? _hovered ?? StartCell() : null);
         // And a board the harness would refuse: Run must not change scene, and
         // must say which fault stopped it.
         if (_open == "runbad" && _frame == 20)
@@ -658,7 +805,9 @@ public sealed partial class MapEditor : SceneRoot
         // Past the dressing too: the first frame lays every tree and the grass,
         // and a capture taken in it is the window before anything was drawn -
         // white, measured (MapEditor.Dress).
-        if (CapturePath is not null && _frame >= CaptureAt && _frame >= _dressedFrame + 3)
+        // and past the tanks on the homes, loaded one a frame (MapEditor.Tanks)
+        if (CapturePath is not null && _frame >= CaptureAt && _frame >= _dressedFrame + 3
+            && !_tanksStale && _frame >= _tankedFrame + 3)
         {
             Capture(CapturePath);
             GetTree().Quit();
@@ -765,18 +914,20 @@ public sealed partial class MapEditor : SceneRoot
     /// </summary>
     private void Settle()
     {
+        // the tanks on the homes stand again next frame (MapEditor.Tanks)
+        _tanksStale = true;
+        // On the relief, as Run plays it (BOT-11): the levels are joined by
+        // slopes, the ramps the letters carry are kept in the file and not
+        // built, and the rules are the relief's (MapRules.Draft.Slopes).
         MapRules.Draft draft = _edit.Draft();
-        _faults = MapRules.Faults(draft);
+        draft.Slopes = true;
+        List<MapRules.Fault> faults = MapRules.Faults(draft);
+        // a species on a cell with no wood: named, not fatal (format 3, Ф5)
+        faults.AddRange(_edit.Waiting());
+        _faults = faults;
         _sites = MapRules.Sites(draft);
         _closure = MapRules.Flood(draft);
-
-        _dropped = _faults
-            .Where(f => f.Rule is "ramp.bridge" or "ramp.rock")
-            .Select(f => f.Cell).ToHashSet();
-        var ramps = (bool[])draft.Ramps.Clone();
-        foreach (Vector2I cell in _dropped)
-            if (draft.On(cell))
-                ramps[draft.At(cell)] = false;
+        _dropped = new HashSet<Vector2I>();
 
         var water = (bool[])draft.Water.Clone();
         foreach (MapRules.Fault fault in _faults.Where(f => f.Rule == "water.step"))
@@ -786,13 +937,37 @@ public sealed partial class MapEditor : SceneRoot
         _field.Columns = _edit.Columns;
         _field.Rows = _edit.Rows;
         _field.Plot = draft.Plot;
-        _field.SetRelief(draft.Levels, ramps);
-        _field.SetWater(water.Any(w => w) ? water : null);
+        _field.Slopes = true;
+        _field.SetRelief(draft.Levels);
+        // The old flood off, the floor on, then the new flood: each setter
+        // judges water and floor together, and a board shifted or resized
+        // under its pond was judged as the new water over the old floor - a
+        // waterfall nobody drew (MapEditor.Document).
+        _field.SetWater(null);
         _field.SetGround(draft.Ground);
+        _field.SetWater(water.Any(w => w) ? water : null);
+        // the ground's looks (format 3's soil), after the floor they lie on
+        _field.SetSoil(_edit.Looks());
+        // the roads, for the trees that stand back from them (BoardDress.Spots)
+        _field.Roads = _edit.Roads;
+        // which trees the woods grow (format 3's wood and trees)
+        _field.WoodMix = _edit.Wood.Count > 0 ? _edit.Wood : null;
+        _field.TreeCells = _edit.Trees();
         string?[] kinds = Kinds(draft);
         _field.SetKinds(kinds);
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
         Covered();
+        Ringed(draft, water, kinds);
+        // no walls, capon or bunker on the relief (Tank3DBench.BuildWalls):
+        // the letters keep them, and each is named where it is
+        foreach (Vector2I walled in _edit.Walled())
+            faults.Add(new MapRules.Fault(walled, "relief.flat",
+                $"({walled.X},{walled.Y}) carries masonry, and the relief stands no "
+                + "wall, capon or bunker - kept in the file, not played", false,
+                $"({walled.X},{walled.Y}) masonry"));
+        Stones(faults);
+        // where the board breaks the symmetry that is up (MapEditor.Symmetry)
+        Symmetric(faults);
 
         // The wood is sown again only when the cells it grows on moved.
         // Grove.Plant walks every cell and rolls a species per prop, which is
@@ -816,6 +991,37 @@ public sealed partial class MapEditor : SceneRoot
         _dressStale = true;
         Bricks();
         Say();
+    }
+
+    /// <summary>
+    /// What a rock's note asks that the relief will not draw (docs/rocks-plan.md
+    /// С5), both warnings: the file keeps the note either way.
+    /// <c>rock.bench</c> - a mesa's ledge on a rock under three cells, laid
+    /// without it (the user's call, С0); <c>rock.wind</c> - yardangs with the
+    /// wind within 20° of the camera's way up the board, where their ridges
+    /// read as teeth (render E2).
+    /// </summary>
+    private void Stones(List<MapRules.Fault> faults)
+    {
+        Vector2I? yardang = null;
+        foreach ((Vector2I at, RockNote note) in _edit.Rocking())
+        {
+            RockLook look = note.Look;
+            if (look.Type == RockType.Yardang)
+                yardang ??= at;
+            int cells = _edit.RockOf(at).Count;
+            if (look.Type == RockType.Mesa && look.Preset == 2 && cells < RockGroup.BenchCells)
+                faults.Add(new MapRules.Fault(at, "rock.bench",
+                    $"the mesa at ({at.X},{at.Y}) asks for a ledge and is {cells} cell"
+                    + $"{(cells == 1 ? "" : "s")} - a ledge needs {RockGroup.BenchCells}; "
+                    + "laid without it", false, $"({at.X},{at.Y}) mesa ledge"));
+        }
+        // the camera looks up the board, along Z: 90 or -90 on the ground
+        float off = Mathf.Abs(Mathf.Wrap(_edit.Climate.Wind - 90.0f, -90.0f, 90.0f));
+        if (yardang is Vector2I first && off < 20.0f)
+            faults.Add(new MapRules.Fault(first, "rock.wind",
+                $"the wind runs at {_edit.Climate.Wind:0}°, {off:0}° off the camera's "
+                + "way - the yardangs' ridges will read as teeth", false, "wind along the view"));
     }
 
     private readonly List<WallProp> _bricks = new();
@@ -858,7 +1064,9 @@ public sealed partial class MapEditor : SceneRoot
     {
         if (_stage is null || _field.Atlas is null)
             return;
-        IReadOnlyList<Vector2I> walled = _edit.Walled();
+        // None on the relief, which stands no masonry (Settle names the cells).
+        // The rest is kept for the day it does.
+        IReadOnlyList<Vector2I> walled = Array.Empty<Vector2I>();
         // The relief is in the signature because a wall stands at its cell's own
         // height - see WallProp.Build, which reads LevelAt - so raising the
         // ground under one has to lift it.
@@ -981,6 +1189,9 @@ public sealed partial class MapEditor : SceneRoot
     private static readonly Color BrushInk = new(0.55f, 0.90f, 1.0f);
     private static readonly Color FloodInk = new(0.55f, 0.70f, 1.0f);
     private static readonly Color BrickInk = new(0.86f, 0.55f, 0.40f);
+    /// <summary>A home's side, in the match's banner colours (Tank3DBench.SideInk).</summary>
+    private static readonly Color GreenInk = new(0.55f, 0.95f, 0.45f);
+    private static readonly Color BrownInk = new(0.85f, 0.62f, 0.38f);
 
     /// <summary>
     /// The mark a cell carries, through <see cref="HexField.Ink"/>.
@@ -1023,9 +1234,22 @@ public sealed partial class MapEditor : SceneRoot
     private Vector2I Pointed() =>
         RayCell(GetViewport().GetMousePosition());
 
-    private IReadOnlyList<Vector2I> Patch() =>
-        _edit.Inside(_under) ? _edit.Ring(_under, _radius)
-                             : Array.Empty<Vector2I>();
+    /// <summary>The cells under the brush itself.</summary>
+    private IReadOnlyList<Vector2I> Own() =>
+        // a tank stands on one cell whatever the radius; selecting, the
+        // pointer paints nothing (MapEditor.Select)
+        _edit.Inside(_under) && !Selecting
+            ? _edit.Ring(_under, _tab == MapEdit.Tab.Units || _instrument == Instrument.Pick ? 0 : _radius)
+            : Array.Empty<Vector2I>();
+
+    /// <summary>The cells a stroke would write: the brush's and, with a
+    /// symmetry up, their twins (MapEditor.Symmetry).</summary>
+    private IReadOnlyList<Vector2I> Patch()
+    {
+        IReadOnlyList<Vector2I> own = Own();
+        List<Vector2I> twins = Twins(own);
+        return twins.Count == 0 ? own : own.Concat(twins).ToList();
+    }
 
     /// <summary>
     /// The layers drawn over the board rather than into it - numbers, arrows and
@@ -1117,18 +1341,37 @@ public sealed partial class MapEditor : SceneRoot
             }
 
             if (editor._layers.HasFlag(Layers.Homes))
+            {
+                // the side a match gives each home, and the edge it starts
+                // facing - the match's own rule (Parking.SidesOf)
+                string[] sides = Parking.SidesOf(editor._edit.Homes);
                 for (int i = 0; i < editor._edit.Homes.Count; i++)
                 {
                     Parking home = editor._edit.Homes[i];
                     Vector2 at = editor.TopOnScreen(home.Cell);
-                    DrawArc(at, 26.0f * z, 0.0f, Mathf.Tau, 24,
-                        new Color(0.6f, 1.0f, 0.9f, 0.9f), 2.5f);
+                    bool green = sides[i] == Parking.Green;
+                    Color ink = green ? GreenInk : BrownInk;
+                    // a side said is solid, one by order fainter
+                    Color ring = home.Side is null ? new Color(ink, 0.55f) : ink;
+                    DrawArc(at, 26.0f * z, 0.0f, Mathf.Tau, 24, ring, 2.5f);
                     DrawString(font, at + new Vector2(-4.0f, -28.0f * z - 4.0f),
-                        (i + 1).ToString(), HorizontalAlignment.Left, -1, 15,
-                        new Color(0.6f, 1.0f, 0.9f));
+                        (i + 1).ToString(), HorizontalAlignment.Left, -1, 15, ink);
+                    int facing = home.Facing ?? (green ? 90 : 270);
+                    Vector2 to = editor.TopOnScreen(HexField.Step(home.Cell, facing));
+                    // out past the ring, so it reads at the zoom the board opens on
+                    Vector2 dir = (to - at).Normalized() * 44.0f * z;
+                    Color arrow = home.Facing is null ? new Color(ink, 0.55f) : ink;
+                    DrawLine(at, at + dir, arrow, 3.0f);
+                    Vector2 wing = new Vector2(-dir.Y, dir.X) * 0.3f;
+                    DrawPolygon(new[] { at + dir * 1.35f, at + dir + wing, at + dir - wing },
+                        new[] { arrow });
                 }
+            }
 
-            // Last, over everything: what the brush would do (MapEditor.Help).
+            // The marked cells and the piece in hand (MapEditor.Select), then
+            // last, over everything: what the brush would do (MapEditor.Help).
+            editor.DrawAxis(this);
+            editor.DrawSelection(this);
             editor.Ghost(this);
         }
     }
@@ -1137,17 +1380,40 @@ public sealed partial class MapEditor : SceneRoot
 
     public override void _UnhandledInput(InputEvent what)
     {
+        if (!_built)
+            return;
         if (what is InputEventMouseMotion pan
             && (pan.ButtonMask & MouseButtonMask.Middle) != 0)
         {
             _camera.Position -= Panned(pan.Relative);
             return;
         }
+        // the select tool and a piece in hand take the pointer (MapEditor.Select)
+        if (SelectInput(what))
+            return;
+        // the line, the box, fill, pick and shift+click (MapEditor.Tools)
+        if (ToolInput(what))
+            return;
+        // the road tool: points, and the road laid between them (MapEditor.Roads)
+        if (RoadInput(what))
+            return;
 
         if (what is InputEventMouseMotion move)
         {
             Vector2I was = _under;
             _under = Pointed();
+            // an Alt drag from a home turns its tank (MapEditor.Tanks)
+            if (_turning >= 0)
+            {
+                Turning(GetViewport().GetMousePosition());
+                return;
+            }
+            // a drag from a tank on the Units tab carries it
+            if (_carrying >= 0)
+            {
+                Carry();
+                return;
+            }
             if (_painting || _erasing)
                 Stroke(false);
             else if (was != _under)
@@ -1163,10 +1429,30 @@ public sealed partial class MapEditor : SceneRoot
         if (what is InputEventMouseButton click)
         {
             _clicks++;
+            // Ctrl and the wheel over a home turn its tank an edge; elsewhere
+            // the wheel zooms, Ctrl or not
+            if (click.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown && click.Pressed
+                && click.CtrlPressed && TurnHome(click.ButtonIndex == MouseButton.WheelUp ? 1 : -1))
+                return;
             if (click.ButtonIndex == MouseButton.WheelUp && click.Pressed)
                 _camera.Zoom *= 1.1f;
             else if (click.ButtonIndex == MouseButton.WheelDown && click.Pressed)
                 _camera.Zoom /= 1.1f;
+            else if (click.ButtonIndex == MouseButton.Left && click.Pressed && click.AltPressed
+                     && StartTurning())
+                return;
+            else if (click.ButtonIndex == MouseButton.Left && !click.Pressed && _turning >= 0)
+            {
+                StopTurning();
+                return;
+            }
+            else if (click.ButtonIndex == MouseButton.Left && click.Pressed && StartCarry())
+                return;
+            else if (click.ButtonIndex == MouseButton.Left && !click.Pressed && _carrying >= 0)
+            {
+                StopCarry();
+                return;
+            }
             else if (click.ButtonIndex == MouseButton.Left)
             {
                 _painting = click.Pressed;
@@ -1206,16 +1492,22 @@ public sealed partial class MapEditor : SceneRoot
 
         if (what is not InputEventKey { Pressed: true, Echo: false } key)
             return;
+        if (SelectKey(key))
+            return;
         switch (key.Keycode)
         {
-            case Key.Key1: _tab = MapEdit.Tab.Foundation; break;
-            case Key.Key2: _tab = MapEdit.Tab.Cover; break;
-            case Key.Key3: _tab = MapEdit.Tab.Level; break;
+            // the number keys walk the bar (TabOrder)
+            case >= Key.Key1 and <= Key.Key7: _tab = TabOrder[key.Keycode - Key.Key1]; break;
             case Key.Q: Cycle(); break;
             case Key.W: Toggle(true); break;
             case Key.E: Toggle(false); break;
             case Key.Bracketleft: _radius = Math.Max(0, _radius - 1); break;
             case Key.Bracketright: _radius = Math.Min(6, _radius + 1); break;
+            // Keycode carries no modifiers, so ctrl+Z, ctrl+S, ctrl+O and ctrl+N
+            // already land on their letters; ctrl+shift+Z is the one standard
+            // pair that meant something else here - undo again (stage 0 of
+            // docs/editor-ux-plan.md).
+            case Key.Z when key.ShiftPressed: Take(_edit.Redo(), "redone"); return;
             case Key.Z: Take(_edit.Undo(), "undone"); return;
             case Key.Y: Take(_edit.Redo(), "redone"); return;
             case Key.F: Fill(); return;
@@ -1224,11 +1516,15 @@ public sealed partial class MapEditor : SceneRoot
             case Key.O: Chose(Item.Open); return;
             case Key.S when key.ShiftPressed: Chose(Item.SaveAs); return;
             case Key.S: Keep(); return;
-            case Key.F5: Play(sprites: key.ShiftPressed); return;
+            case Key.F5: Play(match: key.CtrlPressed, from: key.ShiftPressed ? StartCell() : null); return;
             case Key.L: _layers ^= Layers.Levels; break;
-            case Key.R: _layers ^= Layers.Ramps; break;
-            case Key.G: _layers ^= Layers.Sites; break;
             case Key.B: _layers ^= Layers.Flood; break;
+            // MapEditor.Symmetry: off, half a turn, the two mirrors
+            case Key.P: NextSymmetry(); break;
+            // MapEditor.Tools: the toolbar's free keys, the presets' tab
+            case Key.U: Use(Instrument.Box); break;
+            case Key.G: Use(Instrument.Fill); break;
+            case Key.I: Use(Instrument.Pick); break;
             case Key.Home: Home(); return;
             // MapEditor.View: the board turned a hex side either way.
             case Key.Comma: TurnBy(1); return;
@@ -1252,7 +1548,11 @@ public sealed partial class MapEditor : SceneRoot
     private void Take(bool did, string what)
     {
         _said = did ? $"one stroke {what}" : $"nothing to be {what}";
-        Settle();
+        // a resize undone is the board changing size again (MapEditor.Document)
+        if (_field.Columns != _edit.Columns || _field.Rows != _edit.Rows)
+            Reshaped();
+        else
+            Settle();
     }
 
     // --- the brush -----------------------------------------------------------
@@ -1268,13 +1568,33 @@ public sealed partial class MapEditor : SceneRoot
     {
         if (!_edit.Inside(_under))
             return;
+        // A tank is put by a click, not painted: a drag would carry it over the
+        // others and put each one it crossed on the brush's side and class
+        if (_tab == MapEdit.Tab.Units && !started)
+            return;
         if (started)
+        {
             _edit.Begin();
+            // where shift+click draws a line from (MapEditor.Tools)
+            _lastPainted = _under;
+        }
 
-        IReadOnlyList<Vector2I> patch = Patch();
-        IReadOnlyList<string> refused = _erasing
-            ? _edit.Sweep(patch, c => (_edit.Erase(c, _tab, out string why), why))
-            : _edit.Sweep(patch, Write);
+        List<string> refused;
+        if (_tab == MapEdit.Tab.Presets && !_erasing)
+            // a preset lays core and edge together (MapEditor.Tools)
+            refused = PresetStep(started);
+        else
+        {
+            IReadOnlyList<Vector2I> own = Own();
+            refused = new List<string>(_erasing
+                ? _edit.Sweep(own, Rub)
+                : _edit.Sweep(own, Write));
+            // and again on the twins, when a symmetry is up (MapEditor.Symmetry)
+            List<Vector2I> twins = Twins(own);
+            refused.AddRange(_erasing
+                ? _edit.Sweep(twins, Rub)
+                : _edit.Sweep(twins, WriteTwin));
+        }
 
         if (refused.Count > 0)
             _said = refused[0];
@@ -1290,20 +1610,45 @@ public sealed partial class MapEditor : SceneRoot
         _marks.QueueRedraw();
     }
 
+    /// <summary>The eraser on one cell: the tab's, bar the species brush,
+    /// whose eraser gives the cell back to the board's mix.</summary>
+    private (bool, string) Rub(Vector2I cell)
+    {
+        string why;
+        bool ok = _tab == MapEdit.Tab.Look && _speciesBrush is not null
+            ? _edit.Plant(cell, Species.As, out why)
+            : _edit.Erase(cell, _tab, out why);
+        return (ok, why);
+    }
+
     private (bool, string) Write(Vector2I cell)
     {
         string why;
+        // a preset is laid a stroke at a time, core and edge (MapEditor.Tools)
+        if (_tab == MapEdit.Tab.Presets)
+            return (false, "a preset is laid by its stroke, not a cell at a time");
         bool ok = _tab switch
         {
             MapEdit.Tab.Foundation =>
                 _plotBrush ? _edit.Plot(cell, _plotOn, out why)
                 : _water ? _edit.Water(cell, true, out why)
                 : _edit.Floor(cell, _floor, out why),
+            MapEdit.Tab.Look => _speciesBrush is char sp ? _edit.Plant(cell, sp, out why)
+                : _edit.Wear(cell, _look, out why),
+            // laid by points (MapEditor.Roads); a line, a box or a fill has none
+            MapEdit.Tab.Roads => Refuse("a road is laid by its points - click them, Enter lays", out why),
             MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
+            MapEdit.Tab.Units => _edit.Unit(cell, _unitSide, _unitClass, out why),
             _ => _rampBrush ? _edit.Ramp(cell, true, out why)
                             : _edit.Level(cell, _level, out why),
         };
         return (ok, why);
+    }
+
+    private static bool Refuse(string said, out string why)
+    {
+        why = said;
+        return false;
     }
 
     /// <summary>The bunker brush on one cell: walls on it, then the walls made a
@@ -1313,11 +1658,22 @@ public sealed partial class MapEditor : SceneRoot
 
     private void Fill()
     {
-        if (!_edit.Inside(_under))
+        // tanks are put one by one: a region of them is not a board
+        if (_tab == MapEdit.Tab.Units || (!_edit.Inside(_under) && _selected.Count == 0))
             return;
         _edit.Begin();
-        IReadOnlyList<string> refused =
-            _edit.Sweep(_edit.Region(_under), Write);
+        // the marked cells when there are any (MapEditor.Select), else the
+        // region of one letter under the pointer
+        IReadOnlyList<Vector2I> cells = _selected.Count > 0 ? _selected.ToList() : _edit.Region(_under);
+        List<string> refused;
+        if (_tab == MapEdit.Tab.Presets)
+            // the region is the preset's core (MapEditor.Tools)
+            refused = LayPreset(_edit, cells);
+        else
+        {
+            refused = new List<string>(_edit.Sweep(cells, Write));
+            refused.AddRange(_edit.Sweep(Twins(cells), WriteTwin));
+        }
         _dirty = true;
         _said = refused.Count > 0 ? refused[0] : "filled";
         Settle();
@@ -1336,31 +1692,29 @@ public sealed partial class MapEditor : SceneRoot
     }
 
     /// <summary>
-    /// Play the board being drawn, in the harness.
+    /// Play the board being drawn, on the 3D bench - from memory, without
+    /// saving (Play-in-Editor, stage 1 of docs/editor-ux-plan.md).
     ///
-    /// <b>It saves first, and that is the shape that was chosen.</b> What is
-    /// played is then what is on disk, so a name is all that has to cross the
-    /// scene change - see <see cref="Session"/>, which carries it. The cost is
-    /// named there too: Run on a compiled board refuses, because
-    /// <see cref="MapFile.Save"/> refuses to shadow one, and the author saves it
-    /// under another name first.
+    /// <b>The board crosses as a board, and the editor stays.</b> The draft is
+    /// built (<see cref="MapEdit.Build"/>, the same guards a file goes through)
+    /// and handed over in <see cref="Session.Board"/>; the editor is parked
+    /// whole (<see cref="Loading.Park"/>) and Edit puts the same one back, undo,
+    /// camera, tab and brush as they were. Until 2026-10-26 Run saved first and
+    /// the bench read the file: a try cost the file, a compiled board refused
+    /// to run, and the way back rebuilt the editor without its history. Saving
+    /// is the author's own step now - the bench says when what it plays is
+    /// ahead of the file.
     ///
     /// <b>A board with a fatal fault is not run, and the first fault is what it
-    /// says.</b> The harness would refuse it anyway - <c>Main</c> prints
-    /// REFUSED and quits - so a Run that changed scene and came straight back
-    /// would be the same refusal with the readout thrown away.
+    /// says.</b> The bench would refuse it anyway, so a Run that changed scene
+    /// and came straight back would be the same refusal with the readout
+    /// thrown away.
     ///
-    /// <b>The undo stack does not survive the round trip</b>, and nothing here
-    /// pretends otherwise: Edit re-opens the saved board, which is the letters,
-    /// the ramps, the masonry and the parkings, and no history.
-    ///
-    /// <b>Into the 3D bench, and the sprite harness only on ask.</b> The 3D line
-    /// is the project's main one (the root CLAUDE.md), so Run plays the board
-    /// on <c>Tank3D.tscn</c>; <paramref name="sprites"/> - shift+F5, File's
-    /// "Run sprites", <c>--menu run2d</c> - is the old way into <c>Main</c>,
-    /// kept while that line lives. Both hand back the same way.
+    /// <b>Into the 3D bench, or a match on it.</b> <paramref name="match"/> -
+    /// ctrl+F5 - plays <c>Match3D.tscn</c>; <paramref name="from"/> - shift+F5
+    /// - starts the bench's tank on that cell instead of the first home.
     /// </summary>
-    private void Play(bool sprites = false)
+    private void Play(bool match = false, Vector2I? from = null)
     {
         Settle();
         MapRules.Fault fatal =
@@ -1368,17 +1722,66 @@ public sealed partial class MapEditor : SceneRoot
         if (fatal.Rule is { Length: > 0 })
         {
             _said = "NOT run: " + fatal.Text;
-            Tell("Not run - the harness would refuse this board.\n\n"
+            Tell("Not run - the bench would refuse this board.\n\n"
                  + fatal.Text);
             Say();
             return;
         }
-        if (!Keep())
+        BoardMap board;
+        try
+        {
+            board = _edit.Build();
+        }
+        catch (Exception e)
+        {
+            _said = "NOT run: " + e.Message;
+            Tell("Not run - the board does not build.\n\n" + e.Message);
+            Say();
             return;
+        }
+        // the work to the side first: a run that never comes back loses
+        // nothing (MapEditor.Document)
+        Autosave("run");
         Session.Map = _edit.Name;
+        Session.Board = board;
+        Session.Unsaved = _dirty;
+        Session.Start = match ? null : from;
         Session.Editing = true;
-        GD.Print($"editor: running {_edit.Name} {(sprites ? "in the harness" : "on the 3D bench")}");
-        GetTree().ChangeSceneToFile(sprites ? "res://Main.tscn" : "res://Tank3D.tscn");
+        GD.Print($"editor: running {_edit.Name}{(_dirty ? " (unsaved)" : "")} "
+                 + (match ? "as a match" : "on the 3D bench")
+                 + (Session.Start is Vector2I at ? $" from ({at.X},{at.Y})" : ""));
+        // a match is the same bench with its root's Match set (Match3D.tscn):
+        // two sides off the board's homes, Tank3DBench.LineUpSides
+        Loading.Park(GetTree(), match ? "res://Match3D.tscn" : "res://Tank3D.tscn",
+                     (match ? "Match on " : "Loading ") + _edit.Name + "…");
+    }
+
+    /// <summary>The cell shift+F5 starts the tank on: the one under the
+    /// pointer, else the picked one, when it is on the board.</summary>
+    private Vector2I? StartCell()
+    {
+        foreach (Vector2I cell in new[] { _under, _picked })
+            if (_edit.Inside(cell) && _edit.OnBoard(cell))
+                return cell;
+        return null;
+    }
+
+    /// <summary>Back in the tree after the board was played: the editor is
+    /// the one that left, so only what it says changes.</summary>
+    public override void _EnterTree()
+    {
+        // closing the window asks first while there is unsaved work
+        // (MapEditor.Document)
+        GetTree().AutoAcceptQuit = false;
+        if (!_built)
+            return;
+        Session.Editing = false;
+        // a --menu run fires once: the frame counter goes on where it was, but
+        // the probe is not to be pressed again on the way back
+        _open = "";
+        _said = $"back from the bench on {_edit.Name}" + (_dirty ? " - not saved yet" : "");
+        GD.Print($"editor: back on {_edit.Name}, {_edit.Depth} undo kept");
+        Say();
     }
 
     /// <summary>
@@ -1389,15 +1792,54 @@ public sealed partial class MapEditor : SceneRoot
     /// breaks the session rather than the drawing - which is why the refusal is
     /// shown here instead of on the next run.
     /// </summary>
-    private bool Keep()
+    /// <summary>
+    /// Take off the ramps the file carries that the levels no longer decide.
+    ///
+    /// <b>The editor draws a relief and authors no ramps, and the file still
+    /// has the layer</b> - the harness and the prism scenes build it, and
+    /// <see cref="HexField.SetRelief"/> throws on a ramp with no one high edge.
+    /// A stroke that moved the levels round a ramp the author can no longer see
+    /// would otherwise save a board those scenes refuse. One undoable step.
+    /// </summary>
+    private void Unramp()
     {
+        MapRules.Draft draft = _edit.Draft();
+        List<Vector2I> bad = MapRules.RampFaults(draft)
+            .Where(f => f.Rule is "ramp.bridge" or "ramp.rock")
+            .Select(f => f.Cell).Distinct().ToList();
+        if (bad.Count == 0)
+            return;
+        _edit.Begin();
+        foreach (Vector2I cell in bad)
+            _edit.Ramp(cell, false, out string _);
+        _edit.End();
+        GD.Print($"editor: {bad.Count} ramp(s) the levels no longer decide taken off");
+        Settle();
+    }
+
+    private bool Keep(string then = "save it")
+    {
+        // A board built into the game is asked about in the author's words,
+        // with the way out on the button, before MapFile.Save refuses it in
+        // the self test's (stage 0 of docs/editor-ux-plan.md).
+        if (BoardMap.Compiled.Contains(_edit.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _said = $"NOT saved: {_edit.Name} is built in";
+            BuiltIn(then);
+            Say();
+            return false;
+        }
         bool kept;
+        Unramp();
         try
         {
             string path = _edit.Save();
             _said = "saved " + Path.GetFileName(path);
             _dirty = false;
             kept = true;
+            // on the recent list, and its autosave spent (MapEditor.Document)
+            Remember(_edit.Name);
+            Spent(_edit.Name);
         }
         catch (Exception e)
         {
@@ -1420,6 +1862,14 @@ public sealed partial class MapEditor : SceneRoot
         string cell = _edit.Inside(_under)
             ? $"({_under.X},{_under.Y}) '{glyph.Letter}' "
               + $"{glyph.Floor.ToString().ToLowerInvariant()}"
+              // the rock's look, as the panel names it (MapEditor.Panels.Stone)
+              + (glyph.Floor == Foundation.Rock && _edit.RockAt(_under) is { } rock
+                  ? $", {RockNote.Say(rock.Look.Type)} / {rock.Look.Palette.Name}" : "")
+              // the roads through it (format 3)
+              + string.Concat(_edit.RoadsAt(_under).Select(k => $", road {Road.Say(_edit.Roads[k].Type)}"))
+              // the soil's look, when it is not today's (format 3)
+              + (TankSpriteTest.Soil.Drawn(_edit.LookAt(_under))
+                  ? $", {TankSpriteTest.Soil.Name(_edit.LookAt(_under))}" : "")
               + (glyph.Over == Cover.None
                   ? "" : "/" + glyph.Over.ToString().ToLowerInvariant())
               + $" level {glyph.Level}"
@@ -1428,68 +1878,40 @@ public sealed partial class MapEditor : SceneRoot
 
         _title.Text = $"   {_edit.Name}{(_dirty ? " *" : "")}";
         _hud.Text = $"{_edit.Name}  {_edit.Columns}x{_edit.Rows}   {cell}\n"
-                    + $"{Tool()}   brush {_radius}   {_edit.Depth} undo\n"
+                    + $"{Tool()}   brush {_radius}   {_edit.Depth} undo"
+                    + (_symmetry == MapEdit.Symmetry.None ? "" : $"   symmetry: {Named(_symmetry)}") + "\n"
                     + (_said.Length > 0 ? _said : "");
-        _report.Text = Report();
+        Problems();
         _foot.Text = Under();
         // Last, because the panels read the board this has just described and
         // the right one rebuilds off it - see MapEditor.Panels.
         Refresh();
     }
 
-    private string Tool() => _tab switch
+    private string Tool() => _held is not null ? $"in hand: {(_moving ? "the marked cells" : _heldName)}"
+        : _selectTool ? $"select: {_selected.Count} marked"
+        : _instrument == Instrument.Pick ? $"pick: the {_tab} tab's brush off a cell"
+        // the line, box and fill tools name what they lay (MapEditor.Tools)
+        : _instrument != Instrument.Brush ? $"{Named(_instrument)} - {Laid()}"
+        : Laid();
+
+    /// <summary>What the tab's brush lays.</summary>
+    private string Laid() => _tab switch
     {
+        MapEdit.Tab.Presets => Preset is { } p ? $"preset: {p.Name} - {p.Say}" : "preset: none",
         MapEdit.Tab.Foundation =>
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
-                : _water ? "water" : _floor.ToString().ToLowerInvariant()),
+                : _water ? "water"
+
+                : _floor.ToString().ToLowerInvariant()),
+        MapEdit.Tab.Look => _speciesBrush is char sp ? $"trees: {Species.Name(sp)} - the species only, not the wood"
+                            : "look: " + TankSpriteTest.Soil.Name(_look),
+        MapEdit.Tab.Roads => $"road: {Road.Say(_roadBrush)} - click points, Enter lays",
         MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
                                      : "cover: " + _cover.ToString().ToLowerInvariant(),
+        MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
     };
-
-    /// <summary>
-    /// The audit, live.
-    ///
-    /// <b>Reachability is asked of the field rather than recomputed.</b> It is
-    /// the one rule that needs the floor, the flood, the cliffs and the ramp axis
-    /// together, and <see cref="HexField.Passable"/> is where those four already
-    /// meet - see <see cref="MapRules.Seen"/>.
-    /// </summary>
-    private string Report()
-    {
-        var lines = new List<string>();
-        MapRules.Draft draft = _edit.Draft();
-        int cells = draft.Cells().Count();
-        lines.Add($"{cells} cells on the board, {_sites.Count} could carry a "
-                  + $"ramp, {_sites.Count(kv => !_edit.IsRamp(kv.Key))} free");
-
-        foreach (MapRules.Fault fault in _faults.Where(f => f.Fatal).Take(12))
-            lines.Add("BAD " + fault.Text);
-        foreach (MapRules.Fault fault in _faults.Where(f => !f.Fatal).Take(6))
-            lines.Add("... " + fault.Text);
-        if (_faults.Count(f => f.Fatal) > 12)
-            lines.Add($"... and {_faults.Count(f => f.Fatal) - 12} more");
-
-        // Only when the board builds: reachability off a field carrying dropped
-        // ramps would be reachability on a board the author is not drawing.
-        if (_faults.All(f => !f.Fatal))
-        {
-            foreach (Parking parked in _edit.Homes)
-            {
-                Vector2I home = parked.Cell;
-                HashSet<Vector2I> seen = MapRules.Seen(_field, home);
-                int stranded = draft.Cells()
-                    .Count(c => !draft.IsCliff(c) && !seen.Contains(c));
-                lines.Add($"from ({home.X},{home.Y}): {seen.Count} reachable, "
-                          + $"{stranded} stranded");
-            }
-        }
-        else
-        {
-            lines.Add("(reach is not asked while the board has faults)");
-        }
-        return string.Join("\n", lines);
-    }
 
     // --- the panels ----------------------------------------------------------
 
@@ -1511,34 +1933,7 @@ public sealed partial class MapEditor : SceneRoot
         _hud = Text(LeftWide + 26.0f, 44.0f, 17);
         layer.AddChild(_hud);
 
-        _report = new RichTextLabel
-        {
-            Position = new Vector2(LeftWide + 26.0f, 106.0f),
-            CustomMinimumSize = new Vector2(520.0f, 420.0f),
-            ScrollActive = false,
-            BbcodeEnabled = false,
-            // And it does not eat the board.
-            //
-            // <b>Godot gives Label mouse_filter Ignore in its own constructor
-            // and leaves every other Control on the inherited Stop</b>, so this
-            // was an invisible 520x420 button over the top left of the board:
-            // every hex under the audit was unclickable, and nothing on screen
-            // said why. The panels are Stop on purpose - a click that lands on
-            // one must not paint the cell behind it - and the readout is the
-            // opposite case, because there is nothing on it to click.
-            //
-            // Proved by --menu overlay, which synthesises a click at the middle
-            // of this rectangle and prints the cell it picked. It printed
-            // (-1,-1).
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        _report.AddThemeColorOverride("default_color",
-            new Color(0.86f, 0.92f, 1.0f));
-        _report.AddThemeColorOverride("font_outline_color",
-            new Color(0, 0, 0, 0.85f));
-        _report.AddThemeConstantOverride("outline_size", 4);
-        _report.AddThemeFontSizeOverride("normal_font_size", 13);
-        layer.AddChild(_report);
+        Problems(layer);
     }
 
     private static Label Text(float x, float y, int size)
@@ -1634,9 +2029,6 @@ public sealed partial class MapEditor : SceneRoot
                 _plotOn = !_plotBrush || !_plotOn;
                 _plotBrush = true;
                 _water = false;
-                break;
-            case MapEdit.Tab.Level when first:
-                RampBrush(!_rampBrush);
                 break;
             // The bunker brush taken up, and pressed again its slit turned a
             // side clockwise - Masonry.Headings, the six edges.

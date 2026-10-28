@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -52,9 +53,16 @@ public sealed partial class MapEditor
     private readonly Dictionary<string, TreeModel.Loaded> _species = new();
 
     /// <summary>The species' own scenes, which only their copies ever enter the
-    /// tree: freed here, or every run ends on Godot's leak report.</summary>
+    /// tree: freed here, or every run ends on Godot's leak report. Not when
+    /// Run parks the editor (<see cref="Loading.Parking"/>): the wood planted
+    /// after the way back is copied out of these.</summary>
     public override void _ExitTree()
     {
+        // the window closes straight away again for whatever comes in -
+        // the bench has no unsaved work to ask about (MapEditor.Document)
+        GetTree().AutoAcceptQuit = true;
+        if (Loading.Parking)
+            return;
         foreach (TreeModel.Loaded model in _species.Values)
             if (GodotObject.IsInstanceValid(model.Scene))
                 model.Scene.Free();
@@ -126,7 +134,7 @@ public sealed partial class MapEditor
                 holder.Position = BoardDress.Foot(_field, at, squash, rise);
 
         ulong tWood = Time.GetTicksMsec() - t0;
-        string relief = Relief();
+        string relief = Grounds();
         if (relief != _skinAs)
         {
             _skinAs = relief;
@@ -163,16 +171,21 @@ public sealed partial class MapEditor
     private string CellDress(Vector2I cell) =>
         !_field.InBounds(cell) ? "-"
         : $"{_field.CoverAt(cell)},{_field.FoundationAt(cell)},{_field.LevelAt(cell)},"
-          + $"{_field.IsRamp(cell)},{_field.IsWater(cell)}";
+          + $"{_field.IsRamp(cell)},{_field.IsWater(cell)}"
+          // which trees it grows (format 3): its own species and the mix
+          + (_field.CoverAt(cell) == Cover.Forest
+              ? $",{_field.TreeAt(cell)}" + (_field.WoodMix is { } mix
+                  ? string.Concat(mix.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}{kv.Value}")) : "")
+              : "");
 
-    private string Relief() =>
+    private string Grounds() =>
         $"{_field.Columns}x{_field.Rows}:" + string.Join(";", _dressedAs.OrderBy(p => p.Key.X).ThenBy(p => p.Key.Y)
             .Select(p => p.Value.Substring(p.Value.IndexOf(',') + 1)));
 
     private void Wood(Vector2I cell, float squash, float rise)
     {
         var wood = new List<(Node3D, Vector3)>();
-        foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field, cell, BoardDress.Oaks, BoardDress.WoodCount, squash))
+        foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field, cell, null, BoardDress.WoodCount, squash))
         {
             if (BoardDress.Tree(this, spot, BoardDress.Foot(_field, spot.At, squash, rise), pbr: false, _crowns,
                                 $"{spot.Name}.{cell.X}_{cell.Y}.{spot.Index}", out TreeModel.Loaded? model,
@@ -191,8 +204,14 @@ public sealed partial class MapEditor
     {
         if (!_woodOn.Remove(cell, out List<(Node3D Holder, Vector3 At)>? wood))
             return;
+        // out of the tree now, not at the frame's end: the wood laid again in
+        // this frame takes the same names (a tree of the same seed on the
+        // same spot), and Godot renamed the newcomers @Node3D@N
         foreach ((Node3D holder, Vector3 _) in wood)
+        {
+            holder.GetParent()?.RemoveChild(holder);
             holder.QueueFree();
+        }
     }
 
     private void Mine(Vector2I cell, Vector2 hex, float squash, float rise)
@@ -234,25 +253,99 @@ public sealed partial class MapEditor
                 Name = "Grass", Ppm = _lawnPpm,
                 GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
             };
+            // on the relief the tufts root on the drawn ground and keep off
+            // its banks, as on the bench (BoardDress.ReliefGround); the
+            // relief is asked when a tuft is laid, so the one built last
+            _lawn.Ground = w =>
+            {
+                var flat = new Vector2(w.X, w.Z * _field.Squash);
+                return _relief is { } relief && _stage is not null
+                    ? BoardDress.ReliefGround(relief, flat - _stage.Origin, _field.RiseFactor)
+                    : _field.TopAtPoint(flat) / _field.RiseFactor;
+            };
+            _lawn.Shade = w => _relief is { } relief && _stage is not null
+                ? BoardDress.ReliefShade(relief, new Vector2(w.X, w.Z * _field.Squash) - _stage.Origin)
+                : 1.0f;
             AddChild(_lawn);
             _lawn.Map(BoardDress.LawnSpan(_field, radius, squash, rise));
             due = _dressedAs.Keys;
         }
+        else
+        {
+            // A bank is smoothed across the cells beside the one that moved:
+            // their tufts are laid again on it too.
+            var near = new HashSet<Vector2I>(moved);
+            foreach (Vector2I cell in moved)
+                foreach (int heading in HexField.EdgeHeadings)
+                    near.Add(_field.Neighbour(cell, heading));
+            due = near.Where(_dressedAs.ContainsKey);
+        }
+        // Under the bench's veil the first lawn goes down a few cells a frame
+        // (LawnMore), so the bar moves: it is a second and a half of the
+        // editor's way back, and the veil's bar stood still through all of it.
+        if (!_lawnLoaded && Loading.Veiled)
+        {
+            _lawnDue.AddRange(due);
+            _lawnLaying = (radius, squash, rise);
+            _lawnTotal = _lawnDue.Count;
+            return 0;
+        }
         int laid = 0;
         foreach (Vector2I cell in due)
-        {
-            if (_lawnOn.Remove(cell, out int was))
-                _lawn.TakeUp(was);
-            if (!BoardDress.Lawned(_field, cell))
-                continue;
-            var trunks = new List<Vector3>();
-            if (_woodOn.TryGetValue(cell, out List<(Node3D Holder, Vector3 At)>? wood))
-                foreach ((Node3D holder, Vector3 _) in wood)
-                    trunks.Add(holder.Position);
-            _lawnOn[cell] = _lawn.Lay(Grass3D.Kind.CelTufts, BoardDress.Middle(_field, cell, squash, rise), radius,
-                                      101 + cell.X * 31 + cell.Y, trunks);
-            laid++;
-        }
+            if (LawnCell(cell, radius, squash, rise))
+                laid++;
         return laid;
+    }
+
+    private bool LawnCell(Vector2I cell, float radius, float squash, float rise)
+    {
+        if (_lawnOn.Remove(cell, out int was))
+            _lawn!.TakeUp(was);
+        if (!BoardDress.Lawned(_field, cell))
+            return false;
+        var trunks = new List<Vector3>();
+        if (_woodOn.TryGetValue(cell, out List<(Node3D Holder, Vector3 At)>? wood))
+            foreach ((Node3D holder, Vector3 _) in wood)
+                trunks.Add(holder.Position);
+        _lawnOn[cell] = _lawn!.Lay(Grass3D.Kind.CelTufts, BoardDress.Middle(_field, cell, squash, rise), radius,
+                                   101 + cell.X * 31 + cell.Y, trunks);
+        return true;
+    }
+
+    /// <summary>The first lawn is down, or was never waited for: the veil
+    /// lifts after it, and every later lawn is laid whole, as a stroke
+    /// wants it.</summary>
+    private bool _lawnLoaded;
+
+    private readonly List<Vector2I> _lawnDue = new();
+    private (float Radius, float Squash, float Rise) _lawnLaying;
+    private int _lawnTotal;
+
+    /// <summary>Cells of the first lawn laid a frame under the veil.</summary>
+    private const int LawnStage = 16;
+
+    /// <summary>
+    /// A frame's share of the first lawn under the veil, and the veil told
+    /// once it is all down (<see cref="Loading.Built"/>). Opened straight,
+    /// nothing was queued and this only says the build is over.
+    /// </summary>
+    private void LawnMore()
+    {
+        if (_lawnLoaded)
+            return;
+        if (_lawnDue.Count == 0)
+        {
+            _lawnLoaded = true;
+            Loading.Built(this);
+            return;
+        }
+        int laid = _lawnTotal - _lawnDue.Count;
+        Loading.Step(this, $"grass {laid} of {_lawnTotal} cells", 0.4f + 0.6f * laid / _lawnTotal);
+        int n = Math.Min(LawnStage, _lawnDue.Count);
+        (float radius, float squash, float rise) = _lawnLaying;
+        for (int i = 0; i < n; i++)
+            LawnCell(_lawnDue[i], radius, squash, rise);
+        _lawnDue.RemoveRange(0, n);
+        Loading.Rest();
     }
 }
