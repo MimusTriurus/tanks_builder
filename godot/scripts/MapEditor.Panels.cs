@@ -263,7 +263,7 @@ public sealed partial class MapEditor
                 .Concat(Enum.GetValues<RoadType>().Select(t =>
                     // the roads (format 3): a drag lays one along the cells it
                     // crosses, a right drag cuts
-                    ($"road: {Road.Say(t)}  (drag)",
+                    ($"road: {Road.Say(t)}  (points)",
                      (Action)(() => { _roadBrush = t; _look = null; _water = false; _plotBrush = false; }),
                      (Func<bool>)(() => !_water && !_plotBrush && _look is null && _roadBrush == t))))
                 .ToList();

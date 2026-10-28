@@ -43,7 +43,17 @@ public sealed partial class Stage3D
     /// roads switched off on a board with none. Each axis's segments are laid
     /// over their own box of texels, nearest axis kept.
     /// </summary>
-    private void Roads(Relief f)
+    private void Roads(Relief f) => RedrawRoads();
+
+    /// <summary>
+    /// The road map drawn again from <see cref="HexField.Roads"/>, without
+    /// the relief - the editor's road tool lays its road being drawn this way,
+    /// a frame at a time (MapEditor.Roads). Roads from
+    /// <paramref name="ghostFrom"/> on are its ghost: drawn as roads, see-through
+    /// and cooler, so the author sees the road it will be and that it is not
+    /// laid yet.
+    /// </summary>
+    public void RedrawRoads(int ghostFrom = int.MaxValue)
     {
         _roadDist = null;
         if (Field.Atlas is null || _tops.MaterialOverride is not ShaderMaterial ink)
@@ -91,7 +101,7 @@ public sealed partial class Stage3D
                             continue;
                         dist[k] = d;
                         along[k] = a.Along[i] + t * Mathf.Sqrt(len2);
-                        type[k] = (float)a.Type;
+                        type[k] = (float)a.Type + (a.Index >= ghostFrom ? 8.0f : 0.0f);
                     }
             }
         Image img = Image.CreateEmpty(wide, tall, false, Image.Format.Rgbaf);
@@ -153,7 +163,9 @@ vec3 road_at(vec3 soil, float grain) {
     if (rd.a < 0.5)
         return soil;
     float d = rd.r, s = rd.g;
-    int ty = int(rd.b + 0.5);
+    // 8 and over: the editor's road being drawn, its ghost (RedrawRoads)
+    bool ghost = rd.b > 7.5;
+    int ty = int(rd.b + 0.5) - (ghost ? 8 : 0);
     vec2 q = ground.xz / hex_r;
     // a side wide, the forest track narrower; a dirt road's edge torn, a
     // paved one's clean
@@ -197,6 +209,13 @@ vec3 road_at(vec3 soil, float grain) {
         float line = (1.0 - smoothstep(0.012, 0.02, abs(d - 0.43)));
         float dash = (1.0 - smoothstep(0.015, 0.025, d)) * step(0.5, fract(s / 0.3));
         c = mix(c, vec3(0.92, 0.90, 0.84), max(line, dash));
+    }
+    if (ghost) {
+        // the road being drawn: itself, cooler, and a bright rim at its
+        // edge so its width reads over any ground
+        float rim = smoothstep(edge - 0.06, edge - 0.02, d);
+        c = mix(mix(c, vec3(0.70, 0.88, 1.0), 0.3), vec3(0.92, 0.97, 1.0), rim);
+        return mix(soil, c, on * 0.85);
     }
     return mix(soil, c, on);
 }

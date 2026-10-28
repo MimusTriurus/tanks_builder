@@ -350,6 +350,9 @@ public sealed partial class MapEditor
     /// </summary>
     private void Ghost(Overlay on)
     {
+        // the road tool draws its own (MapEditor.Roads)
+        if (RoadGhost(on))
+            return;
         if (!_edit.Inside(_under) || _sheet is not null)
             return;
         // the pointer is the selection's (MapEditor.Select), which draws its own

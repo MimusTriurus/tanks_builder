@@ -90,14 +90,9 @@ public sealed partial class MapEditor : SceneRoot
     /// null for the floor brushes: it paints the look a floor wears and never
     /// the floor.</summary>
     private char? _look;
-    /// <summary>The Floor tab's road brush (<see cref="Road"/>, format 3), or
-    /// null: a drag lays a road along the cells it crosses, a right drag cuts
-    /// every road under it.</summary>
+    /// <summary>The Floor tab's road tool (<see cref="Road"/>, format 3), or
+    /// null: points on hexes, the road laid between them (MapEditor.Roads).</summary>
     private RoadType? _roadBrush;
-    /// <summary>The road the stroke under way is laying: its cells so far
-    /// and its index among the draft's roads, -1 before it has two.</summary>
-    private readonly List<Vector2I> _roadCells = new();
-    private int _roadSlot = -1;
 
     /// <summary>Which way the board's-edge brush writes: a cell on to the plot
     /// or off it. Two statements rather than one toggle, because "empty" and
@@ -523,6 +518,7 @@ public sealed partial class MapEditor : SceneRoot
         FloorProbe();
         SoilProbe();
         RoadProbe();
+        RoadToolProbe();
         ToolsProbe();
         AutosaveTick(delta);
         CrownsFollow();
@@ -1378,6 +1374,9 @@ public sealed partial class MapEditor : SceneRoot
         // the line, the box, fill, pick and shift+click (MapEditor.Tools)
         if (ToolInput(what))
             return;
+        // the road tool: points, and the road laid between them (MapEditor.Roads)
+        if (RoadInput(what))
+            return;
 
         if (what is InputEventMouseMotion move)
         {
@@ -1548,61 +1547,6 @@ public sealed partial class MapEditor : SceneRoot
     /// what makes a drag across forty cells one undo - see
     /// <see cref="MapEdit.Begin"/>.
     /// </summary>
-    /// <summary>
-    /// The road brush's stroke (format 3, docs/map-format3-plan.md Ф6): the
-    /// cells the drag crosses become one road, its gaps filled by the hex line
-    /// between (<see cref="MapEdit.Line"/>), and drawn back over its last cell
-    /// it gives that cell up. Laid again on every cell, so the author sees it
-    /// grow; a step the map would refuse - water, a rock, a stretch another
-    /// road already has - is not taken, and the road stays as it was. Started
-    /// on another road it is a fork. A right drag cuts every road under the
-    /// brush.
-    /// </summary>
-    private List<string> Paving(bool started, RoadType type)
-    {
-        var refused = new List<string>();
-        if (_erasing)
-        {
-            foreach (Vector2I c in Own())
-                _edit.Cut(c);
-            return refused;
-        }
-        if (started)
-        {
-            _roadCells.Clear();
-            _roadSlot = -1;
-            _roadCells.Add(_under);
-            return refused;
-        }
-        if (_roadCells.Count == 0 || _roadCells[^1] == _under)
-            return refused;
-        var next = new List<Vector2I>(_roadCells);
-        IReadOnlyList<Vector2I> line = MapEdit.Line(next[^1], _under);
-        for (int i = 1; i < line.Count; i++)
-        {
-            if (next.Count >= 2 && line[i] == next[^2])
-                next.RemoveAt(next.Count - 1);
-            else
-                next.Add(line[i]);
-        }
-        if (next.Count < 2)
-        {
-            _roadCells.Clear();
-            _roadCells.AddRange(next);
-            return refused;
-        }
-        int slot = _edit.Pave(next, type, _roadSlot, out string why);
-        if (slot < 0)
-        {
-            refused.Add(why);
-            return refused;
-        }
-        _roadSlot = slot;
-        _roadCells.Clear();
-        _roadCells.AddRange(next);
-        return refused;
-    }
-
     private void Stroke(bool started)
     {
         if (!_edit.Inside(_under))
@@ -1619,10 +1563,7 @@ public sealed partial class MapEditor : SceneRoot
         }
 
         List<string> refused;
-        if (_tab == MapEdit.Tab.Foundation && _roadBrush is RoadType paving
-            && !_water && !_plotBrush && _look is null)
-            refused = Paving(started, paving);
-        else if (_tab == MapEdit.Tab.Presets && !_erasing)
+        if (_tab == MapEdit.Tab.Presets && !_erasing)
             // a preset lays core and edge together (MapEditor.Tools)
             refused = PresetStep(started);
         else
@@ -1925,7 +1866,7 @@ public sealed partial class MapEditor : SceneRoot
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
                 : _water ? "water"
                 : _look is char look ? "look " + TankSpriteTest.Soil.Name(look)
-                : _roadBrush is RoadType rt ? $"road {Road.Say(rt)}"
+                : _roadBrush is RoadType rt ? $"road {Road.Say(rt)} - click points, Enter lays"
 
                 : _floor.ToString().ToLowerInvariant()),
         MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"

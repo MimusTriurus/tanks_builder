@@ -618,6 +618,78 @@ public sealed partial class MapEditor
     }
 
     /// <summary>
+    /// <c>--map roadtest --menu roadtool</c> and <c>--menu roadlay</c>: the
+    /// road tool without a mouse (MapEditor.Roads). The first puts two points
+    /// and leaves the pointer on a third, so a capture shows the ghost, the
+    /// numbers and the axis; the second lays a road by its points, drags the
+    /// dirt road's end handle, starts a fork with a press that does not move,
+    /// tries a point across water, and undoes it all back to the file.
+    /// </summary>
+    private void RoadToolProbe()
+    {
+        if (_open is not ("roadtool" or "roadlay") || _frame != 10)
+            return;
+        string file = MapFile.Has(_edit.Name)
+            ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
+        _tab = MapEdit.Tab.Foundation;
+        _roadBrush = RoadType.Gravel;
+        _look = null;
+        _water = false;
+        _plotBrush = false;
+        void Click(Vector2I c)
+        {
+            _under = c;
+            RoadPress(false);
+            RoadRelease();
+        }
+        string Path() => string.Join(" ", _roadPath.Select(c => $"{c.X},{c.Y}"));
+        Click(new Vector2I(7, 2));
+        Click(new Vector2I(10, 6));
+        _under = new Vector2I(13, 8);
+        RoadLay();
+        GD.Print($"roadtool: points 7,2 10,6 and the pointer on 13,8 - {_roadPath.Count} cells: {Path()}"
+                 + (_roadBlock is null ? "" : $"; blocked: {_roadWhy}"));
+        if (_open == "roadtool")
+            return;
+
+        RoadCommit();
+        GD.Print($"roadtool: laid - {_said}; now {_edit.Roads.Count} roads, the last {_edit.Roads[^1]}");
+
+        // the dirt road's far end dragged up to 13,0
+        _under = new Vector2I(13, 2);
+        RoadPress(false);
+        _roadMoved = true;
+        _roadPoints[_roadHolding] = new Vector2I(13, 0);
+        RoadRelease();
+        GD.Print($"roadtool: the dirt road's end dragged to 13,0 - "
+                 + string.Join(" | ", _edit.Roads.Where(r => r.Type == RoadType.Dirt)));
+
+        // a press on the cobble that does not move: a fork from it
+        Click(new Vector2I(11, 4));
+        Click(new Vector2I(11, 6));
+        RoadCommit();
+        GD.Print($"roadtool: a fork from the cobble at 11,4 - {_said}; the last {_edit.Roads[^1]}");
+
+        // a point across the water: the first cell in the way and why
+        _edit.Begin();
+        _edit.Water(new Vector2I(4, 1), true, out string _);
+        _edit.Water(new Vector2I(4, 2), true, out string _);
+        _edit.End();
+        Settle();
+        Click(new Vector2I(3, 1));
+        _under = new Vector2I(5, 1);
+        RoadLay();
+        GD.Print($"roadtool: 3,1 to 5,1 round the water - {Path()}"
+                 + (_roadBlock is null ? "" : $"; blocked: {_roadWhy}"));
+        RoadCancel();
+
+        while (_edit.Undo()) { }
+        Settle();
+        GD.Print($"roadtool: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        Say();
+    }
+
+    /// <summary>
     /// <c>--map roadtest --menu roads</c>: Ф6's roads without a mouse. The
     /// board written back as the file; a road laid and one refused across
     /// water; the fork cut at its cell; water painted on a road; the turn's

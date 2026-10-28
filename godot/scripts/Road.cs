@@ -118,7 +118,7 @@ public static class Road
 
     /// <summary>One road's axis in world XZ, densely sampled, with the arc
     /// length at each point, both in world units.</summary>
-    public readonly record struct Axis(Vector2[] Points, float[] Along, RoadType Type);
+    public readonly record struct Axis(Vector2[] Points, float[] Along, RoadType Type, int Index);
 
     /// <summary>
     /// Every road's axis, given each cell's middle in world XZ. A road ends in
@@ -170,9 +170,85 @@ public static class Road
             var along = new float[points.Count];
             for (int i = 1; i < points.Count; i++)
                 along[i] = along[i - 1] + points[i].DistanceTo(points[i - 1]);
-            axes.Add(new Axis(points.ToArray(), along, roads[k].Type));
+            axes.Add(new Axis(points.ToArray(), along, roads[k].Type, k));
         }
         return axes;
+    }
+
+    /// <summary>A step's price over the plain one by how far the road turns
+    /// into it: none straight on, a little for 60 degrees, much for 120 - so a
+    /// laid road runs straight and bends gently, as the renders' did. A turn
+    /// of 180 is no step at all.</summary>
+    public const float Bend60 = 0.35f, Bend120 = 1.2f;
+
+    /// <summary>
+    /// The road the editor lays between two of the author's points
+    /// (docs/editor.md, «Дорога по точкам»): the cheapest chain of
+    /// neighbouring cells from <paramref name="from"/> to <paramref name="to"/>,
+    /// each step one cell plus its bend (<see cref="Bend60"/>), only through
+    /// cells <paramref name="open"/> lets a road cross and not along a stretch
+    /// <paramref name="taken"/> says another road has. <paramref name="heading"/>
+    /// is the way the road came into <paramref name="from"/>, so a road laid
+    /// point by point bends at its points as it would anywhere else. Null when
+    /// no such chain is.
+    /// </summary>
+    public static List<Vector2I>? Route(Vector2I from, int? heading, Vector2I to,
+                                        Func<Vector2I, bool> open, Func<Vector2I, Vector2I, bool> taken)
+    {
+        if (from == to)
+            return new List<Vector2I> { from };
+        if (!open(to) || !open(from))
+            return null;
+        // a state is a cell and the side the road came in by
+        var cost = new Dictionary<(Vector2I, int), float>();
+        var back = new Dictionary<(Vector2I, int), (Vector2I, int)>();
+        var queue = new PriorityQueue<(Vector2I Cell, int Way), float>();
+        var start = (from, heading ?? -1);
+        cost[start] = 0.0f;
+        queue.Enqueue(start, Hexes(from, to));
+        int spent = 0;
+        while (queue.TryDequeue(out (Vector2I Cell, int Way) s, out float _) && spent++ < 20000)
+        {
+            if (s.Cell == to)
+            {
+                var path = new List<Vector2I> { s.Cell };
+                var at = s;
+                while (back.TryGetValue(at, out var was))
+                {
+                    path.Add(was.Item1);
+                    at = was;
+                }
+                path.Reverse();
+                return path;
+            }
+            float here = cost[s];
+            foreach (int way in HexField.EdgeHeadings)
+            {
+                int turn = s.Way < 0 ? 0 : Mathf.Abs(Mathf.PosMod(way - s.Way + 180, 360) - 180);
+                if (turn >= 180)
+                    continue;
+                Vector2I next = HexField.Step(s.Cell, way);
+                if (!open(next) || taken(s.Cell, next))
+                    continue;
+                float price = here + 1.0f + (turn == 60 ? Bend60 : turn == 120 ? Bend120 : 0.0f);
+                var n = (next, way);
+                if (cost.TryGetValue(n, out float had) && had <= price)
+                    continue;
+                cost[n] = price;
+                back[n] = s;
+                queue.Enqueue(n, price + Hexes(next, to));
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Steps between two cells on the flat-top odd-q grid
+    /// (<see cref="HexField.Step"/>: odd columns shoved down).</summary>
+    public static int Hexes(Vector2I a, Vector2I b)
+    {
+        int az = a.Y - (a.X - (a.X & 1)) / 2, bz = b.Y - (b.X - (b.X & 1)) / 2;
+        int dx = a.X - b.X, dz = az - bz;
+        return (Mathf.Abs(dx) + Mathf.Abs(dz) + Mathf.Abs(dx + dz)) / 2;
     }
 
     /// <summary>How far a point lies from the nearest of the axes.</summary>
