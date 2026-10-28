@@ -17,6 +17,16 @@ namespace TankSpriteTest;
 /// flips across the seam between the two axes, and its false zero drew a
 /// centre line where there was none (the renders' catch).
 ///
+/// <b>Two distances, because an open end parts them.</b> Past the end the
+/// nearest point of the axis is the end itself: the distance to it is round
+/// and the length along stands still. A pattern laid by those bent a dirt
+/// road's ruts into a horseshoe round its end and froze a log road's logs into
+/// one value - the gap between two logs, a black patch (2026-10-28). So the
+/// texel keeps both: off the axis's line and the length run on past the end,
+/// which the pattern reads (r, g), and the distance to the road, which cuts
+/// its shape (a). The end is then each type's own: a track wears out, a log
+/// road stops at its last log, a paved road is rounded off.
+///
 /// <b>Fine, because the road's lines are.</b> A texel is a fortieth of a
 /// circumradius: an asphalt's centre dash is a few hundredths of one wide and
 /// drawn where the distance is under that, which a 1/12 raster would round off.
@@ -77,6 +87,7 @@ public sealed partial class Stage3D
         int tall = Mathf.Clamp(Mathf.CeilToInt((hiZ - loZ) / texel) + 1, 2, 4096);
         float stepX = (hiX - loX) / (wide - 1), stepZ = (hiZ - loZ) / (tall - 1);
         var dist = new float[wide * tall];
+        var side = new float[wide * tall];
         var along = new float[wide * tall];
         var type = new float[wide * tall];
         System.Array.Fill(dist, float.MaxValue);
@@ -94,13 +105,19 @@ public sealed partial class Stage3D
                     for (int x = x0; x <= x1; x++)
                     {
                         var q = new Vector2(loX + x * stepX, loZ + z * stepZ);
-                        float t = Mathf.Clamp((q - p0).Dot(seg) / len2, 0.0f, 1.0f);
+                        float free = (q - p0).Dot(seg) / len2;
+                        float t = Mathf.Clamp(free, 0.0f, 1.0f);
                         float d = q.DistanceTo(p0 + seg * t);
                         int k = z * wide + x;
                         if (d >= dist[k])
                             continue;
                         dist[k] = d;
-                        along[k] = a.Along[i] + t * Mathf.Sqrt(len2);
+                        // past an open end the nearest point is the end itself:
+                        // the pattern reads the line and the length run on
+                        // (side, free), the shape the end (dist) - else the
+                        // ruts bent round the end and the logs stood still
+                        side[k] = Mathf.Abs((q - p0).Cross(seg)) / Mathf.Sqrt(len2);
+                        along[k] = a.Along[i] + free * Mathf.Sqrt(len2);
                         type[k] = (float)a.Type + (a.Index >= ghostFrom ? 8.0f : 0.0f);
                     }
             }
@@ -111,8 +128,8 @@ public sealed partial class Stage3D
                 int k = z * wide + x;
                 bool near = dist[k] <= reach;
                 img.SetPixel(x, z, near
-                    ? new Color(dist[k] / r, along[k] / r, type[k], 1.0f)
-                    : new Color(9.0f, 0.0f, 0.0f, 0.0f));
+                    ? new Color(side[k] / r, along[k] / r, type[k], dist[k] / r)
+                    : new Color(9.0f, 0.0f, 0.0f, 9.0f));
             }
         if (_roadMap is null || _roadMap.GetWidth() != wide || _roadMap.GetHeight() != tall)
             _roadMap = ImageTexture.CreateFromImage(img);
@@ -160,9 +177,14 @@ vec3 road_at(vec3 soil, float grain) {
     if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0)
         return soil;
     vec4 rd = texture(road_tex, uv);
-    if (rd.a < 0.5)
+    // a: the distance to the road, which its shape is cut by; r: off the
+    // axis's line, which its pattern is laid by - the two part only past an
+    // open end (RedrawRoads)
+    if (rd.a > 0.69)
         return soil;
-    float d = rd.r, s = rd.g;
+    float d = rd.r, s = rd.g, out_d = rd.a;
+    // how far past the end, along the road; nought along it
+    float past = sqrt(max(out_d * out_d - d * d, 0.0));
     // 8 and over: the editor's road being drawn, its ghost (RedrawRoads)
     bool ghost = rd.b > 7.5;
     int ty = int(rd.b + 0.5) - (ghost ? 8 : 0);
@@ -172,7 +194,13 @@ vec3 road_at(vec3 soil, float grain) {
     float half_w = ty == 4 ? 0.3 : 0.5;
     bool rough = ty == 0 || ty == 4 || ty == 3;
     float edge = half_w + (rough ? 0.05 : 0.01) * (rock_noise(q / 0.12) * 2.0 - 1.0);
-    float on = 1.0 - smoothstep(edge - 0.015, edge, d);
+    float on = 1.0 - smoothstep(edge - 0.015, edge, out_d);
+    // the end: a track wears out into the grass, a log road stops at its
+    // last log, a paved one is rounded off
+    if (ty == 0 || ty == 4)
+        on *= 1.0 - smoothstep(0.05, half_w * 0.9, past + 0.12 * rock_noise(q / 0.1));
+    else if (ty == 3)
+        on *= 1.0 - step(0.04, past);
     if (on <= 0.0)
         return soil;
     vec3 c;
@@ -213,7 +241,7 @@ vec3 road_at(vec3 soil, float grain) {
     if (ghost) {
         // the road being drawn: itself, cooler, and a bright rim at its
         // edge so its width reads over any ground
-        float rim = smoothstep(edge - 0.06, edge - 0.02, d);
+        float rim = smoothstep(edge - 0.06, edge - 0.02, out_d);
         c = mix(mix(c, vec3(0.70, 0.88, 1.0), 0.3), vec3(0.92, 0.97, 1.0), rim);
         return mix(soil, c, on * 0.85);
     }
