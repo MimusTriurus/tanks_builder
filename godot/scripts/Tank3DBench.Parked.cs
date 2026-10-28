@@ -143,6 +143,8 @@ public sealed partial class Tank3DBench
         // in the pond, afloat (Tank3DBench.Afloat)
         if (AfloatY(cell, model, ClassFor(tag)) is float afloat)
             rig.Position = new Vector3(rig.Position.X, afloat, rig.Position.Z);
+        // a new rig: none of the bob it rode before is on it
+        FloatOf(model).Applied = 0.0f;
         rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
         // measured as it is stood up, unturned, so a hand-over to it measures
         // nothing (Tank3DBench.MeasureRig)

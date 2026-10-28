@@ -841,13 +841,19 @@ public sealed partial class Tank3DBench
         float ground = OtherGround(o.Rig.Position, out Vector3 up);
         // afloat with the gear, as the rig is; knocked out, down to the bed
         // (Tank3DBench.Afloat)
+        bool floats = false;
         if (o.Fate == Fate.Alive && _field is not null
             && AfloatY(_field.CellUnder(Board(o.Rig.Position)), o.Model, o.Profile) is float afloat)
         {
             ground = afloat;
             up = Vector3.Up;
+            floats = true;
         }
-        float y = o.Rig.Position.Y;
+        // the bob off: the fall below judges the hull's own height
+        Float bob = FloatOf(o.Model);
+        float y = o.Rig.Position.Y - bob.Applied;
+        bob.Applied = 0.0f;
+        bool fell = o.Falling;
         Vector3 way = new(o.Way.X, 0.0f, o.Way.Z);
         way = way.LengthSquared() > 1e-6f ? way.Normalized() : o.Ahead;
         float reach = ReachAlong(o, way);
@@ -893,6 +899,14 @@ public sealed partial class Tank3DBench
                 Land(o, way, o.FallV / LandAt);
             }
             y = ground;
+        }
+        // Afloat: the plunge's kick as it lands on the water, then the bob,
+        // as the rig's (Tank3DBench.Afloat)
+        if (floats && !o.Falling)
+        {
+            if (fell)
+                bob.Bob.Jolt(TankTick.PlungeKick);
+            y = Bobbed(o.Model, y, dt);
         }
         o.Rig.Position = new Vector3(o.Rig.Position.X, y, o.Rig.Position.Z);
         // Tipped, the up leans the way it falls: the hull's line along the
@@ -1151,6 +1165,7 @@ public sealed partial class Tank3DBench
     private void RamFrame(float dt, Basis eye)
     {
         OtherTick(dt);
+        FloatTick(dt);
         _other?.Hits.Tick(dt, eye);
         foreach (CelHit? fan in _fans)
             fan?.Tick(dt, eye);

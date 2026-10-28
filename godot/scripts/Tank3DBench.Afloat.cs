@@ -13,6 +13,13 @@ namespace TankSpriteTest;
 /// And the rig's way out (<see cref="Climb"/>): the hull takes the bank's
 /// height over a moment, nose up, the water running off it - its middle
 /// crossing on to the bank had the ride jump a level in one frame.
+///
+/// <b>Afloat, they bob</b> (2026-10-28): the target and the standing units
+/// each ride a <see cref="Buoy"/> of their own (<see cref="FloatOf"/>), as
+/// the rig rides its - the swell, and the target's plunge when a ram throws
+/// it in. Only the rig bobbed: a hull rammed into the pond lay dead still on
+/// it until it was taken. Kept per model, so the bob goes with a hull from
+/// target to standing and back.
 /// </summary>
 public sealed partial class Tank3DBench
 {
@@ -28,6 +35,51 @@ public sealed partial class Tank3DBench
 
     /// <summary>The rig is on its way up out of the pond.</summary>
     private bool _climbing;
+
+    /// <summary>A hull's bob off the rig, and how much of it its rig's height
+    /// carries now, world Y - taken off before the height is judged again.</summary>
+    private sealed class Float
+    {
+        public readonly Buoy Bob = new();
+        public float Applied;
+    }
+
+    private readonly Dictionary<TankModel, Float> _floats = new();
+
+    private Float FloatOf(TankModel model)
+    {
+        if (!_floats.TryGetValue(model, out Float? f))
+        {
+            // each hull at its own place in the swell, as Fleet.Crew sets it
+            f = new Float();
+            f.Bob.Phase = (model.GetInstanceId() % 628) * 0.01;
+            _floats[model] = f;
+        }
+        return f;
+    }
+
+    /// <summary>The bob of <paramref name="model"/> this frame on top of
+    /// <paramref name="rest"/>, world Y.</summary>
+    private float Bobbed(TankModel model, float rest, float dt)
+    {
+        Float f = FloatOf(model);
+        f.Bob.Update(dt);
+        f.Applied = (float)(f.Bob.Offset + f.Bob.Idle) / RiseFactor;        return rest + f.Applied;
+    }
+
+    /// <summary>Every frame: the standing units afloat ride their bob. A
+    /// knocked-out one is <see cref="Founder"/>'s, going down.</summary>
+    private void FloatTick(float dt)
+    {
+        for (int i = 0; i < _parked.Count; i++)
+        {
+            Parked p = _parked[i];
+            if (p.Fate != Fate.Alive || AfloatY(p.Cell, p.Model, ClassFor(p.Tag)) is not float rest)
+                continue;
+            Vector3 at = p.Rig.Position;
+            p.Rig.Position = new Vector3(at.X, Bobbed(p.Model, rest, dt), at.Z);
+        }
+    }
 
     /// <summary>Where a hull of <paramref name="model"/> floats on
     /// <paramref name="cell"/>, world Y - or null when it does not: dry land, a
