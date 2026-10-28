@@ -408,10 +408,11 @@ public static class MapFile
     /// <summary>
     /// A block of format 3 this build does not read yet, refused by name.
     ///
-    /// Each comes off this list in the stage that reads it
-    /// (docs/map-format3-plan.md, Ф2-Ф6): <c>climate</c> and <c>rocks</c>
-    /// came off in Ф2. Until then a file that says one is a board this build
-    /// would show wrong, so it is not shown at all.
+    /// Each came off this list in the stage that reads it
+    /// (docs/map-format3-plan.md, Ф2-Ф6); since Ф5 every block is read, and
+    /// the check stays for the next block a format adds. A file that says a
+    /// block the build does not read is a board it would show wrong, so it is
+    /// not shown at all.
     /// </summary>
     private static void Unread(Shape file, string name)
     {
