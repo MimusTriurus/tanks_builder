@@ -23,8 +23,13 @@
 `seats` из сайдкара, а неопубликованная порода читается из `pipeline/out` — снимки
 `Tree3D` с шестью породами, пожар и падение (godot/docs/props.md, «Tree3D»).
 **Т4 сделана** — это Ф5 формата 3 ([godot/docs/map-format3-plan.md](../../godot/docs/map-format3-plan.md)):
-`Species`, блоки `wood` и `trees`, кисть породы; `maps/woodtest.json`. Т5 (публикация
-в LFS) ждёт, когда автор примет вид на доске; Т6 — раздел о породах в [trees.md](trees.md).
+`Species`, блоки `wood` и `trees`, кисть породы; `maps/woodtest.json`.
+
+**Т5 сделана (2026-10-28)**: автор принял вид на доске, все 18 зёрен (по три на породу)
+скопированы в `assets/Models/Trees/<Имя>/` (`tree.glb` через LFS, `tree.json`) — 42 МБ,
+меньше оценки в ~100: пород дешевле дуба больше половины. Копировал руками, как
+`tree_gen.publish` из `pipeline/out/trees/species/`. Т6 — раздел о породах в
+[trees.md](trees.md).
 
 **Что показала Т1** (зёрна 1–3 всех шести, `glb_burn` по записанному файлу):
 
