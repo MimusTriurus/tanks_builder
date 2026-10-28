@@ -776,6 +776,8 @@ void fragment() {
         if (_aimInk is { } ramInk)
         {
             DrawBadges(ramInk);
+            DrawShotSign(ramInk);
+            DrawRamSign(ramInk);
             DrawRam(ramInk);
             DrawBlast(ramInk);
         }

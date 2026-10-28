@@ -1350,6 +1350,8 @@ public sealed partial class Tank3DBench : Node3D
             case "ram-mode": RamToggle(); break;
             // Ctrl held for a capture: the own side aimed at (Tank3DBench.Match)
             case "friendly": _friendlyHeld = !_friendlyHeld; break;
+            // the pointer on the end-turn button, for a capture (Tank3DBench.Badges)
+            case "pass-hover": _passHeld = !_passHeld; break;
             case "douse": Douse(); break;
             case "restart": if (Match) Restart(); break;
             case "way": NextWay(); break;

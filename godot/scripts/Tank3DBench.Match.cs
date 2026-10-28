@@ -736,7 +736,16 @@ public sealed partial class Tank3DBench
         pass.AddThemeFontSizeOverride("font_size", 16);
         pass.Pressed += EndTurn;
         layer.AddChild(pass);
+        _passButton = pass;
     }
+
+    private Button? _passButton;
+    /// <summary><c>--do pass-hover</c>: the pointer held on the end of the turn, for a capture.</summary>
+    private bool _passHeld;
+
+    /// <summary>The end of the turn under the pointer: what passing it costs is
+    /// shown on the board (<c>Tank3DBench.Badges</c>).</summary>
+    private bool PassUnder => _passHeld || (_passButton?.IsHovered() ?? false);
 
     private string _bannerText = "";
     private Color _bannerInk = Colors.White;

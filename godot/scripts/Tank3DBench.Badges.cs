@@ -55,7 +55,7 @@ public sealed partial class Tank3DBench
     private void BadgeOn(Control ink, TankModel model, Node3D rig, Side side, string tag, Fate fate, Vector2I cell, float r)
     {
         Badge badge = BadgeOf(side, tag, fate, cell);
-        if (badge == Badge.None || BlastMarked(model))
+        if (badge == Badge.None || BlastMarked(model) || ShotMarked(model))
             return;
         Vector2 at = Over(model, rig);
         // the drowned on the bed: over the water, not over the hull under it,
@@ -66,33 +66,60 @@ public sealed partial class Tank3DBench
             p.Y = Mathf.Max(p.Y, _field!.WaterTop(cell) / RiseFactor);
             at = _camera.UnprojectPosition(p + Vector3.Up * (model.Size.Y * model.PixelsPerUnit * 1.15f));
         }
-        // a token, dark with a pale rim: the sign reads over the hull's own
-        // fire and smoke, which a bare flame drowned in. A fire beats on its
-        // owner's turn - it is the owner's to answer.
-        float beat = badge == Badge.Burning && side == _turn
-            ? 0.5f - 0.5f * Mathf.Cos(Mathf.Tau * _badgeClock / BadgeBeat) : 0.0f;
+        // A fire beats on its owner's turn - it is the owner's to answer; with
+        // the end of the turn under the pointer it is crossed out: it burns
+        // as the turn is passed (GDD states.md «Горит»).
+        bool mine = badge == Badge.Burning && side == _turn;
+        float beat = mine ? 0.5f - 0.5f * Mathf.Cos(Mathf.Tau * _badgeClock / BadgeBeat) : 0.0f;
+        Sign(ink, badge, at, r, beat);
+        if (mine && PassUnder)
+            Doomed(ink, at, r);
+    }
+
+    /// <summary>
+    /// The sign on its token, dark with a pale rim: it reads over the hull's
+    /// own fire and smoke, which a bare flame drowned in. <paramref name="beat"/>
+    /// swells the token and reddens the rim, 0 to 1; <paramref name="a"/>
+    /// fades it all - a forecast coming up (the ram's).
+    /// </summary>
+    private void Sign(Control ink, Badge badge, Vector2 at, float r, float beat = 0.0f, float a = 1.0f)
+    {
         float token = r * (1.0f + 0.12f * beat);
-        ink.DrawCircle(at, token + 1.5f, new Color(0.0f, 0.0f, 0.0f, 0.45f));
-        ink.DrawCircle(at, token, BadgeToken);
-        ink.DrawArc(at, token, 0.0f, Mathf.Tau, 32, badge == Badge.Burning ? BadgeKnocked.Lerp(BlastFire, beat) : BadgeKnocked,
-                    1.5f + 1.0f * beat, true);
+        ink.DrawCircle(at, token + 1.5f, new Color(0.0f, 0.0f, 0.0f, 0.45f * a));
+        ink.DrawCircle(at, token, new Color(BadgeToken, BadgeToken.A * a));
+        ink.DrawArc(at, token, 0.0f, Mathf.Tau, 32, new Color(BadgeKnocked.Lerp(BlastFire, beat), a), 1.5f + 1.0f * beat, true);
         float icon = r * 0.68f;
         switch (badge)
         {
             case Badge.Burning:
-                Flame(ink, at + new Vector2(0.0f, icon * 0.2f), icon * 0.8f, BlastFire);
+                Flame(ink, at + new Vector2(0.0f, icon * 0.2f), icon * 0.8f, BlastFire, a);
                 break;
             case Badge.Knocked:
-                Shield(ink, at, icon, BadgeKnocked);
+                Shield(ink, at, icon, BadgeKnocked, a);
                 break;
             case Badge.Drowned:
-                Drowned(ink, at, icon);
+                Drowned(ink, at, icon, a);
                 break;
             case Badge.Afloat:
-                Buoy(ink, at, icon);
+                Buoy(ink, at, icon, a);
                 break;
         }
     }
+
+    /// <summary>A red cross over a token: it will be gone.</summary>
+    private static void Doomed(Control ink, Vector2 at, float r)
+    {
+        float x = r * 0.95f;
+        foreach (bool under in Both)
+        {
+            Color c = under ? new Color(0.0f, 0.0f, 0.0f, 0.6f) : AimPierce;
+            float w = under ? 6.0f : 3.0f;
+            ink.DrawLine(at - new Vector2(x, x), at + new Vector2(x, x), c, w, true);
+            ink.DrawLine(at - new Vector2(x, -x), at + new Vector2(x, -x), c, w, true);
+        }
+    }
+
+    private static readonly bool[] Both = { true, false };
 
     private Badge BadgeOf(Side side, string tag, Fate fate, Vector2I cell)
     {
@@ -118,6 +145,12 @@ public sealed partial class Tank3DBench
                 return true;
         return false;
     }
+
+    /// <summary>The shot's forecast stands over this hull (<see cref="DrawShotSign"/>).</summary>
+    private bool ShotMarked(TankModel model) =>
+        _judged is { Fires: true } shot && _other is { Fate: Fate.Alive } o && _blastAt is null
+        && (ReferenceEquals(o.Model, model)
+            || (shot.Onward is { Ends: LegEnd.Tank, Hull: { } hull } && ReferenceEquals(hull.Model, model)));
 
     // The shield, unit size, y down: its outline, and the two halves the crack
     // splits it into - the crack a zigzag from the top edge to the point.
@@ -145,13 +178,20 @@ public sealed partial class Tank3DBench
     /// A cracked shield: the armour gone through. The knocked-out unit's sign,
     /// and the one to say "it will pierce" before a shot - hence its own
     /// colour and fade. The halves sit apart on a dark silhouette, the crack
-    /// between them dark.
+    /// between them dark. Not <paramref name="cracked"/> - the armour holds.
     /// </summary>
-    private void Shield(Control ink, Vector2 at, float r, Color c, float a = 1.0f)
+    private void Shield(Control ink, Vector2 at, float r, Color c, float a = 1.0f, bool cracked = true)
     {
         for (int i = 0; i < ShieldWhole.Length; i++)
             _shieldWhole[i] = at + ShieldWhole[i] * (r * 1.12f) + new Vector2(0.0f, r * 0.02f);
         ink.DrawColoredPolygon(_shieldWhole, new Color(0.0f, 0.0f, 0.0f, 0.6f * a));
+        if (!cracked)
+        {
+            for (int i = 0; i < ShieldWhole.Length; i++)
+                _shieldWhole[i] = at + ShieldWhole[i] * r;
+            ink.DrawColoredPolygon(_shieldWhole, new Color(c, c.A * a));
+            return;
+        }
         // the halves apart and tipped a little off the crack
         Vector2 apart = new(r * 0.07f, 0.0f);
         for (int i = 0; i < ShieldLeft.Length; i++)
@@ -164,7 +204,7 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>A ring with water over its lower half, the water's top a wave.</summary>
-    private void Drowned(Control ink, Vector2 at, float r)
+    private void Drowned(Control ink, Vector2 at, float r, float alpha = 1.0f)
     {
         const int wave = 7;
         int n = _badgeWet.Length;
@@ -185,19 +225,128 @@ public sealed partial class Tank3DBench
             float a = Mathf.Lerp(from, Mathf.Pi - from, (i + 1) / (float)(arc + 1));
             _badgeWet[wave + i] = at + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * rim;
         }
-        ink.DrawColoredPolygon(_badgeWet, BadgeWater);
-        ink.DrawArc(at, r * 0.92f, 0.0f, Mathf.Tau, 28, BadgeKnocked, 2.0f, true);
+        ink.DrawColoredPolygon(_badgeWet, new Color(BadgeWater, alpha));
+        ink.DrawArc(at, r * 0.92f, 0.0f, Mathf.Tau, 28, new Color(BadgeKnocked, alpha), 2.0f, true);
     }
 
     /// <summary>A lifebuoy: a thick ring, red and white by quarters.</summary>
-    private static void Buoy(Control ink, Vector2 at, float r)
+    private static void Buoy(Control ink, Vector2 at, float r, float alpha = 1.0f)
     {
         float w = r * 0.38f;
         float mid = r - w * 0.5f;
         for (int q = 0; q < 4; q++)
         {
             float a = Mathf.Pi * 0.25f + Mathf.Pi * 0.5f * q;
-            ink.DrawArc(at, mid, a, a + Mathf.Pi * 0.5f, 8, q % 2 == 0 ? BadgeBuoy : BadgeKnocked, w, true);
+            ink.DrawArc(at, mid, a, a + Mathf.Pi * 0.5f, 8, new Color(q % 2 == 0 ? BadgeBuoy : BadgeKnocked, alpha), w, true);
         }
+    }
+}
+
+/// <summary>
+/// The forecasts (2026-10-28): the same signs, put up before an order on the
+/// one it will befall - over the shot's target what the round does to it,
+/// over the ram's target what the water does, and the end of the turn under
+/// the pointer crosses out the own fires (<see cref="Doomed"/>). Each comes up
+/// once, over <see cref="BlastRise"/>, and stays while the order is shown -
+/// no loop, no blinking.
+/// </summary>
+public sealed partial class Tank3DBench
+{
+    private float _shotSignUp, _ramSignUp;
+    private readonly Vector2[] _bounce = new Vector2[3];
+
+    /// <summary>Over the shot's target: a cracked shield - it pierces, a whole
+    /// one - it holds, a whole one with a round bounced off - a ricochet. And,
+    /// smaller, over the second tank the round goes on to.</summary>
+    private void DrawShotSign(Control ink)
+    {
+        if (_judged is not { Fires: true } shot || _other is not { Fate: Fate.Alive } o || _blastAt is not null)
+        {
+            _shotSignUp = 0.0f;
+            return;
+        }
+        float up = SignUp(ref _shotSignUp);
+        float r = Mathf.Max(10.0f, HexScreen() * 0.16f) * Mathf.Lerp(0.75f, 1.0f, up);
+        ShotSign(ink, Over(o.Model, o.Rig), r, shot.Pierces, shot.Glances, up);
+        if (shot.Onward is { Ends: LegEnd.Tank, Hull: { } hull } leg)
+            ShotSign(ink, Over(hull.Model, hull.Rig), r * 0.75f, leg.Pierces, false, up);
+    }
+
+    private void ShotSign(Control ink, Vector2 at, float r, bool pierces, bool glances, float a)
+    {
+        if (pierces)
+        {
+            Shield(ink, at, r * 0.8f, AimPierce, a);
+            return;
+        }
+        Shield(ink, at, r * 0.8f, glances ? AimGlance : AimHeld, a, cracked: false);
+        if (!glances)
+            return;
+        // the round across the shield's face: in, off it at a right angle and
+        // away - pale on a dark edge, over the shield, so it does not melt
+        // into its yellow
+        Vector2 hit = at + new Vector2(0.0f, 0.25f) * r;
+        Vector2 tip = hit + new Vector2(0.8f, -0.8f) * r;
+        Vector2 way = new Vector2(1.0f, -1.0f).Normalized();
+        // the head a filled triangle and the shaft stopped at its base: two
+        // strokes for a head ended square at the tip and cut it off
+        float head = r * 0.5f;
+        Vector2 baseMid = tip - way * head;
+        Vector2 side = new Vector2(-way.Y, way.X) * (head * 0.62f);
+        _bounce[0] = hit + new Vector2(-0.8f, -0.8f) * r;
+        _bounce[1] = hit;
+        _bounce[2] = baseMid + way * 1.0f;
+        _head[0] = tip;
+        _head[1] = baseMid + side;
+        _head[2] = baseMid - side;
+        // the dark edge: each side moved out by the edge's width, each corner
+        // out along its bisector as far as that takes - not grown about the
+        // middle, which ran the sharp tip on past itself
+        const float edge = 1.6f;
+        for (int i = 0; i < 3; i++)
+        {
+            Vector2 p = _head[i];
+            Vector2 u1 = (p - _head[(i + 1) % 3]).Normalized();
+            Vector2 u2 = (p - _head[(i + 2) % 3]).Normalized();
+            float half = Mathf.Sqrt(Mathf.Max(0.05f, (1.0f - u1.Dot(u2)) * 0.5f));
+            _headUnder[i] = p + (u1 + u2).Normalized() * (edge / half);
+        }
+        var dark = new Color(0.0f, 0.0f, 0.0f, 0.7f * a);
+        var pale = new Color(BadgeKnocked, a);
+        ink.DrawPolyline(_bounce, dark, 5.5f, true);
+        ink.DrawColoredPolygon(_headUnder, dark);
+        ink.DrawPolyline(_bounce, pale, 2.5f, true);
+        ink.DrawColoredPolygon(_head, pale);
+    }
+
+    private readonly Vector2[] _head = new Vector2[3];
+    private readonly Vector2[] _headUnder = new Vector2[3];
+
+    /// <summary>Over the ram's target, where it lands in deep water: the
+    /// lifebuoy - it swims, with the gear; the circle under water - it drowns,
+    /// without (<see cref="RamIntoDeep"/>).</summary>
+    private void DrawRamSign(Control ink)
+    {
+        RamPlan? plan = _ramWaiting ?? _ramPlan;
+        if (plan is null || !RamIntoDeep(plan) || _other is not { } o || _field is null)
+        {
+            _ramSignUp = 0.0f;
+            return;
+        }
+        float up = SignUp(ref _ramSignUp);
+        Vector2I onto = plan.Push.Legs[^1];
+        Vector3 p = CellMiddle(onto);
+        p.Y = _field.WaterTop(onto) / RiseFactor;
+        Vector2 at = _camera.UnprojectPosition(p + Vector3.Up * (o.Model.Size.Y * o.Model.PixelsPerUnit * 1.15f));
+        float r = Mathf.Max(8.0f, HexScreen() * 0.11f) * Mathf.Lerp(0.75f, 1.0f, up);
+        Sign(ink, _amphibious ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up);
+    }
+
+    /// <summary>A forecast coming up: its clock on by a frame, and how far up
+    /// it is, 0 to 1.</summary>
+    private float SignUp(ref float clock)
+    {
+        clock = Mathf.Min(1.0f, clock + (float)GetProcessDeltaTime() / BlastRise);
+        return Mathf.SmoothStep(0.0f, 1.0f, clock);
     }
 }
