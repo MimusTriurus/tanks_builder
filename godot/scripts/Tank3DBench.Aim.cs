@@ -775,6 +775,7 @@ void fragment() {
         // turn hands it back to standing in that frame (Tank3DBench.Match)
         if (_aimInk is { } ramInk)
         {
+            DrawBadges(ramInk);
             DrawRam(ramInk);
             DrawBlast(ramInk);
         }
