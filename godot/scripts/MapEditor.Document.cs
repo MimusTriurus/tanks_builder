@@ -810,6 +810,60 @@ public sealed partial class MapEditor
     }
 
     /// <summary>
+    /// <c>--menu icons</c>: every brush icon of the Floor and Cover tabs in a
+    /// row a tab, drawn three times over without smoothing, to
+    /// <c>out/editor_icons.png</c> - the list is longer than the window, and a
+    /// 30 px icon is judged at its pixels.
+    /// </summary>
+    private void IconsProbe()
+    {
+        // asked at 10, read at 16: a model's icon is a viewport rendered in
+        // the frames after it is asked for, and empty in the frame it was
+        if (_open != "icons" || _frame is not (10 or 16))
+            return;
+        MapEdit.Tab was = _tab;
+        if (_frame == 10)
+        {
+            foreach (MapEdit.Tab tab in new[] { MapEdit.Tab.Foundation, MapEdit.Tab.Cover })
+            {
+                _tab = tab;
+                foreach (var b in Brushes())
+                    IconFor(tab, b.Name);
+            }
+            _tab = was;
+            return;
+        }
+        var rows = new List<List<Image>>();
+        foreach (MapEdit.Tab tab in new[] { MapEdit.Tab.Foundation, MapEdit.Tab.Cover })
+        {
+            _tab = tab;
+            rows.Add(Brushes().Select(b => IconFor(tab, b.Name)?.GetImage())
+                              .Where(i => i is not null).Select(i => i!).ToList());
+        }
+        _tab = was;
+        const int zoom = 3, cell = (IconSide + 2) * zoom;
+        int wide = rows.Max(r => r.Count);
+        var sheet = Image.CreateEmpty(wide * cell, rows.Count * cell, false, Image.Format.Rgba8);
+        sheet.Fill(new Color(0.13f, 0.13f, 0.14f));
+        for (int r = 0; r < rows.Count; r++)
+            for (int k = 0; k < rows[r].Count; k++)
+            {
+                Image icon = rows[r][k];
+                icon.Convert(Image.Format.Rgba8);
+                // a model's viewport is larger than the icon: the panel's
+                // button fits it to IconSide, and so does the sheet
+                if (icon.GetWidth() != IconSide)
+                    icon.Resize(IconSide, IconSide * icon.GetHeight() / icon.GetWidth(), Image.Interpolation.Lanczos);
+                icon.Resize(icon.GetWidth() * zoom, icon.GetHeight() * zoom, Image.Interpolation.Nearest);
+                sheet.BlendRect(icon, new Rect2I(Vector2I.Zero, icon.GetSize()), new Vector2I(k * cell, r * cell));
+            }
+        string path = Path.Combine(AssetRoot.Out, "editor_icons.png");
+        Directory.CreateDirectory(AssetRoot.Out);
+        sheet.SavePng(path);
+        GD.Print($"icons: {string.Join(", ", rows.Select(r => r.Count))} a tab - {path}");
+    }
+
+    /// <summary>
     /// <c>--map woodtest --menu wood</c>: the species without a mouse
     /// (format 3, Ф5). Which models the woods stand, a cell given acacia and
     /// pine taken out of the mix, the warning on a species with no wood, the

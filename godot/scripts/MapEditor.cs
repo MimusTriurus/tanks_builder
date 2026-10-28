@@ -522,6 +522,7 @@ public sealed partial class MapEditor : SceneRoot
         FloorProbe();
         SoilProbe();
         WoodProbe();
+        IconsProbe();
         RoadProbe();
         RoadToolProbe();
         ToolsProbe();
