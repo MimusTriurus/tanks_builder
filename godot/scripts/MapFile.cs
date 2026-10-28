@@ -53,8 +53,17 @@ public static class MapFile
     /// says 1 and carries a letter 1 never had - mislabelled, and a build that
     /// speaks only 1 would have stopped on that letter with no word about why.
     /// The point of the bump is that build: it now refuses a file by its number.
+    ///
+    /// <b>3 is 2 with room for the look of the board</b> - rocks, the floor
+    /// under a cover, soil, roads, tree species (docs/map-format3-plan.md) -
+    /// and the last bump those take. All their blocks are named at once in
+    /// <see cref="Shape"/>, a key no block answers to is refused rather than
+    /// skipped (<see cref="Reading"/>), and a block this build does not read yet
+    /// is refused by its name (<see cref="Unread"/>). A build that knows rocks
+    /// and not roads therefore stops on the roads, instead of showing the board
+    /// without them; the blocks can land in any order and none bumps again.
     /// </summary>
-    public const int Format = 2;
+    public const int Format = 3;
 
     /// <summary>The oldest format still read - the ones between it and
     /// <see cref="Format"/> are taken up by <see cref="Upgrade"/>.</summary>
@@ -134,15 +143,11 @@ public static class MapFile
         Shape? file;
         try
         {
-            file = JsonSerializer.Deserialize<Shape>(text, new JsonSerializerOptions
-            {
-                ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true,
-            });
+            file = JsonSerializer.Deserialize<Shape>(text, Reading);
         }
         catch (JsonException e)
         {
-            throw new InvalidOperationException($"{name}: {e.Message}");
+            throw new InvalidOperationException($"{name}: {Said(e)}");
         }
 
         if (file is null)
@@ -154,6 +159,7 @@ public static class MapFile
         if (file.Ground is null || file.Ground.Length == 0)
             throw new InvalidOperationException($"{name}: no ground grid");
         Upgrade(file, name);
+        Unread(file, name);
         if (file.Ramps is null)
             throw new InvalidOperationException(
                 $"{name}: no ramp grid - a board with no ramps writes one of "
@@ -211,6 +217,65 @@ public static class MapFile
             }
             file.Format = 2;
         }
+        if (file.Format == 2)
+        {
+            // 2 -> 3: nothing moves. A 2 that carries a block of 3 is not a 2.
+            if (Blocks(file).FirstOrDefault(b => b.Said) is { Key: { } key })
+                throw new InvalidOperationException(
+                    $"{name}: \"{key}\" came in format 3 and the file says 2");
+            file.Format = 3;
+        }
+    }
+
+    /// <summary>
+    /// How every map, draft and stamp is read.
+    ///
+    /// <b>A key no field answers to is refused, and that is what format 3 is
+    /// for.</b> The serializer's default skips it, so a build that does not
+    /// know a block would read the board without it and nobody would see the
+    /// difference - a road missing from the board is not an error anywhere
+    /// else. The refusal names the key.
+    /// </summary>
+    private static readonly JsonSerializerOptions Reading = new()
+    {
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    };
+
+    /// <summary>What the serializer refused, in the file's words: a stray key
+    /// by its path (<c>$.roadz</c>), anything else as the serializer says
+    /// it.</summary>
+    private static string Said(JsonException e) =>
+        e.Message.Contains("could not be mapped") && e.Path is { Length: > 0 } at
+            ? $"{at}: no such field in a map file"
+            : e.Message;
+
+    /// <summary>The blocks format 3 brought, by the key the file writes, and
+    /// whether this file said each.</summary>
+    private static IEnumerable<(string Key, bool Said)> Blocks(Shape file)
+    {
+        yield return ("floor", file.Floor is not null);
+        yield return ("climate", file.Climate is not null);
+        yield return ("rocks", file.Rocks is not null);
+        yield return ("soil", file.Soil is not null);
+        yield return ("roads", file.Roads is not null);
+        yield return ("wood", file.Wood is not null);
+        yield return ("trees", file.Trees is not null);
+    }
+
+    /// <summary>
+    /// A block of format 3 this build does not read yet, refused by name.
+    ///
+    /// Each comes off this list in the stage that reads it
+    /// (docs/map-format3-plan.md, Ф2-Ф6). Until then a file that says one is
+    /// a board this build would show wrong, so it is not shown at all.
+    /// </summary>
+    private static void Unread(Shape file, string name)
+    {
+        if (Blocks(file).FirstOrDefault(b => b.Said) is { Key: { } key })
+            throw new InvalidOperationException(
+                $"{name}: \"{key}\" is a block of format 3 this build does not read yet");
     }
 
     /// <summary>
@@ -351,6 +416,11 @@ public static class MapFile
             if (!home.TryGetProperty("at", out JsonElement at))
                 throw new InvalidOperationException(
                     $"{name}: a home written as an object needs an \"at\"");
+            // read by hand, so Reading's refusal of a stray key is said here
+            foreach (JsonProperty field in home.EnumerateObject())
+                if (field.Name is not ("at" or "class" or "side" or "facing"))
+                    throw new InvalidOperationException(
+                        $"{name}: a home has no field \"{field.Name}\"");
             string? crew = home.TryGetProperty("class", out JsonElement said_)
                            && said_.ValueKind == JsonValueKind.String
                 ? said_.GetString() : null;
@@ -791,18 +861,15 @@ public static class MapFile
         Shape? file;
         try
         {
-            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), new JsonSerializerOptions
-            {
-                ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true,
-            });
+            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), Reading);
         }
         catch (JsonException e)
         {
-            throw new InvalidOperationException($"{name}: {e.Message}");
+            throw new InvalidOperationException($"{name}: {Said(e)}");
         }
         if (file?.Ground is not { Length: > 0 } ground)
             throw new InvalidOperationException($"{name}: no ground grid");
+        Unread(file, name);
         return MapEdit.Raw(file.Name is { Length: > 0 } said ? said : name, ground,
                            file.Ramps ?? Array.Empty<string>(), Parkings(file.Homes, name),
                            Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
@@ -897,18 +964,15 @@ public static class MapFile
         Shape? file;
         try
         {
-            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), new JsonSerializerOptions
-            {
-                ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true,
-            });
+            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), Reading);
         }
         catch (JsonException e)
         {
-            throw new InvalidOperationException($"stamp {name}: {e.Message}");
+            throw new InvalidOperationException($"stamp {name}: {Said(e)}");
         }
         if (file?.Ground is not { Length: > 0 } ground)
             throw new InvalidOperationException($"stamp {name}: no ground grid");
+        Unread(file, "stamp " + name);
         string[] ramps = file.Ramps ?? Array.Empty<string>();
         IReadOnlyDictionary<Vector2I, Masonry> walling =
             Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
@@ -949,6 +1013,17 @@ public static class MapFile
         [JsonPropertyName("walls")] public WallShape[]? Walls { get; set; }
         /// <summary>A stamp's only: the cell it is held by (SaveStamp).</summary>
         [JsonPropertyName("anchor")] public int[]? Anchor { get; set; }
+
+        // format 3 (docs/map-format3-plan.md): named so that a file saying one
+        // is refused by Unread rather than read without it; each gets its own
+        // shape in the stage that reads it
+        [JsonPropertyName("floor")] public JsonElement? Floor { get; set; }
+        [JsonPropertyName("climate")] public JsonElement? Climate { get; set; }
+        [JsonPropertyName("rocks")] public JsonElement? Rocks { get; set; }
+        [JsonPropertyName("soil")] public JsonElement? Soil { get; set; }
+        [JsonPropertyName("roads")] public JsonElement? Roads { get; set; }
+        [JsonPropertyName("wood")] public JsonElement? Wood { get; set; }
+        [JsonPropertyName("trees")] public JsonElement? Trees { get; set; }
     }
 
     private sealed class WallShape

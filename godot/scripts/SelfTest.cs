@@ -21771,6 +21771,35 @@ public static class SelfTest
                 Refusal(good.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test")
                     .Length == 0,
                 Refusal(good.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test"));
+
+            // Format 3 (docs/map-format3-plan.md, Ф1) is 2 with room for the
+            // look of the board, and its point is the refusals: a key nothing
+            // answers to, a block of 3 under a 2, and a block of 3 this build
+            // does not read yet - each would otherwise be a board shown
+            // without what the file said.
+            string With(string text, string field) =>
+                text[..text.LastIndexOf('}')].TrimEnd() + ",\n  " + field + "\n}\n";
+            string second = good.Replace($"\"format\": {MapFile.Format}", "\"format\": 2");
+            Check("a format-2 file still reads, as the same board",
+                Refusal(second, "test").Length == 0
+                && MapFile.Ground(MapFile.Parse(second, "test"))
+                    .SequenceEqual(MapFile.Ground(BoardMap.Test)),
+                Refusal(second, "test"));
+            Check("a format-2 file carrying a block of 3 is refused by its number",
+                Refusal(With(second, "\"rocks\": []"), "test").Contains("format 3"),
+                Refusal(With(second, "\"rocks\": []"), "test"));
+            Check("a block of 3 this build does not read is refused by its name",
+                Refusal(With(good, "\"roads\": []"), "test").Contains("\"roads\""),
+                Refusal(With(good, "\"roads\": []"), "test"));
+            Check("a key no field answers to is refused, not skipped",
+                Refusal(With(good, "\"roadz\": []"), "test").Contains("roadz"),
+                Refusal(With(good, "\"roadz\": []"), "test"));
+            Vector2I stray = BoardMap.Test.Homes[0];
+            Check("and so is a stray field on a home",
+                Refusal(good.Replace($"[{stray.X}, {stray.Y}]",
+                                     $"{{ \"at\": [{stray.X}, {stray.Y}], \"colour\": \"red\" }}"),
+                        "test").Contains("colour"),
+                "a home's unknown field was skipped");
             Check("a board with no homes is refused",
                 Refusal(good.Replace(
                     "\"homes\": [" + string.Join(", ",
