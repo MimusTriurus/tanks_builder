@@ -86,17 +86,25 @@ public sealed partial class MapEditor : SceneRoot
     private Cover _cover = Cover.Forest;
     private bool _water;
     private bool _plotBrush;
-    /// <summary>The Floor tab's look brush (<see cref="Soil"/>, format 3), or
-    /// null for the floor brushes: it paints the look a floor wears and never
-    /// the floor.</summary>
-    private char? _look;
-    /// <summary>The Cover tab's species brush (<see cref="Species"/>, format 3),
-    /// or null for the cover brushes: it paints which trees a cell grows and
+    /// <summary>The Look tab's ground brush (<see cref="Soil"/>, format 3): it
+    /// paints the look a floor wears and never the floor.</summary>
+    private char _look = TankSpriteTest.Soil.Grass;
+    /// <summary>The Look tab's species brush (<see cref="Species"/>, format 3),
+    /// or null for the ground's looks: it paints which trees a cell grows and
     /// never the wood itself; the eraser gives the cell back to the mix.</summary>
     private char? _speciesBrush;
-    /// <summary>The Floor tab's road tool (<see cref="Road"/>, format 3), or
-    /// null: points on hexes, the road laid between them (MapEditor.Roads).</summary>
-    private RoadType? _roadBrush;
+    /// <summary>The Roads tab's road (<see cref="Road"/>, format 3): points on
+    /// hexes, the road laid between them (MapEditor.Roads).</summary>
+    private RoadType _roadBrush = RoadType.Dirt;
+
+    /// <summary>The tabs in the bar's order, which is also the number keys':
+    /// the floor and what lies on it, then the rest. The enum keeps the order
+    /// they came in, which nothing on the bar is.</summary>
+    private static readonly MapEdit.Tab[] TabOrder =
+    {
+        MapEdit.Tab.Foundation, MapEdit.Tab.Look, MapEdit.Tab.Roads, MapEdit.Tab.Cover,
+        MapEdit.Tab.Level, MapEdit.Tab.Units, MapEdit.Tab.Presets,
+    };
 
     /// <summary>Which way the board's-edge brush writes: a cell on to the plot
     /// or off it. Two statements rather than one toggle, because "empty" and
@@ -231,6 +239,8 @@ public sealed partial class MapEditor : SceneRoot
                     "level" => MapEdit.Tab.Level,
                     "units" => MapEdit.Tab.Units,
                     "presets" => MapEdit.Tab.Presets,
+                    "look" => MapEdit.Tab.Look,
+                    "roads" => MapEdit.Tab.Roads,
                     _ => MapEdit.Tab.Foundation,
                 };
             else if (args[i] == "--radius" && i + 1 < args.Length
@@ -629,8 +639,7 @@ public sealed partial class MapEditor : SceneRoot
                 8 => (int)MapEdit.Tab.Foundation,
                 _ => (int)MapEdit.Tab.Level,
             };
-            Vector2 at = ((TabBar)_tabs).GetGlobalRect().Position
-                         + _tabs.GetTabRect(want).GetCenter();
+            Vector2 at = _tabButtons[Array.IndexOf(TabOrder, (MapEdit.Tab)want)].GetGlobalRect().GetCenter();
             foreach (bool down in new[] { true, false })
                 Input.ParseInputEvent(new InputEventMouseButton
                 {
@@ -642,7 +651,7 @@ public sealed partial class MapEditor : SceneRoot
         }
         if (_open == "tabs" && _frame is 6 or 10 or 14)
             GD.Print($"tabs: clicked to {_tab}, the bar says "
-                     + $"{_tabs.GetTabTitle(_tabs.CurrentTab)}, the palette says "
+                     + $"{_tabButtons.FirstOrDefault(t => t.ButtonPressed)?.Text}, the palette says "
                      + string.Join("/", _picks.Select(b => b.Text)));
         // Taking a wall off takes its bricks off. The risky half of standing
         // props from a map: a stale wall left on the board after the cover was
@@ -1487,10 +1496,8 @@ public sealed partial class MapEditor : SceneRoot
             return;
         switch (key.Keycode)
         {
-            case Key.Key1: _tab = MapEdit.Tab.Foundation; break;
-            case Key.Key2: _tab = MapEdit.Tab.Cover; break;
-            case Key.Key3: _tab = MapEdit.Tab.Level; break;
-            case Key.Key4: _tab = MapEdit.Tab.Units; break;
+            // the number keys walk the bar (TabOrder)
+            case >= Key.Key1 and <= Key.Key7: _tab = TabOrder[key.Keycode - Key.Key1]; break;
             case Key.Q: Cycle(); break;
             case Key.W: Toggle(true); break;
             case Key.E: Toggle(false); break;
@@ -1518,7 +1525,6 @@ public sealed partial class MapEditor : SceneRoot
             case Key.U: Use(Instrument.Box); break;
             case Key.G: Use(Instrument.Fill); break;
             case Key.I: Use(Instrument.Pick); break;
-            case Key.Key5: _tab = MapEdit.Tab.Presets; break;
             case Key.Home: Home(); return;
             // MapEditor.View: the board turned a hex side either way.
             case Key.Comma: TurnBy(1); return;
@@ -1609,7 +1615,7 @@ public sealed partial class MapEditor : SceneRoot
     private (bool, string) Rub(Vector2I cell)
     {
         string why;
-        bool ok = _tab == MapEdit.Tab.Cover && _speciesBrush is not null
+        bool ok = _tab == MapEdit.Tab.Look && _speciesBrush is not null
             ? _edit.Plant(cell, Species.As, out why)
             : _edit.Erase(cell, _tab, out why);
         return (ok, why);
@@ -1626,15 +1632,23 @@ public sealed partial class MapEditor : SceneRoot
             MapEdit.Tab.Foundation =>
                 _plotBrush ? _edit.Plot(cell, _plotOn, out why)
                 : _water ? _edit.Water(cell, true, out why)
-                : _look is char look ? _edit.Wear(cell, look, out why)
                 : _edit.Floor(cell, _floor, out why),
-            MapEdit.Tab.Cover => _speciesBrush is char sp ? _edit.Plant(cell, sp, out why)
-                : _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
+            MapEdit.Tab.Look => _speciesBrush is char sp ? _edit.Plant(cell, sp, out why)
+                : _edit.Wear(cell, _look, out why),
+            // laid by points (MapEditor.Roads); a line, a box or a fill has none
+            MapEdit.Tab.Roads => Refuse("a road is laid by its points - click them, Enter lays", out why),
+            MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
             MapEdit.Tab.Units => _edit.Unit(cell, _unitSide, _unitClass, out why),
             _ => _rampBrush ? _edit.Ramp(cell, true, out why)
                             : _edit.Level(cell, _level, out why),
         };
         return (ok, why);
+    }
+
+    private static bool Refuse(string said, out string why)
+    {
+        why = said;
+        return false;
     }
 
     /// <summary>The bunker brush on one cell: walls on it, then the walls made a
@@ -1888,12 +1902,12 @@ public sealed partial class MapEditor : SceneRoot
         MapEdit.Tab.Foundation =>
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
                 : _water ? "water"
-                : _look is char look ? "look " + TankSpriteTest.Soil.Name(look)
-                : _roadBrush is RoadType rt ? $"road {Road.Say(rt)} - click points, Enter lays"
 
                 : _floor.ToString().ToLowerInvariant()),
-        MapEdit.Tab.Cover => _speciesBrush is char sp ? $"trees: {Species.Name(sp)} - the species only, not the wood"
-                             : _bunker ? $"cover: bunker, slit {_facing}"
+        MapEdit.Tab.Look => _speciesBrush is char sp ? $"trees: {Species.Name(sp)} - the species only, not the wood"
+                            : "look: " + TankSpriteTest.Soil.Name(_look),
+        MapEdit.Tab.Roads => $"road: {Road.Say(_roadBrush)} - click points, Enter lays",
+        MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
                                      : "cover: " + _cover.ToString().ToLowerInvariant(),
         MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",

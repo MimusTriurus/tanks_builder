@@ -35,7 +35,7 @@ public sealed partial class MapEditor
     {
         new("Board", "left drag", "paint with the brush", "paint"),
         new("Board", "right drag", "erase: plain ground, no cover, level 0", "erase"),
-        new("Board", "1  2  3  4  5", "Foundation, Cover, Level, Units, Presets tab"),
+        new("Board", "1 - 7", "Floor, Look, Roads, Cover, Level, Units, Presets tab"),
         new("Tools", "toolbar", "brush, line, box, fill, select, pick - over every tab"),
         new("Tools", "U  G  I", "box, fill, pick; Esc back to the brush", "box, fill, pick"),
         new("Tools", "shift+click", "with the brush: a line from the last cell painted"),

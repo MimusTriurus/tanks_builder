@@ -45,8 +45,7 @@ public sealed partial class MapEditor
     private string _roadWhy = "";
 
     private bool RoadTool =>
-        _tab == MapEdit.Tab.Foundation && _roadBrush is not null && !_water && !_plotBrush
-        && _look is null && !Selecting && _held is null;
+        _tab == MapEdit.Tab.Roads && !Selecting && _held is null;
 
     /// <summary>The pointer, the buttons and the keys while the road tool is
     /// up; false when it is not, or for what it leaves to the rest.</summary>
@@ -320,7 +319,7 @@ public sealed partial class MapEditor
                 roads.Add(_edit.Roads[k].Moved(ring.Shift));
         int from = roads.Count;
         if (ghost is not null)
-            roads.Add(new RoadPath(_roadType ?? _roadBrush ?? RoadType.Dirt, ghost).Moved(ring.Shift));
+            roads.Add(new RoadPath(_roadType ?? _roadBrush, ghost).Moved(ring.Shift));
         _board.Roads = roads;
         _stage.RedrawRoads(ghost is null ? int.MaxValue : from);
     }
@@ -339,7 +338,7 @@ public sealed partial class MapEditor
             return;
         }
         _edit.Begin();
-        int laid = _edit.Pave(_roadPath, _roadType ?? _roadBrush ?? RoadType.Dirt, _roadEditing, out string why);
+        int laid = _edit.Pave(_roadPath, _roadType ?? _roadBrush, _roadEditing, out string why);
         _edit.End();
         if (laid < 0)
         {

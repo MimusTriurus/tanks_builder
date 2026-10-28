@@ -174,8 +174,8 @@ public sealed partial class MapEditor
         var refused = new List<string>();
         if (erase)
         {
-            refused.AddRange(_edit.Sweep(core, c => (_edit.Erase(c, _tab, out string why), why)));
-            refused.AddRange(_edit.Sweep(Twins(core), c => (_edit.Erase(c, _tab, out string why), why)));
+            refused.AddRange(_edit.Sweep(core, Rub));
+            refused.AddRange(_edit.Sweep(Twins(core), Rub));
         }
         else if (_tab == MapEdit.Tab.Presets)
             refused.AddRange(LayPreset(_edit, core));
@@ -235,6 +235,24 @@ public sealed partial class MapEditor
                     _cover = g.Over;
                     took = g.Over.ToString().ToLowerInvariant();
                 }
+                break;
+            case MapEdit.Tab.Look when _speciesBrush is not null:
+                _speciesBrush = _edit.TreeAt(cell) is var own && own != Species.As ? own : Species.Oak;
+                took = $"trees {Species.Name(_speciesBrush.Value)}";
+                break;
+            case MapEdit.Tab.Look:
+                _look = _edit.LookAt(cell) is var worn && worn != TankSpriteTest.Soil.As ? worn : _look;
+                took = "look " + TankSpriteTest.Soil.Name(_look);
+                break;
+            case MapEdit.Tab.Roads:
+                if (_edit.RoadsAt(cell) is not { Count: > 0 } paved)
+                {
+                    _said = $"no road in ({cell.X},{cell.Y}) to pick";
+                    Say();
+                    return;
+                }
+                _roadBrush = _edit.Roads[paved[0]].Type;
+                took = $"road {Road.Say(_roadBrush)}";
                 break;
             case MapEdit.Tab.Level:
                 if (g.Cliff)

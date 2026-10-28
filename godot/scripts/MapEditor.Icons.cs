@@ -57,8 +57,10 @@ public sealed partial class MapEditor
             (MapEdit.Tab.Foundation, "put on the board") => Prism(Grass, 0),
             (MapEdit.Tab.Foundation, "take off the board") => Prism(new Color(0, 0, 0, 0), 0),
             // a look and a road: the plain hex, what they lay drawn on its top
-            (MapEdit.Tab.Foundation, string l) when l.StartsWith("look: ") => LookIcon(l[6..]),
-            (MapEdit.Tab.Foundation, string t) when t.StartsWith("road: ") && Road.Named(t[6..]) is { } road
+            (MapEdit.Tab.Look, string t) when t.StartsWith("trees: ") && Species.Of(t[7..]) is var k and >= 0
+                => Model(key, tree: true, Species.Model(Species.All[k].Letter, 0)),
+            (MapEdit.Tab.Look, string l) => LookIcon(l),
+            (MapEdit.Tab.Roads, string t) when Road.Named(t) is { } road
                 => Prism(Grass, 0, paint: (q, c) => RoadOn(road, q, c), high: true),
             (MapEdit.Tab.Cover, "none") => Prism(Grass, 0),
             (MapEdit.Tab.Cover, "trench") => Prism(Grass, 0, trench: true),
@@ -66,9 +68,6 @@ public sealed partial class MapEditor
             (MapEdit.Tab.Cover, "bunker") => Prism(Concrete, 1, slit: true),
             (MapEdit.Tab.Cover, "forest") => Model(key, tree: true),
             (MapEdit.Tab.Cover, "minefield") => Model(key, tree: false),
-            // a species brush: its first seed, as the forest's is the first oak
-            (MapEdit.Tab.Cover, string t) when t.StartsWith("trees: ") && Species.Of(t[7..]) is var k and >= 0
-                => Model(key, tree: true, Species.Model(Species.All[k].Letter, 0)),
             (MapEdit.Tab.Level, "level +1") => Prism(Grass, 1),
             (MapEdit.Tab.Level, "level 0") => Prism(Grass, 0),
             (MapEdit.Tab.Level, "level -1") => Prism(Grass, -1),

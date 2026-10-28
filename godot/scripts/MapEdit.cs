@@ -43,6 +43,13 @@ public sealed class MapEdit
         /// four axes rather than instead of them: the eraser clears every axis
         /// - plain ground at the datum, nothing on it.</summary>
         Presets,
+        /// <summary>The looks (format 3): the ground's (<see cref="Soil"/>) and
+        /// the woods' species (<see cref="Species"/>) - what a cell wears,
+        /// never what it is. The eraser takes the ground's look off.</summary>
+        Look,
+        /// <summary>The roads (format 3, <see cref="Road"/>): laid by points
+        /// (MapEditor.Roads), the eraser cuts the roads in a cell.</summary>
+        Roads,
     }
 
     public string Name { get; set; } = "untitled";
@@ -999,8 +1006,18 @@ public sealed class MapEdit
         Tab.Foundation => Floor(cell, Foundation.Solid, out why),
         Tab.Units => Unhome(cell, out why),
         Tab.Presets => Wipe(cell, out why),
+        Tab.Look => Wear(cell, Soil.As, out why),
+        Tab.Roads => Uncut(cell, out why),
         _ => Ramp(cell, false, out why) && Level(cell, 0, out why),
     };
+
+    /// <summary>The Roads tab's eraser: the roads in a cell cut, or why not.</summary>
+    private bool Uncut(Vector2I cell, out string why)
+    {
+        int cut = Cut(cell);
+        why = cut > 0 ? "" : $"no road in ({cell.X},{cell.Y})";
+        return cut > 0;
+    }
 
     /// <summary>Every axis of a cell back to plain ground at the datum - the
     /// Presets tab's eraser. The home on it stays: tanks are the Units tab's.</summary>

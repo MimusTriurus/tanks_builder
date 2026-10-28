@@ -37,7 +37,9 @@ public sealed partial class MapEditor
 {
     // --- the left panel ------------------------------------------------------
 
-    private TabBar _tabs = null!;
+    private GridContainer _tabs = null!;
+    /// <summary>The bar's buttons, in <see cref="TabOrder"/>.</summary>
+    private readonly List<Button> _tabButtons = new();
     private VBoxContainer _choices = null!;
     private Label _brushSays = null!;
     private readonly Dictionary<Instrument, Button> _toolButtons = new();
@@ -103,23 +105,35 @@ public sealed partial class MapEditor
         }
         box.AddChild(tools);
 
-        // Four tabs in the panel's width, none scrolled off: unclipped, a point
-        // smaller than the palette
-        _tabs = new TabBar { ClipTabs = false };
-        _tabs.AddThemeFontSizeOverride("font_size", 12);
-        // Foundation as Floor on the bar - the readout's own word for it - so
-        // that five tabs fit the panel's width (Presets, MapEditor.Tools)
-        foreach (MapEdit.Tab tab in Enum.GetValues<MapEdit.Tab>())
-            _tabs.AddTab(tab == MapEdit.Tab.Foundation ? "Floor" : tab.ToString());
-        _tabs.CurrentTab = (int)_tab;
-        _tabs.TabChanged += index =>
+        // Seven tabs in two rows of toggles, none scrolled off: a TabBar is one
+        // row, and seven names do not fit the panel's width in one (Look and
+        // Roads, 2026-10-28). Foundation as Floor - the readout's own word.
+        _tabs = new GridContainer { Columns = 4 };
+        _tabs.AddThemeConstantOverride("h_separation", 2);
+        _tabs.AddThemeConstantOverride("v_separation", 2);
+        var group = new ButtonGroup();
+        foreach (MapEdit.Tab tab in TabOrder)
         {
-            if (_loading)
-                return;
-            _tab = (MapEdit.Tab)(int)index;
-            Refresh();
-            Say();
-        };
+            MapEdit.Tab mine = tab;
+            var button = new Button
+            {
+                Text = tab == MapEdit.Tab.Foundation ? "Floor" : tab.ToString(),
+                ToggleMode = true, ButtonGroup = group, ButtonPressed = tab == _tab,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                FocusMode = Control.FocusModeEnum.None,
+            };
+            button.AddThemeFontSizeOverride("font_size", 12);
+            button.Pressed += () =>
+            {
+                if (_loading)
+                    return;
+                _tab = mine;
+                Refresh();
+                Say();
+            };
+            _tabButtons.Add(button);
+            _tabs.AddChild(button);
+        }
         box.AddChild(_tabs);
 
         _choices = new VBoxContainer();
@@ -254,38 +268,38 @@ public sealed partial class MapEditor
                     ("take off the board",
                         () => { _plotBrush = true; _plotOn = false; _water = false; },
                         () => _plotBrush && !_plotOn),
-                }.Concat(TankSpriteTest.Soil.Looks.Select(l =>
-                    // the looks (format 3): each paints only the floor it is
-                    // for, and says so on any other
-                    ($"look: {l.Name}  ({TankSpriteTest.Soil.FloorOf(l.Letter)!.Value.ToString().ToLowerInvariant()})",
-                     (Action)(() => { _look = l.Letter; _roadBrush = null; _water = false; _plotBrush = false; }),
-                     (Func<bool>)(() => !_water && !_plotBrush && _look == l.Letter))))
-                .Concat(Enum.GetValues<RoadType>().Select(t =>
-                    // the roads (format 3): a drag lays one along the cells it
-                    // crosses, a right drag cuts
-                    ($"road: {Road.Say(t)}  (points)",
-                     (Action)(() => { _roadBrush = t; _look = null; _water = false; _plotBrush = false; }),
-                     (Func<bool>)(() => !_water && !_plotBrush && _look is null && _roadBrush == t))))
-                .ToList();
+                };
+            case MapEdit.Tab.Look:
+                // the looks (format 3): the ground's, each only on the floor it
+                // is for and saying so on any other; then the woods' species,
+                // which a cell with no wood keeps until it is planted
+                return TankSpriteTest.Soil.Looks.Select(l =>
+                    ($"{l.Name}  ({TankSpriteTest.Soil.FloorOf(l.Letter)!.Value.ToString().ToLowerInvariant()})",
+                     (Action)(() => { _look = l.Letter; _speciesBrush = null; }),
+                     (Func<bool>)(() => _speciesBrush is null && _look == l.Letter)))
+                    .Concat(Species.All.Select(sp =>
+                        ($"trees: {sp.Key}",
+                         (Action)(() => _speciesBrush = sp.Letter),
+                         (Func<bool>)(() => _speciesBrush == sp.Letter))))
+                    .ToList();
+            case MapEdit.Tab.Roads:
+                // the roads (format 3): points on hexes, the road laid between
+                // them; a right click cuts
+                return Enum.GetValues<RoadType>().Select(t =>
+                    (Road.Say(t),
+                     (Action)(() => _roadBrush = t),
+                     (Func<bool>)(() => _roadBrush == t))).ToList();
             case MapEdit.Tab.Cover:
                 var covers = Enum.GetValues<Cover>().Select(over =>
                     (over.ToString().ToLowerInvariant(),
-                     (Action)(() => { _cover = over; _bunker = false; _speciesBrush = null; }),
-                     (Func<bool>)(() => _cover == over && !_bunker && _speciesBrush is null))).ToList();
+                     (Action)(() => { _cover = over; _bunker = false; }),
+                     (Func<bool>)(() => _cover == over && !_bunker))).ToList();
                 // The capon, a brush of its own rather than a dial on the
                 // walls: it is walls on the cell and the block saying concrete,
                 // and the author means one thing by it. W turns the slit.
                 covers.Add(($"bunker  slit {_facing}  (W turns)",
-                    () => { _cover = Cover.Walls; _bunker = true; _speciesBrush = null; },
-                    () => _bunker && _speciesBrush is null));
-                // the species (format 3): which trees a cell grows, the wood
-                // left as it is - on a cell with none it waits to be planted
-                foreach ((char letter, string key, _, _) in Species.All)
-                {
-                    char sp = letter;
-                    covers.Add(($"trees: {key}", () => { _speciesBrush = sp; _bunker = false; },
-                                () => _speciesBrush == sp));
-                }
+                    () => { _cover = Cover.Walls; _bunker = true; },
+                    () => _bunker));
                 return covers;
             case MapEdit.Tab.Presets:
                 // off editor_presets.json (MapEditor.Tools); its own words beside each
@@ -325,13 +339,11 @@ public sealed partial class MapEditor
         }
     }
 
-    private bool Plain() => !_water && !_plotBrush && _look is null && _roadBrush is null;
+    private bool Plain() => !_water && !_plotBrush;
 
     private void Floor(Foundation want)
     {
         _floor = want;
-        _look = null;
-        _roadBrush = null;
         _water = false;
         _plotBrush = false;
     }
@@ -401,8 +413,9 @@ public sealed partial class MapEditor
     {
         _loading = true;
         // The bar is told where the tab is either way; setting it to what it
-        // already says emits nothing.
-        _tabs.CurrentTab = (int)_tab;
+        // already says emits nothing (and _loading holds the press off).
+        for (int i = 0; i < _tabButtons.Count; i++)
+            _tabButtons[i].SetPressedNoSignal(TabOrder[i] == _tab);
         IReadOnlyList<(string Name, Action Pick, Func<bool> On)> brushes =
             Brushes();
         // Rebuilt when the palette was laid out for another tab - the question

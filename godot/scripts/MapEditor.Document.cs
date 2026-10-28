@@ -631,11 +631,8 @@ public sealed partial class MapEditor
             return;
         string file = MapFile.Has(_edit.Name)
             ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
-        _tab = MapEdit.Tab.Foundation;
+        _tab = MapEdit.Tab.Roads;
         _roadBrush = RoadType.Gravel;
-        _look = null;
-        _water = false;
-        _plotBrush = false;
         void Click(Vector2I c)
         {
             _under = c;
@@ -824,7 +821,7 @@ public sealed partial class MapEditor
         MapEdit.Tab was = _tab;
         if (_frame == 10)
         {
-            foreach (MapEdit.Tab tab in new[] { MapEdit.Tab.Foundation, MapEdit.Tab.Cover })
+            foreach (MapEdit.Tab tab in TabOrder)
             {
                 _tab = tab;
                 foreach (var b in Brushes())
@@ -834,7 +831,7 @@ public sealed partial class MapEditor
             return;
         }
         var rows = new List<List<Image>>();
-        foreach (MapEdit.Tab tab in new[] { MapEdit.Tab.Foundation, MapEdit.Tab.Cover })
+        foreach (MapEdit.Tab tab in TabOrder)
         {
             _tab = tab;
             rows.Add(Brushes().Select(b => IconFor(tab, b.Name)?.GetImage())
@@ -893,11 +890,11 @@ public sealed partial class MapEditor
         if (_frame == 18)
         {
             GD.Print($"wood: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}; stands {Stood()}");
-            // for the capture: the Cover tab with the pine brush up, the
+            // for the capture: the Look tab with the pine brush up, the
             // spruce cell picked
             _speciesBrush = 'p';
             _picked = new Vector2I(5, 0);
-            _tabs.CurrentTab = (int)MapEdit.Tab.Cover;
+            _tab = MapEdit.Tab.Look;
             Refresh();
             Say();
             return;
