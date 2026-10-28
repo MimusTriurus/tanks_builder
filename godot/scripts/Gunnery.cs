@@ -219,13 +219,13 @@ public static class Gunnery
         // separates "стреляет" from "стреляет навесом" being that it goes over
         // what a gun has to go through.
         //
-        // <b>Only this half.</b> The walk below still stops a mortar at a hull or
-        // a wood in the lane, which the same sentence says it should not - that
-        // is older than the levels and is written down where it lives, in
-        // <c>TankTick.Loose</c>, which unblocks the bomb once it is away. Two
-        // halves of one exemption in two places is worth knowing about; folding
-        // the second one in here is a change to what the mortar may be ordered to
-        // do, not to what the ground does.
+        // <b>And the other half too</b> (2026-10-28): a hull, a wood or smoke on
+        // the lane does not stop the mortar either, by the same sentence. The
+        // walk used to stop it there and only <c>TankTick.Loose</c> let the bomb
+        // over once it was away - so the 2D harness flew it, and the 3D bench,
+        // whose gate this is before anything flies, refused the order with "на
+        // линии огня танк". Smoke as well: match.md, the HM "стреляет поверх
+        // своего же дыма навесом".
         // Cover beside the tanks and in the same walk, because from the round's
         // point of view they are one question: something is standing in the way
         // and the shell stops there. Which of the two it was is carried out
@@ -269,6 +269,9 @@ public static class Gunnery
                 stop = Barrier.Ground;
                 break;
             }
+            // the bomb goes over whatever stands on the way (above)
+            if (lobs)
+                continue;
             bool tank = occupied(lane[i]);
             if (!tank && !field.Screened(lane[i]))
                 continue;
