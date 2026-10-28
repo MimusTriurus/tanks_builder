@@ -1348,6 +1348,8 @@ public sealed partial class Tank3DBench : Node3D
             // the end of turn's button (Tank3DBench.Match)
             case "pass": EndTurn(); break;
             case "ram-mode": RamToggle(); break;
+            // Ctrl held for a capture: the own side aimed at (Tank3DBench.Match)
+            case "friendly": _friendlyHeld = !_friendlyHeld; break;
             case "douse": Douse(); break;
             case "restart": if (Match) Restart(); break;
             case "way": NextWay(); break;

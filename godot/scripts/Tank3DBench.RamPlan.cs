@@ -32,8 +32,10 @@ namespace TankSpriteTest;
 /// goes on down to the bed without it, dimming into the water's blue - the HUD
 /// says which.
 ///
-/// Not yet: ramming one's own (the pointer on an own unit takes it), what a
-/// mine on the hex behind does to the shoved in the preview.
+/// One's own is rammed with Ctrl held, which makes it the target
+/// (<c>Tank3DBench.Match</c>, <c>FriendlyFire</c>).
+///
+/// Not yet: what a mine on the hex behind does to the shoved in the preview.
 /// </summary>
 public sealed partial class Tank3DBench
 {
