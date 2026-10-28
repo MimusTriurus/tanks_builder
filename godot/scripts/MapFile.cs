@@ -197,7 +197,31 @@ public static class MapFile
                                    Walling(file.Walls, name),
                                    Rocking(file.Rocks, name), Climate(file.Climate, name),
                                    file.Floor, SoilBase(file.Soil, name), file.Soil?.Cells,
-                                   Paths(file.Roads, name));
+                                   Paths(file.Roads, name), Wood(file.Wood, name), file.Trees);
+    }
+
+    /// <summary>
+    /// The wood block (format 3, Ф5): a weight a species, by its key
+    /// (<see cref="Species"/>). A key nothing answers to, or a weight under
+    /// one, is refused - a species weighed nought is one not said.
+    /// </summary>
+    private static IReadOnlyDictionary<char, int>? Wood(Dictionary<string, int>? said, string name)
+    {
+        if (said is not { Count: > 0 })
+            return null;
+        var mix = new Dictionary<char, int>();
+        foreach ((string key, int weight) in said)
+        {
+            int k = Species.Of(key);
+            if (k < 0)
+                throw new InvalidOperationException(
+                    $"{name}: the wood names \"{key}\", and the species are " + string.Join(", ", Species.Keys));
+            if (weight < 1)
+                throw new InvalidOperationException(
+                    $"{name}: the wood weighs {key} at {weight}, and a weight is a whole number from 1");
+            mix[Species.All[k].Letter] = weight;
+        }
+        return mix;
     }
 
     /// <summary>
@@ -377,8 +401,8 @@ public static class MapFile
         yield return ("rocks", file.Rocks is not null, true);
         yield return ("soil", file.Soil is not null, true);
         yield return ("roads", file.Roads is not null, true);
-        yield return ("wood", file.Wood is not null, false);
-        yield return ("trees", file.Trees is not null, false);
+        yield return ("wood", file.Wood is not null, true);
+        yield return ("trees", file.Trees is not null, true);
     }
 
     /// <summary>
@@ -939,6 +963,7 @@ public static class MapFile
         Look(text, map.Rocking, map.Climate, map.SoilBase,
              map.SoilCells is { } cells ? Rows(cells, map.Columns, map.Rows) : null);
         Paved(text, map.Roads);
+        Wooded(text, map.WoodMix, map.TreeCells is { } trees ? Rows(trees, map.Columns, map.Rows) : null);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -954,6 +979,19 @@ public static class MapFile
     {
         Soiled(text, soilBase, soilCells);
         Rocked(text, rocking, climate);
+    }
+
+    /// <summary>The wood block on one line, in <see cref="Species.All"/>'s
+    /// order, and the trees grid under it - each only when said.</summary>
+    private static void Wooded(StringBuilder text, IReadOnlyDictionary<char, int>? mix, string[]? cells)
+    {
+        if (mix is { Count: > 0 })
+            text.Append(",\n\n  \"wood\": { " + string.Join(", ", Species.All
+                .Where(s => mix.ContainsKey(s.Letter))
+                .Select(s => $"\"{s.Key}\": {mix[s.Letter]}")) + " }");
+        if (cells is not null)
+            text.Append((mix is { Count: > 0 } ? ",\n" : ",\n\n") + "  \"trees\": [\n"
+                        + string.Join(",\n", cells.Select(r => "    " + Quote(r))) + "\n  ]");
     }
 
     /// <summary>The roads block, a road a line, in the order drawn: a fork
@@ -1161,6 +1199,7 @@ public static class MapFile
                         + "\n  ]");
         Look(text, edit.Rocking(), edit.Climate, edit.SoilBase, edit.SoilRows());
         Paved(text, edit.Roads);
+        Wooded(text, edit.Wood, edit.TreeRows());
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -1187,7 +1226,8 @@ public static class MapFile
                            Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
                            file.Height ?? true, file.Plinth ?? 0,
                            Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor,
-                           SoilBase(file.Soil, name), file.Soil?.Cells, Paths(file.Roads, name));
+                           SoilBase(file.Soil, name), file.Soil?.Cells, Paths(file.Roads, name),
+                           Wood(file.Wood, name), file.Trees);
     }
 
     // --- stamps ----------------------------------------------------------------
@@ -1295,9 +1335,9 @@ public static class MapFile
         // a piece carries cells, not a board's look: a note in one would be
         // read and dropped
         if (file.Rocks is not null || file.Climate is not null || file.Soil is not null
-            || file.Roads is not null)
+            || file.Roads is not null || file.Wood is not null || file.Trees is not null)
             throw new InvalidOperationException(
-                $"stamp {name}: a stamp carries no rocks, climate, soil or roads block");
+                $"stamp {name}: a stamp carries no rocks, climate, soil, roads, wood or trees block");
         string[] ramps = file.Ramps ?? Array.Empty<string>();
         IReadOnlyDictionary<Vector2I, Masonry> walling =
             Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
@@ -1351,8 +1391,8 @@ public static class MapFile
         [JsonPropertyName("rocks")] public RockShape[]? Rocks { get; set; }
         [JsonPropertyName("soil")] public SoilShape? Soil { get; set; }
         [JsonPropertyName("roads")] public RoadShape[]? Roads { get; set; }
-        [JsonPropertyName("wood")] public JsonElement? Wood { get; set; }
-        [JsonPropertyName("trees")] public JsonElement? Trees { get; set; }
+        [JsonPropertyName("wood")] public Dictionary<string, int>? Wood { get; set; }
+        [JsonPropertyName("trees")] public string[]? Trees { get; set; }
     }
 
     private sealed class RockShape

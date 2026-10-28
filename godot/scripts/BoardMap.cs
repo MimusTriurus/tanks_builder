@@ -339,6 +339,28 @@ public sealed partial class BoardMap
     /// cell they cross is <see cref="Foundation.Road"/> in <see cref="Ground"/>.</summary>
     public IReadOnlyList<RoadPath> Roads { get; }
 
+    /// <summary>The board's mix of species (format 3's <c>wood</c>,
+    /// <see cref="Species"/>): a weight a species letter; null for oaks.</summary>
+    public IReadOnlyDictionary<char, int>? WoodMix { get; }
+
+    /// <summary>Each cell's own species (<c>trees</c>), one a cell with
+    /// <see cref="Species.As"/> where it said nothing; null when no cell did.
+    /// A letter on a cell with no wood is kept: the species waits for the cell
+    /// to be planted (<see cref="Unplanted"/>).</summary>
+    public char[]? TreeCells { get; }
+
+    /// <summary>The cells whose species letter stands on no wood - not wrong,
+    /// waiting (docs/map-format3-plan.md, <c>wood</c> и <c>trees</c>); the map
+    /// report names them.</summary>
+    public IEnumerable<Vector2I> Unplanted()
+    {
+        if (TreeCells is null)
+            yield break;
+        for (int at = 0; at < TreeCells.Length; at++)
+            if (TreeCells[at] != Species.As && Over[at] != Cover.Forest)
+                yield return new Vector2I(at % Columns, at / Columns);
+    }
+
     /// <summary>Each cell's floor as its letter and the floor grid say it,
     /// under the roads - what the file writes and the look is worn on; null
     /// on a board with no road (<see cref="Ground"/> is the same then).</summary>
@@ -407,8 +429,12 @@ public sealed partial class BoardMap
                      IReadOnlyDictionary<Foundation, char>? soilBase = null,
                      char[]? soilCells = null,
                      IReadOnlyList<RoadPath>? roads = null,
-                     Foundation[]? unpaved = null)
+                     Foundation[]? unpaved = null,
+                     IReadOnlyDictionary<char, int>? wood = null,
+                     char[]? treeCells = null)
     {
+        WoodMix = wood;
+        TreeCells = treeCells;
         Roads = roads ?? Array.Empty<RoadPath>();
         Unpaved = unpaved;
         Rocking = rocking ?? new Dictionary<Vector2I, RockNote>();
@@ -712,7 +738,9 @@ public sealed partial class BoardMap
                                         string[]? under = null,
                                         IReadOnlyDictionary<Foundation, char>? soilBase = null,
                                         string[]? soilCells = null,
-                                        IReadOnlyList<RoadPath>? roads = null)
+                                        IReadOnlyList<RoadPath>? roads = null,
+                                        IReadOnlyDictionary<char, int>? wood = null,
+                                        string[]? trees = null)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
@@ -903,6 +931,24 @@ public sealed partial class BoardMap
             }
         }
 
+        // The species of a cell: a letter that names none is refused; one on
+        // a cell with no wood waits for it (Unplanted), as the plan has it
+        char[]? treeCells = null;
+        if (trees is not null)
+        {
+            char[,] tt = Read(name + " trees", trees, columns, rows);
+            treeCells = new char[columns * rows];
+            for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+            {
+                char t = tt[q, r];
+                treeCells[r * columns + q] = t;
+                if (t != Species.As && Species.Of(t) < 0)
+                    wrong.Add($"({q},{r}) has '{t}' in the trees grid, and the species are "
+                              + string.Join(", ", Species.All.Select(s => $"{s.Letter} {s.Key}")));
+            }
+        }
+
         // The roads, after the looks (a look is worn on the floor under the
         // road, a swamp on either side of a log road): what a road may not
         // cross, then the floor they lay (Road, docs/map-format3-plan.md Ф6)
@@ -958,7 +1004,8 @@ public sealed partial class BoardMap
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
                                    plot, paint, height, plinth, walling,
-                                   rocking, climate, soilBase, looks, roads, unpaved));
+                                   rocking, climate, soilBase, looks, roads, unpaved,
+                                   wood is { Count: > 0 } ? wood : null, treeCells));
     }
 
     /// <summary>

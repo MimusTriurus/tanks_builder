@@ -45,7 +45,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private string[] _treeNames = BoardDress.Oaks;
+    private string[]? _treeNames;
     private int _woodCount = BoardDress.WoodCount;
     private float _wind = 1.0f, _weather;
 

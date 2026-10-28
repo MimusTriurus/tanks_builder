@@ -270,14 +270,22 @@ public sealed partial class MapEditor
             case MapEdit.Tab.Cover:
                 var covers = Enum.GetValues<Cover>().Select(over =>
                     (over.ToString().ToLowerInvariant(),
-                     (Action)(() => { _cover = over; _bunker = false; }),
-                     (Func<bool>)(() => _cover == over && !_bunker))).ToList();
+                     (Action)(() => { _cover = over; _bunker = false; _speciesBrush = null; }),
+                     (Func<bool>)(() => _cover == over && !_bunker && _speciesBrush is null))).ToList();
                 // The capon, a brush of its own rather than a dial on the
                 // walls: it is walls on the cell and the block saying concrete,
                 // and the author means one thing by it. W turns the slit.
                 covers.Add(($"bunker  slit {_facing}  (W turns)",
-                    () => { _cover = Cover.Walls; _bunker = true; },
-                    () => _bunker));
+                    () => { _cover = Cover.Walls; _bunker = true; _speciesBrush = null; },
+                    () => _bunker && _speciesBrush is null));
+                // the species (format 3): which trees a cell grows, the wood
+                // left as it is - on a cell with none it waits to be planted
+                foreach ((char letter, string key, _, _) in Species.All)
+                {
+                    char sp = letter;
+                    covers.Add(($"trees: {key}", () => { _speciesBrush = sp; _bunker = false; },
+                                () => _speciesBrush == sp));
+                }
                 return covers;
             case MapEdit.Tab.Presets:
                 // off editor_presets.json (MapEditor.Tools); its own words beside each
@@ -510,6 +518,7 @@ public sealed partial class MapEditor
             Stone(into);
         else if (!glyph.Water && TankSpriteTest.Soil.Today(glyph.Floor) != TankSpriteTest.Soil.As)
             Worn(into, glyph.Floor);
+        Grown(into);
         Paved(into);
         into.AddChild(Does("take it off the board",
             () => _edit.Plot(_picked, false, out string why) ? "" : why));
@@ -616,6 +625,26 @@ public sealed partial class MapEditor
                                        out string why) ? "" : why);
         };
         into.AddChild(Field("look", pick));
+    }
+
+    /// <summary>The cell's own species (format 3's <c>trees</c>): "as the
+    /// board" first, which is the mix, then the species. Offered on any cell -
+    /// one with no wood keeps it until it is planted.</summary>
+    private void Grown(VBoxContainer into)
+    {
+        var pick = new OptionButton();
+        pick.AddItem("as the board");
+        foreach ((_, string key, _, _) in Species.All)
+            pick.AddItem(key);
+        char own = _edit.TreeAt(_picked);
+        pick.Selected = own == Species.As ? 0 : Species.Of(own) + 1;
+        pick.ItemSelected += index =>
+        {
+            if (!_loading)
+                Wrote(() => _edit.Plant(_picked, index == 0 ? Species.As : Species.All[(int)index - 1].Letter,
+                                        out string why) ? "" : why);
+        };
+        into.AddChild(Field("trees", pick));
     }
 
     /// <summary>
@@ -841,6 +870,29 @@ public sealed partial class MapEditor
                 });
             };
             into.AddChild(Field(key, pick));
+        }
+        // the wood (format 3): a weight a species, nought for none; all
+        // nought is oaks, as a board that never said
+        into.AddChild(Note("wood: a weight a species, 0 for none - all 0 is oaks"));
+        foreach ((char letter, string key, _, _) in Species.All)
+        {
+            char sp = letter;
+            var weight = new SpinBox
+            {
+                MinValue = 0, MaxValue = 9, Step = 1,
+                Value = _edit.Wood.TryGetValue(sp, out int w) ? w : 0,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            weight.ValueChanged += value =>
+            {
+                if (!_loading)
+                    Wrote(() =>
+                    {
+                        _edit.Weigh(sp, (int)value);
+                        return "";
+                    });
+            };
+            into.AddChild(Field(key, weight));
         }
         // the climate: one wind and one ice a board, the yardangs' and the
         // dunes' wind and the moutonnees' ice

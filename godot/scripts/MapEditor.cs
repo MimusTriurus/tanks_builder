@@ -90,6 +90,10 @@ public sealed partial class MapEditor : SceneRoot
     /// null for the floor brushes: it paints the look a floor wears and never
     /// the floor.</summary>
     private char? _look;
+    /// <summary>The Cover tab's species brush (<see cref="Species"/>, format 3),
+    /// or null for the cover brushes: it paints which trees a cell grows and
+    /// never the wood itself; the eraser gives the cell back to the mix.</summary>
+    private char? _speciesBrush;
     /// <summary>The Floor tab's road tool (<see cref="Road"/>, format 3), or
     /// null: points on hexes, the road laid between them (MapEditor.Roads).</summary>
     private RoadType? _roadBrush;
@@ -517,6 +521,7 @@ public sealed partial class MapEditor : SceneRoot
         RockProbe();
         FloorProbe();
         SoilProbe();
+        WoodProbe();
         RoadProbe();
         RoadToolProbe();
         ToolsProbe();
@@ -907,6 +912,8 @@ public sealed partial class MapEditor : SceneRoot
         MapRules.Draft draft = _edit.Draft();
         draft.Slopes = true;
         List<MapRules.Fault> faults = MapRules.Faults(draft);
+        // a species on a cell with no wood: named, not fatal (format 3, Ф5)
+        faults.AddRange(_edit.Waiting());
         _faults = faults;
         _sites = MapRules.Sites(draft);
         _closure = MapRules.Flood(draft);
@@ -933,6 +940,9 @@ public sealed partial class MapEditor : SceneRoot
         _field.SetSoil(_edit.Looks());
         // the roads, for the trees that stand back from them (BoardDress.Spots)
         _field.Roads = _edit.Roads;
+        // which trees the woods grow (format 3's wood and trees)
+        _field.WoodMix = _edit.Wood.Count > 0 ? _edit.Wood : null;
+        _field.TreeCells = _edit.Trees();
         string?[] kinds = Kinds(draft);
         _field.SetKinds(kinds);
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
@@ -1570,12 +1580,12 @@ public sealed partial class MapEditor : SceneRoot
         {
             IReadOnlyList<Vector2I> own = Own();
             refused = new List<string>(_erasing
-                ? _edit.Sweep(own, c => (_edit.Erase(c, _tab, out string why), why))
+                ? _edit.Sweep(own, Rub)
                 : _edit.Sweep(own, Write));
             // and again on the twins, when a symmetry is up (MapEditor.Symmetry)
             List<Vector2I> twins = Twins(own);
             refused.AddRange(_erasing
-                ? _edit.Sweep(twins, c => (_edit.Erase(c, _tab, out string why), why))
+                ? _edit.Sweep(twins, Rub)
                 : _edit.Sweep(twins, WriteTwin));
         }
 
@@ -1593,6 +1603,17 @@ public sealed partial class MapEditor : SceneRoot
         _marks.QueueRedraw();
     }
 
+    /// <summary>The eraser on one cell: the tab's, bar the species brush,
+    /// whose eraser gives the cell back to the board's mix.</summary>
+    private (bool, string) Rub(Vector2I cell)
+    {
+        string why;
+        bool ok = _tab == MapEdit.Tab.Cover && _speciesBrush is not null
+            ? _edit.Plant(cell, Species.As, out why)
+            : _edit.Erase(cell, _tab, out why);
+        return (ok, why);
+    }
+
     private (bool, string) Write(Vector2I cell)
     {
         string why;
@@ -1606,7 +1627,8 @@ public sealed partial class MapEditor : SceneRoot
                 : _water ? _edit.Water(cell, true, out why)
                 : _look is char look ? _edit.Wear(cell, look, out why)
                 : _edit.Floor(cell, _floor, out why),
-            MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
+            MapEdit.Tab.Cover => _speciesBrush is char sp ? _edit.Plant(cell, sp, out why)
+                : _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
             MapEdit.Tab.Units => _edit.Unit(cell, _unitSide, _unitClass, out why),
             _ => _rampBrush ? _edit.Ramp(cell, true, out why)
                             : _edit.Level(cell, _level, out why),
@@ -1869,7 +1891,8 @@ public sealed partial class MapEditor : SceneRoot
                 : _roadBrush is RoadType rt ? $"road {Road.Say(rt)} - click points, Enter lays"
 
                 : _floor.ToString().ToLowerInvariant()),
-        MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
+        MapEdit.Tab.Cover => _speciesBrush is char sp ? $"trees: {Species.Name(sp)} - the species only, not the wood"
+                             : _bunker ? $"cover: bunker, slit {_facing}"
                                      : "cover: " + _cover.ToString().ToLowerInvariant(),
         MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",

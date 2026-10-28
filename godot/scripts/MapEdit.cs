@@ -85,6 +85,19 @@ public sealed class MapEdit
     public Dictionary<Foundation, char> SoilBase { get; private set; } = new();
 
     /// <summary>
+    /// Format 3's species (docs/map-format3-plan.md, Ф5): each cell's own,
+    /// <see cref="Species.As"/> where it says nothing, and the board's mix
+    /// beside it (<see cref="Wood"/>). Look only, and kept on a cell with no
+    /// wood - unlike a look off its floor, it waits for the cell to be
+    /// planted, so felling and planting again does not lose it.
+    /// </summary>
+    private char[] _trees = Array.Empty<char>();
+
+    /// <summary>The board's mix of species (<c>wood</c>): a weight a letter;
+    /// empty for oaks.</summary>
+    public Dictionary<char, int> Wood { get; private set; } = new();
+
+    /// <summary>
     /// The roads (format 3's <c>roads</c>, docs/map-format3-plan.md Ф6): paths
     /// along the hex sides, beside the letters rather than in them - a letter
     /// says the floor under the road. Written only through <see cref="Pave"/>,
@@ -176,6 +189,7 @@ public sealed class MapEdit
             _ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
+            _trees = Enumerable.Repeat(Species.As, columns * rows).ToArray(),
             _ramps = new bool[columns * rows],
         };
         // One home, in the middle. A board with none is refused on the way out -
@@ -226,6 +240,9 @@ public sealed class MapEdit
             _soil = map.SoilCells is { } looks ? (char[])looks.Clone()
                 : Enumerable.Repeat(Soil.As, map.Columns * map.Rows).ToArray(),
             SoilBase = new Dictionary<Foundation, char>(map.SoilBase),
+            _trees = map.TreeCells is { } trees ? (char[])trees.Clone()
+                : Enumerable.Repeat(Species.As, map.Columns * map.Rows).ToArray(),
+            Wood = map.WoodMix is { } mix ? new Dictionary<char, int>(mix) : new(),
             _roads = map.Roads.ToList(),
             _ramps = (bool[])map.Ramps.Clone(),
             _homes = map.Parked.ToList(),
@@ -455,6 +472,66 @@ public sealed class MapEdit
             SoilBase.Remove(floor);
     }
 
+    // --- species --------------------------------------------------------------
+
+    /// <summary>The trees grid as the file writes it, or null when no cell
+    /// names a species.</summary>
+    public string[]? TreeRows() => MapFile.Rows(_trees, Columns, Rows);
+
+    /// <summary>A cell's own species, <see cref="Species.As"/> when it has none.</summary>
+    public char TreeAt(Vector2I cell) => Inside(cell) ? _trees[At(cell)] : Species.As;
+
+    /// <summary>Every cell's own species, <see cref="HexField.TreeCells"/>'s array;
+    /// null when none says one.</summary>
+    public char[]? Trees() => _trees.All(c => c == Species.As) ? null : (char[])_trees.Clone();
+
+    /// <summary>
+    /// Give a cell a species of its own, or none (<see cref="Species.As"/>,
+    /// the eraser's: back to the mix). Any cell on the board takes one - a
+    /// cell with no wood keeps it until it is planted; only the species is
+    /// written, never the cover.
+    /// </summary>
+    public bool Plant(Vector2I cell, char species, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is off the board";
+            return false;
+        }
+        if (species != Species.As && Species.Of(species) < 0)
+        {
+            why = $"'{species}' is no species";
+            return false;
+        }
+        _trees[At(cell)] = species;
+        return true;
+    }
+
+    /// <summary>The cells whose species stands on no wood - named, not
+    /// refused: it waits for the cell to be planted (<see cref="Plant"/>).</summary>
+    public IEnumerable<MapRules.Fault> Waiting()
+    {
+        for (int at = 0; at < _trees.Length; at++)
+        {
+            var cell = new Vector2I(at % Columns, at / Columns);
+            if (_trees[at] != Species.As && OnBoard(cell) && GlyphAt(cell).Over != Cover.Forest)
+                yield return new MapRules.Fault(cell, "trees.wait",
+                    $"({cell.X},{cell.Y}) names {Species.Name(_trees[at])} and grows no wood - "
+                    + "the species waits for the cell to be planted", false,
+                    $"({cell.X},{cell.Y}) {Species.Name(_trees[at])} waits for a wood");
+        }
+    }
+
+    /// <summary>A species' weight in the board's mix; nought takes it out.</summary>
+    public void Weigh(char species, int weight)
+    {
+        if (Species.Of(species) >= 0 && weight > 0)
+            Wood[species] = weight;
+        else
+            Wood.Remove(species);
+    }
+
     // --- roads ----------------------------------------------------------------
 
     /// <summary>Why no road may cross a cell, or null: the map's own
@@ -572,6 +649,7 @@ public sealed class MapEdit
     /// they were taken at.</remarks>
     private readonly record struct Snap(char[] Ground, char[] Under, char[] Soil,
                                         Dictionary<Foundation, char> SoilBase,
+                                        char[] Trees, Dictionary<char, int> Wood,
                                         List<RoadPath> Roads, bool[] Ramps,
                                         List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls,
@@ -581,6 +659,7 @@ public sealed class MapEdit
 
     private Snap Taken() => new((char[])_ground.Clone(), (char[])_under.Clone(),
                                 (char[])_soil.Clone(), new Dictionary<Foundation, char>(SoilBase),
+                                (char[])_trees.Clone(), new Dictionary<char, int>(Wood),
                                 _roads.ToList(),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
@@ -589,9 +668,9 @@ public sealed class MapEdit
                                 Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _under, _soil, SoilBase, _roads, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
-            (was.Ground, was.Under, was.Soil, was.SoilBase, was.Roads, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
-             was.Columns, was.Rows);
+        (_ground, _under, _soil, SoilBase, _trees, Wood, _roads, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+            (was.Ground, was.Under, was.Soil, was.SoilBase, was.Trees, was.Wood, was.Roads, was.Ramps, was.Homes, was.Walls,
+             was.Rocks, was.Climate, was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
 
@@ -631,6 +710,8 @@ public sealed class MapEdit
                     && was.Soil.SequenceEqual(_soil) && was.Roads.SequenceEqual(_roads)
                     && was.SoilBase.Count == SoilBase.Count
                     && was.SoilBase.All(kv => SoilBase.TryGetValue(kv.Key, out char now) && now == kv.Value)
+                    && was.Trees.SequenceEqual(_trees) && was.Wood.Count == Wood.Count
+                    && was.Wood.All(kv => Wood.TryGetValue(kv.Key, out int now) && now == kv.Value)
                     && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
@@ -941,6 +1022,8 @@ public sealed class MapEdit
         _under = (char[])_under.Clone(),
         _soil = (char[])_soil.Clone(),
         SoilBase = new Dictionary<Foundation, char>(SoilBase),
+        _trees = (char[])_trees.Clone(),
+        Wood = new Dictionary<char, int>(Wood),
         _roads = _roads.ToList(),
         _ramps = (bool[])_ramps.Clone(),
         _homes = _homes.ToList(),
@@ -1609,6 +1692,7 @@ public sealed class MapEdit
         var ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
         var under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
         var soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray();
+        var trees = Enumerable.Repeat(Species.As, columns * rows).ToArray();
         var ramps = new bool[columns * rows];
         var walls = new Dictionary<Vector2I, Masonry>();
         var rocks = new Dictionary<Vector2I, RockNote>();
@@ -1622,14 +1706,15 @@ public sealed class MapEdit
             ground[to.Y * columns + to.X] = _ground[At(from)];
             under[to.Y * columns + to.X] = _under[At(from)];
             soil[to.Y * columns + to.X] = _soil[At(from)];
+            trees[to.Y * columns + to.X] = _trees[At(from)];
             ramps[to.Y * columns + to.X] = _ramps[At(from)];
             if (_walls.TryGetValue(from, out Masonry? wall))
                 walls[to] = wall;
             if (_rocks.TryGetValue(from, out RockNote? note))
                 rocks[to] = note;
         }
-        (Columns, Rows, _ground, _under, _soil, _ramps, _homes, _walls, _rocks) =
-            (columns, rows, ground, under, soil, ramps, homes, walls, rocks);
+        (Columns, Rows, _ground, _under, _soil, _trees, _ramps, _homes, _walls, _rocks) =
+            (columns, rows, ground, under, soil, trees, ramps, homes, walls, rocks);
         // the roads moved with the cells, cut where they ran off the board
         List<RoadPath> roads = _roads.Select(r => r.Moved(by)).ToList();
         _roads = new List<RoadPath>();
@@ -1659,7 +1744,8 @@ public sealed class MapEdit
                               IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
                               RockClimate climate = default, string[]? floors = null,
                               IReadOnlyDictionary<Foundation, char>? soilBase = null,
-                              string[]? soilCells = null, IReadOnlyList<RoadPath>? roads = null)
+                              string[]? soilCells = null, IReadOnlyList<RoadPath>? roads = null,
+                              IReadOnlyDictionary<char, int>? wood = null, string[]? trees = null)
     {
         int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
         if (columns < 1 || ground.Any(row => row.Length != columns))
@@ -1672,6 +1758,8 @@ public sealed class MapEdit
             _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
             SoilBase = soilBase is null ? new() : new Dictionary<Foundation, char>(soilBase),
+            _trees = Enumerable.Repeat(Species.As, columns * rows).ToArray(),
+            Wood = wood is null ? new() : new Dictionary<char, int>(wood),
             _roads = roads?.ToList() ?? new List<RoadPath>(),
             _ramps = new bool[columns * rows],
             _homes = homes.ToList(),
@@ -1692,6 +1780,9 @@ public sealed class MapEdit
                 edit._under[edit.At(cell)] = floors[r][q];
             if (soilCells is not null && r < soilCells.Length && q < soilCells[r].Length)
                 edit._soil[edit.At(cell)] = soilCells[r][q];
+            if (trees is not null && r < trees.Length && q < trees[r].Length
+                && Species.Of(trees[r][q]) >= 0)
+                edit._trees[edit.At(cell)] = trees[r][q];
             edit._ramps[edit.At(cell)] = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
             if (walls is not null && walls.TryGetValue(cell, out Masonry? wall) && edit.GlyphAt(cell).Wall)
                 edit._walls[cell] = wall.Copy();
@@ -1922,7 +2013,8 @@ public sealed class MapEdit
                                    _walls.ToDictionary(kv => kv.Key,
                                                        kv => kv.Value.Copy()),
                                    Rocking(), Climate, Floors(),
-                                   SoilBase.Count > 0 ? SoilBase : null, SoilRows(), _roads);
+                                   SoilBase.Count > 0 ? SoilBase : null, SoilRows(), _roads,
+                                   Wood.Count > 0 ? Wood : null, TreeRows());
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

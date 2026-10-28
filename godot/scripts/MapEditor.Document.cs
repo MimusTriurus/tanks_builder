@@ -808,4 +808,72 @@ public sealed partial class MapEditor
         GD.Print($"soil: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}");
         Say();
     }
+
+    /// <summary>
+    /// <c>--map woodtest --menu wood</c>: the species without a mouse
+    /// (format 3, Ф5). Which models the woods stand, a cell given acacia and
+    /// pine taken out of the mix, the warning on a species with no wood, the
+    /// draft and the undo back to the file.
+    /// </summary>
+    private void WoodProbe()
+    {
+        // three frames apart: a wood laid again stands in the next frame, the
+        // trees it replaced leave at the end of this one
+        if (_open != "wood" || _frame is not (10 or 14 or 18))
+            return;
+        string file = MapFile.Has(_edit.Name)
+            ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
+        string Stood()
+        {
+            var kinds = new SortedDictionary<string, int>();
+            foreach (List<(Node3D Holder, Vector3 At)> wood in _woodOn.Values)
+                foreach ((Node3D holder, _) in wood)
+                {
+                    string kind = holder.Name.ToString().Split('_')[0];
+                    kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
+                }
+            return string.Join(", ", kinds.Select(kv => $"{kv.Value} {kv.Key}"));
+        }
+        string Cell(Vector2I c) => string.Join(" ", _woodOn.TryGetValue(c, out var w)
+            ? w.Select(t => t.Holder.Name.ToString().Split('.')[0]) : Array.Empty<string>());
+        if (_frame == 18)
+        {
+            GD.Print($"wood: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}; stands {Stood()}");
+            // for the capture: the Cover tab with the pine brush up, the
+            // spruce cell picked
+            _speciesBrush = 'p';
+            _picked = new Vector2I(5, 0);
+            _tabs.CurrentTab = (int)MapEdit.Tab.Cover;
+            Refresh();
+            Say();
+            return;
+        }
+        if (_frame == 10)
+        {
+            GD.Print($"wood: opened - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+            GD.Print($"wood: stands {Stood()}");
+            GD.Print($"wood: 0,0 by the mix - {Cell(new Vector2I(0, 0))}; 5,0 spruce - {Cell(new Vector2I(5, 0))}");
+            GD.Print($"wood: waiting - {string.Join("; ", _faults.Where(f => f.Rule == "trees.wait").Select(f => f.Text))}");
+            _edit.Begin();
+            bool planted = _edit.Plant(new Vector2I(0, 0), 'a', out string why);
+            _edit.Weigh('p', 0);
+            _edit.End();
+            GD.Print($"wood: 0,0 acacia - {(planted ? "ok" : why)}; pine out of the mix");
+            Settle();
+            return;
+        }
+        GD.Print($"wood: 0,0 {Cell(new Vector2I(0, 0))}; 1,1 {Cell(new Vector2I(1, 1))}; stands {Stood()}; "
+                 + $"the file says {string.Join(" ", MapFile.Write(_edit.Build()).Split('\n').Where(l => l.Contains("\"wood\"")))}");
+
+        string draft = MapFile.WriteDraft(_edit);
+        string tmp = Path.Combine(AutosaveDir, "zz_wood" + MapFile.Extension);
+        Directory.CreateDirectory(AutosaveDir);
+        File.WriteAllText(tmp, draft);
+        MapEdit back = MapFile.ReadDraft(tmp);
+        File.Delete(tmp);
+        GD.Print($"wood: the draft read back the same: {MapFile.WriteDraft(back) == draft}");
+
+        while (_edit.Undo()) { }
+        Settle();
+    }
 }

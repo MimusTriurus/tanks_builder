@@ -222,8 +222,12 @@ void light() {
     /// by a hash of where it stands - the crowns overlap as a wood's do. All of
     /// it hashed off the cell, so a cell planted again plants the same wood.
     /// </summary>
-    public static IEnumerable<TreeSpot> Spots(HexField field, Vector2I cell, string[] names, int count, float squash)
+    /// <remarks>Each tree's model is the board's (<see cref="HexField.TreeAt"/>,
+    /// <see cref="HexField.WoodMix"/>, <see cref="Species.Tree"/>), unless
+    /// <paramref name="names"/> overrides it - a bench's <c>--trees</c>.</remarks>
+    public static IEnumerable<TreeSpot> Spots(HexField field, Vector2I cell, string[]? names, int count, float squash)
     {
+        char own = field.TreeAt(cell);
         Vector2 flat = field.FlatAnchor(cell) + field.CentreOffset;
         // a wood a road runs through stands back from it (Road, format 3):
         // the axes in this method's own XZ, the board's origin left out
@@ -248,7 +252,9 @@ void light() {
             if (road is not null && Road.Distance(road, new Vector2(at.X, at.Y / squash)) < clear)
                 continue;
             int salt = cell.X * 97 + cell.Y * 31 + i;
-            yield return new TreeSpot(cell, i, names[(salt + i) % names.Length],
+            string name = names is { Length: > 0 }
+                ? names[(salt + i) % names.Length] : Species.Tree(own, field.WoodMix, salt + i);
+            yield return new TreeSpot(cell, i, name,
                                       new Vector3(at.X, 0.0f, at.Y / squash), Mathf.Tau * CelPuff.Hash(salt, 611), at);
         }
     }

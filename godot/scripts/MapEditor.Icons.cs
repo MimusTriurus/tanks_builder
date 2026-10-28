@@ -62,6 +62,9 @@ public sealed partial class MapEditor
             (MapEdit.Tab.Cover, "bunker") => Prism(Concrete, 1, slit: true),
             (MapEdit.Tab.Cover, "forest") => Model(key, tree: true),
             (MapEdit.Tab.Cover, "minefield") => Model(key, tree: false),
+            // a species brush: its first seed, as the forest's is the first oak
+            (MapEdit.Tab.Cover, string t) when t.StartsWith("trees: ") && Species.Of(t[7..]) is var k and >= 0
+                => Model(key, tree: true, Species.Model(Species.All[k].Letter, 0)),
             (MapEdit.Tab.Level, "level +1") => Prism(Grass, 1),
             (MapEdit.Tab.Level, "level 0") => Prism(Grass, 0),
             (MapEdit.Tab.Level, "level -1") => Prism(Grass, -1),
@@ -256,13 +259,13 @@ public sealed partial class MapEditor
     /// grass, rendered once in a viewport of its own world - lit by the
     /// board's sun, at the board's angle, its background clear.
     /// </summary>
-    private Texture2D? Model(string key, bool tree)
+    private Texture2D? Model(string key, bool tree, string? species = null)
     {
         Node3D? thing = null;
         float size;
         if (tree)
         {
-            if (TreeModel.Load(BoardDress.Oaks[0], false, out string? error) is not { } oak)
+            if (TreeModel.Load(species ?? BoardDress.Oaks[0], false, out string? error) is not { } oak)
             {
                 GD.Print($"editor: icon {key}: {error}");
                 return null;

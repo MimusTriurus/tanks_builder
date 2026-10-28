@@ -834,6 +834,9 @@ public sealed partial class Tank3DBench : Node3D
         // the roads' way through each cell, for the drawing; the rule is the
         // floor the map already laid (Foundation.Road)
         _field.Roads = map.Roads;
+        // which trees its woods grow (format 3's wood and trees, Species)
+        _field.WoodMix = map.WoodMix;
+        _field.TreeCells = map.TreeCells;
         AddChild(_field);
         _field.Atlas = _tile;
         if (_reliefOn)

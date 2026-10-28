@@ -171,7 +171,12 @@ public sealed partial class MapEditor
     private string CellDress(Vector2I cell) =>
         !_field.InBounds(cell) ? "-"
         : $"{_field.CoverAt(cell)},{_field.FoundationAt(cell)},{_field.LevelAt(cell)},"
-          + $"{_field.IsRamp(cell)},{_field.IsWater(cell)}";
+          + $"{_field.IsRamp(cell)},{_field.IsWater(cell)}"
+          // which trees it grows (format 3): its own species and the mix
+          + (_field.CoverAt(cell) == Cover.Forest
+              ? $",{_field.TreeAt(cell)}" + (_field.WoodMix is { } mix
+                  ? string.Concat(mix.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}{kv.Value}")) : "")
+              : "");
 
     private string Grounds() =>
         $"{_field.Columns}x{_field.Rows}:" + string.Join(";", _dressedAs.OrderBy(p => p.Key.X).ThenBy(p => p.Key.Y)
@@ -180,7 +185,7 @@ public sealed partial class MapEditor
     private void Wood(Vector2I cell, float squash, float rise)
     {
         var wood = new List<(Node3D, Vector3)>();
-        foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field, cell, BoardDress.Oaks, BoardDress.WoodCount, squash))
+        foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field, cell, null, BoardDress.WoodCount, squash))
         {
             if (BoardDress.Tree(this, spot, BoardDress.Foot(_field, spot.At, squash, rise), pbr: false, _crowns,
                                 $"{spot.Name}.{cell.X}_{cell.Y}.{spot.Index}", out TreeModel.Loaded? model,
@@ -199,8 +204,14 @@ public sealed partial class MapEditor
     {
         if (!_woodOn.Remove(cell, out List<(Node3D Holder, Vector3 At)>? wood))
             return;
+        // out of the tree now, not at the frame's end: the wood laid again in
+        // this frame takes the same names (a tree of the same seed on the
+        // same spot), and Godot renamed the newcomers @Node3D@N
         foreach ((Node3D holder, Vector3 _) in wood)
+        {
+            holder.GetParent()?.RemoveChild(holder);
             holder.QueueFree();
+        }
     }
 
     private void Mine(Vector2I cell, Vector2 hex, float squash, float rise)

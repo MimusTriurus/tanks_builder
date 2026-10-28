@@ -1671,6 +1671,19 @@ public sealed partial class HexField : Node2D
     /// drawing's - which way each road runs through a cell.</summary>
     public IReadOnlyList<RoadPath> Roads { get; set; } = Array.Empty<RoadPath>();
 
+    /// <summary>The board's mix of species (format 3's <c>wood</c>,
+    /// <see cref="Species"/>), null for oaks; and each cell's own
+    /// (<c>trees</c>), null when no cell said one. Look only: what a wooded
+    /// cell grows, which <see cref="BoardDress.Spots"/> asks.</summary>
+    public IReadOnlyDictionary<char, int>? WoodMix { get; set; }
+    public char[]? TreeCells { get; set; }
+
+    /// <summary>The species a cell's own letter names, <see cref="Species.As"/>
+    /// for none.</summary>
+    public char TreeAt(Vector2I cell) =>
+        TreeCells is not null && InBounds(cell) && TreeCells.Length == Columns * Rows
+            ? TreeCells[cell.Y * Columns + cell.X] : Species.As;
+
     /// <summary>The look each cell's ground wears (<see cref="Soil"/>,
     /// resolved), or null for today's ground everywhere.</summary>
     private char[]? _soil;

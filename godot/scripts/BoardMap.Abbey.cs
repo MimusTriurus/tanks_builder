@@ -204,6 +204,12 @@ public sealed partial class BoardMap
             foreach (MapRules.Fault fault in MapRules.HomeFaults(draft))
                 lines.Add("  BAD " + fault.Text);
 
+            // A species on a cell with no wood waits to be planted - named,
+            // not BAD (format 3's trees, docs/map-format3-plan.md Ф5)
+            string waiting = string.Join(" ", Unplanted().Select(c => $"({c.X},{c.Y})"));
+            if (waiting.Length > 0)
+                lines.Add("  trees named on cells with no wood, waiting: " + waiting);
+
             // The field's own guards, on the real arrays.
             probe.SetRelief(Levels, Ramps);
             if (Water.Any(w => w))
