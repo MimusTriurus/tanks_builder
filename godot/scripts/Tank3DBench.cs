@@ -1397,6 +1397,14 @@ public sealed partial class Tank3DBench : Node3D
                             AimCell(MapCell(q, r));
                     }
                 }
+                else if (what.StartsWith("hover=", StringComparison.Ordinal))
+                {
+                    // hover=Q,R: --hover moved mid-run, for a capture that aims
+                    // at one unit and then at another
+                    string[] qr = what[6..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                        _hoverFixed = MapCell(q, r);
+                }
                 else if (what.StartsWith("pan=", StringComparison.Ordinal))
                 {
                     // pan=DX,DY: the middle button dragged that many pixels.

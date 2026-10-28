@@ -89,19 +89,34 @@ public sealed partial class Tank3DBench
     {
         if (!Match || _field is null)
             return;
-        int level = _field.LevelAt(at);
         foreach (int side in HexField.EdgeHeadings)
         {
             Vector2I n = HexField.Step(at, side);
-            if (!_field.InBounds(n) || _field.LevelAt(n) != level)
-                continue;
-            if (CellHere == n && _fate == Fate.Alive)
-                Ignite(_side, _modelTag, n);
-            else if (_other is { Unit: true } o && OtherCell(o) == n)
-                Struck(o.Side, o.Tag, o.Fate, n);
-            else if (_parked.Find(p => p.Cell == n && p.Fate != Fate.Destroyed) is { } p)
-                Struck(p.Side, p.Tag, p.Fate, n);
+            if (BlastTouches(at, n) && UnitOn(n) is { } u)
+                Struck(u.Side, u.Tag, u.Fate, n);
         }
+    }
+
+    /// <summary>Whether a blast on <paramref name="at"/> reaches its neighbour
+    /// <paramref name="n"/>: on the board and on the same level. The blast and
+    /// its preview (<c>Tank3DBench.BlastPlan</c>) both ask it.</summary>
+    private bool BlastTouches(Vector2I at, Vector2I n) =>
+        _field is not null && _field.InBounds(n) && _field.LevelAt(n) == _field.LevelAt(at);
+
+    /// <summary>A unit a blast can do something to on <paramref name="cell"/>:
+    /// the own tank still fighting, the target, or a standing one not yet
+    /// destroyed.</summary>
+    private (Side Side, string Tag, Fate Fate, TankModel Model)? UnitOn(Vector2I cell)
+    {
+        if (CellHere == cell && _fate == Fate.Alive)
+            return (_side, _modelTag, _fate, _model);
+        if (_other is { Unit: true } o && OtherCell(o) == cell)
+            return (o.Side, o.Tag, o.Fate, o.Model);
+        // a loop, not Find with a lambda: the preview asks it every frame (BOT-3)
+        foreach (Parked p in _parked)
+            if (p.Cell == cell && p.Fate != Fate.Destroyed)
+                return (p.Side, p.Tag, p.Fate, p.Model);
+        return null;
     }
 
     private void Struck(Side side, string tag, Fate fate, Vector2I cell)

@@ -156,9 +156,18 @@ public sealed partial class Tank3DBench
                 Judged then = Judge(after, o);
                 _judgedNote += $"; после хода из {MapAt(after)}: {then.Says}";
             }
+            // a knocked-out target goes up: whom it takes with it (Tank3DBench.BlastPlan)
+            BlastPlanTick(_judged, o);
+            if (_blastAt is not null)
+                _judgedNote += $"; {_blastNote}";
             if (_aimMesh?.Mesh is ImmediateMesh plate)
+            {
                 AimGround(plate, _judged);
+                BlastGround(plate);
+            }
         }
+        else
+            BlastPlanTick(null, null);
         BeadsTick();
         _aimInk?.QueueRedraw();
     }
@@ -763,7 +772,10 @@ void fragment() {
         // the target can go between the judging and the drawing: a match's
         // turn hands it back to standing in that frame (Tank3DBench.Match)
         if (_aimInk is { } ramInk)
+        {
             DrawRam(ramInk);
+            DrawBlast(ramInk);
+        }
         if (_aimInk is not { } ink || _judged is not { } shot || _other is null)
             return;
         Font font = ThemeDB.FallbackFont;
@@ -810,10 +822,10 @@ void fragment() {
 
     /// <summary>A wall broken through: eight rays out of a small ring, in
     /// <paramref name="c"/> on a dark one.</summary>
-    private static void Burst(Control ink, Vector2 at, float r, Color c)
+    private static void Burst(Control ink, Vector2 at, float r, Color c, float a = 1.0f)
     {
-        var dark = new Color(0.0f, 0.0f, 0.0f, 0.5f);
-        foreach ((Color col, float w) in new[] { (dark, 5.0f), (c, 2.5f) })
+        var dark = new Color(0.0f, 0.0f, 0.0f, 0.5f * a);
+        foreach ((Color col, float w) in new[] { (dark, 5.0f), (new Color(c, c.A * a), 2.5f) })
         {
             ink.DrawArc(at, r * 0.35f, 0.0f, Mathf.Tau, 20, col, w, true);
             for (int i = 0; i < 8; i++)
