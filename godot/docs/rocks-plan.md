@@ -155,6 +155,9 @@
 
 ### С3. Карта: формат 3, блок `rocks` и `climate` — `MapFile.cs`, `BoardMap.cs`
 
+Формат 3 теперь общий для скал, грунта, дорог и пород: каркас и порядок —
+[map-format3-plan.md](map-format3-plan.md), Ф1; блоки ниже входят в него как Ф2.
+
 ```json
 "climate": { "wind": 25, "ice": -30 },
 "rocks": [
