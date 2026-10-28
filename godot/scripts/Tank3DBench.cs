@@ -69,11 +69,15 @@ public sealed partial class Tank3DBench : Node3D
     private bool _reliefOn;
 
     /// <summary>The rocks' looks on the relief (<c>--rock</c>, docs/rocks-plan.md):
-    /// one look for every rock or a list dealt out in reading order, and the
-    /// board's wind and ice (<c>--rock-wind</c>, <c>--ice</c>). Null - every
-    /// rock a crag, the relief as it always was.</summary>
+    /// one look for every rock or a list dealt out in reading order, dressed
+    /// over what the map's notes say - the look changes, not the map. Null -
+    /// the map's own (<see cref="RockStyles.Of"/>).</summary>
     private RockStyles? _rocks;
-    private float _rockWind = 25.0f, _rockIce = -30.0f;
+    /// <summary><c>--rock-wind</c>, <c>--ice</c>: over the map's climate; null
+    /// - the map's.</summary>
+    private float? _rockWind, _rockIce;
+    /// <summary>The ice the relief was built by, for the shader's striae.</summary>
+    private float _iceBuilt = RockClimate.DefaultIce;
     /// <summary><c>--brow</c>: the relief's brow lines on from the start
     /// (off by default, the user's call; the panel switches them).</summary>
     private bool _browOn;
@@ -824,7 +828,7 @@ public sealed partial class Tank3DBench : Node3D
         AddChild(_field);
         _field.Atlas = _tile;
         if (_reliefOn)
-            BuildRelief(map.Name);
+            BuildRelief(map);
         _home = _startCell ?? (map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2));
         // a match: who stands where, and which of them rides the rig
         LineUpSides();
@@ -849,7 +853,7 @@ public sealed partial class Tank3DBench : Node3D
             CelRelief = !_pbr && !_flatRelief,
             // --relief: one smooth ground for the prisms (BOT-11)
             Relief = _relief,
-            RockIce = _rockIce,
+            RockIce = _iceBuilt,
             ShowBrow = _browOn,
             ShowLawn = _lawnOn,
             ShowTurf = _turfOn,
@@ -897,14 +901,21 @@ public sealed partial class Tank3DBench : Node3D
 
     /// <summary>The board's smooth fields (<c>--relief</c>), and their
     /// pictures, looked at before anything stands on them.</summary>
-    private void BuildRelief(string name)
+    private void BuildRelief(BoardMap map)
     {
-        if (_rocks is not null)
+        string name = map.Name;
+        // the map's rocks and climate (format 3, docs/rocks-plan.md С4), the
+        // flags dressed over them
+        RockStyles? rocks = _rocks ?? RockStyles.Of(map.Rocking, map.Climate);
+        if (rocks is null && (_rockWind is not null || _rockIce is not null))
+            rocks = new RockStyles();
+        if (rocks is not null)
         {
-            _rocks.Wind = _rockWind;
-            _rocks.Ice = _rockIce;
+            rocks.Wind = _rockWind ?? map.Climate.Wind;
+            rocks.Ice = _rockIce ?? map.Climate.Ice;
         }
-        _relief = Relief.Build(_field!, rocks: _rocks);
+        _iceBuilt = rocks?.Ice ?? map.Climate.Ice;
+        _relief = Relief.Build(_field!, rocks: rocks);
         if (_relief is null)
             return;
         foreach (RockGroup g in _relief.Rocks)
@@ -1211,8 +1222,8 @@ public sealed partial class Tank3DBench : Node3D
                 else
                     _reliefOn = true;
             }
-            else if (a == "--rock-wind" && more) _rockWind = F(args[++i], _rockWind);
-            else if (a == "--ice" && more) _rockIce = F(args[++i], _rockIce);
+            else if (a == "--rock-wind" && more) _rockWind = F(args[++i], RockClimate.DefaultWind);
+            else if (a == "--ice" && more) _rockIce = F(args[++i], RockClimate.DefaultIce);
             else if (a == "--brow") _browOn = true;
             else if (a == "--lawn") _lawnOn = true;
             else if (a == "--no-turf") _turfOn = false;

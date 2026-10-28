@@ -311,6 +311,55 @@ public sealed partial class BoardMap
     /// decision rather than a limit of the storage.</summary>
     public Cover[] Over { get; }
 
+    /// <summary>
+    /// What the rocks look like, a note a rock (format 3's <c>rocks</c>,
+    /// docs/map-format3-plan.md), by the cell the file wrote it at - any of
+    /// the rock's own.
+    ///
+    /// <b>Only the rocks that said something</b>, as <see cref="Walling"/>: a
+    /// rock with no note is the crag a bare <see cref="Rock"/> always was.
+    /// Look only - the rules read the letter, and a mesa stops a tank and a
+    /// round exactly as a crag does.
+    /// </summary>
+    public IReadOnlyDictionary<Vector2I, RockNote> Rocking { get; }
+
+    /// <summary>The board's wind and ice (format 3's <c>climate</c>), which
+    /// the yardangs and the moutonnees lie by.</summary>
+    public RockClimate Climate { get; }
+
+    /// <summary>
+    /// The board's rocks: the rock cells joined by their sides, each group in
+    /// reading order of its first cell and its cells in the order they were
+    /// reached - the order <see cref="ReliefRocks.Groups"/> deals looks in.
+    /// Asked of the cells alone, so the editor asks it of a draft.
+    /// </summary>
+    public static List<List<Vector2I>> RockGroups(int columns, int rows, Func<Vector2I, bool> rock)
+    {
+        var left = new HashSet<Vector2I>();
+        for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+                if (rock(new Vector2I(q, r)))
+                    left.Add(new Vector2I(q, r));
+        var groups = new List<List<Vector2I>>();
+        for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+            {
+                var start = new Vector2I(q, r);
+                if (!left.Remove(start))
+                    continue;
+                var cells = new List<Vector2I> { start };
+                for (int k = 0; k < cells.Count; k++)
+                    for (int h = 30; h < 360; h += 60)
+                    {
+                        Vector2I o = HexField.Step(cells[k], h);
+                        if (left.Remove(o))
+                            cells.Add(o);
+                    }
+                groups.Add(cells);
+            }
+        return groups;
+    }
+
     private BoardMap(string name, int columns, int rows,
                      IReadOnlyList<Parking> homes,
                      int[] levels, bool[] ramps, bool[] water,
@@ -318,8 +367,12 @@ public sealed partial class BoardMap
                      Foundation[] ground, Cover[] over,
                      IReadOnlySet<Vector2I>? plot,
                      string paint, bool height, int plinth = 0,
-                     IReadOnlyDictionary<Vector2I, Masonry>? walling = null)
+                     IReadOnlyDictionary<Vector2I, Masonry>? walling = null,
+                     IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
+                     RockClimate climate = default)
     {
+        Rocking = rocking ?? new Dictionary<Vector2I, RockNote>();
+        Climate = climate;
         Name = name;
         Columns = columns;
         Rows = rows;
@@ -610,7 +663,10 @@ public sealed partial class BoardMap
                                         string paint, bool height,
                                         int plinth = 0,
                                         IReadOnlyDictionary<Vector2I, Masonry>?
-                                            walling = null)
+                                            walling = null,
+                                        IReadOnlyDictionary<Vector2I, RockNote>?
+                                            rocking = null,
+                                        RockClimate climate = default)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
@@ -747,6 +803,31 @@ public sealed partial class BoardMap
                 wrong.Add($"the masonry at ({cell.X},{cell.Y}) is on a cell "
                           + "carrying no wall");
 
+        // A rock's note off a rock, or two on one rock, are the same
+        // disagreement: a look that quietly did nothing, or one that quietly
+        // lost to the other.
+        if (rocking is { Count: > 0 })
+        {
+            var rockOf = new Dictionary<Vector2I, int>();
+            List<List<Vector2I>> groups = RockGroups(columns, rows,
+                c => floor[c.Y * columns + c.X] == Foundation.Rock);
+            for (int k = 0; k < groups.Count; k++)
+                foreach (Vector2I c in groups[k])
+                    rockOf[c] = k;
+            var noted = new Dictionary<int, Vector2I>();
+            foreach (Vector2I cell in rocking.Keys.OrderBy(c => c.Y).ThenBy(c => c.X))
+            {
+                if (!rockOf.TryGetValue(cell, out int k))
+                    wrong.Add($"the rock note at ({cell.X},{cell.Y}) is on a cell "
+                              + "carrying no rock");
+                else if (noted.TryGetValue(k, out Vector2I first))
+                    wrong.Add($"the rock at ({first.X},{first.Y}) has a second note at "
+                              + $"({cell.X},{cell.Y}), and one of them would lose silently");
+                else
+                    noted[k] = cell;
+            }
+        }
+
         if (wrong.Count > 0)
             throw new InvalidOperationException(
                 name + ": " + string.Join("; ", wrong));
@@ -757,7 +838,8 @@ public sealed partial class BoardMap
 
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
-                                   plot, paint, height, plinth, walling));
+                                   plot, paint, height, plinth, walling,
+                                   rocking, climate));
     }
 
     /// <summary>

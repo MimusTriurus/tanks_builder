@@ -76,6 +76,22 @@ public sealed class MapEdit
     /// </summary>
     private Dictionary<Vector2I, Masonry> _walls = new();
 
+    /// <summary>
+    /// What the rocks look like (format 3's <c>rocks</c>), by <b>every</b> cell
+    /// of each rock that has a note rather than by the one cell the file
+    /// writes it at.
+    ///
+    /// <b>Kept by the cell because a stroke cuts and joins rocks</b>
+    /// (docs/rocks-plan.md С5): a rock cut in two leaves both halves holding the
+    /// note, two rocks joined keep the note most of their cells hold
+    /// (<see cref="Rocking"/>), and nothing has to know which stroke did it.
+    /// Dropped with the letter by <see cref="Sync"/>, as the masonry is.
+    /// </summary>
+    private Dictionary<Vector2I, RockNote> _rocks = new();
+
+    /// <summary>The board's wind and ice (format 3's <c>climate</c>).</summary>
+    public RockClimate Climate { get; set; }
+
     /// <summary>The parkings, cell and class each - see
     /// <see cref="Parking"/>.</summary>
     public IReadOnlyList<Parking> Homes => _homes;
@@ -175,6 +191,7 @@ public sealed class MapEdit
             // would be every scene in the session drawing the edit.
             _walls = map.Walling.ToDictionary(kv => kv.Key,
                                               kv => kv.Value.Copy()),
+            Climate = map.Climate,
         };
         for (int r = 0; r < map.Rows; r++)
         for (int q = 0; q < map.Columns; q++)
@@ -188,7 +205,103 @@ public sealed class MapEdit
             // the same board back without it.
             edit.Sync(cell);
         }
+        edit.Spread(map.Rocking);
         return edit;
+    }
+
+    /// <summary>A file's rock notes, each laid over every cell of its rock
+    /// (<see cref="_rocks"/>). A note off a rock is dropped: a draft is
+    /// allowed to be wrong, and the letter is what says what is a rock.</summary>
+    private void Spread(IReadOnlyDictionary<Vector2I, RockNote>? rocking)
+    {
+        if (rocking is null || rocking.Count == 0)
+            return;
+        foreach (List<Vector2I> rock in Rocks())
+            foreach (Vector2I c in rock)
+                if (rocking.TryGetValue(c, out RockNote? note))
+                {
+                    foreach (Vector2I d in rock)
+                        _rocks[d] = note;
+                    break;
+                }
+    }
+
+    // --- rocks ---------------------------------------------------------------
+
+    /// <summary>The draft's rocks, as <see cref="BoardMap.RockGroups"/> finds
+    /// them on a board.</summary>
+    public List<List<Vector2I>> Rocks() =>
+        BoardMap.RockGroups(Columns, Rows, c => GlyphAt(c).Floor == Foundation.Rock);
+
+    /// <summary>The rock a cell is part of, or empty off a rock.</summary>
+    public IReadOnlyList<Vector2I> RockOf(Vector2I cell)
+    {
+        if (!Inside(cell) || GlyphAt(cell).Floor != Foundation.Rock)
+            return Array.Empty<Vector2I>();
+        foreach (List<Vector2I> rock in Rocks())
+            if (rock.Contains(cell))
+                return rock;
+        return Array.Empty<Vector2I>();
+    }
+
+    /// <summary>The note the cell's rock holds there, or null - a crag, as a
+    /// bare letter always was.</summary>
+    public RockNote? RockAt(Vector2I cell) =>
+        _rocks.TryGetValue(cell, out RockNote? note) ? note : null;
+
+    /// <summary>
+    /// Give a whole rock one note, or none (null or <see cref="RockNote.Plain"/>
+    /// takes it back to a crag). Names and figures are the file's to judge -
+    /// the panel offers only what the file reads - so what is refused here is
+    /// a cell that is no rock.
+    /// </summary>
+    public bool Note(Vector2I cell, RockNote? note, out string why)
+    {
+        IReadOnlyList<Vector2I> rock = RockOf(cell);
+        if (rock.Count == 0)
+        {
+            why = $"({cell.X},{cell.Y}) is no rock";
+            return false;
+        }
+        why = "";
+        foreach (Vector2I c in rock)
+            if (note is null || note.Plain)
+                _rocks.Remove(c);
+            else
+                _rocks[c] = note;
+        return true;
+    }
+
+    /// <summary>
+    /// The rocks' notes as the file writes them: one a rock, at its first cell
+    /// in reading order of the walk, and the one most of its cells hold. A rock
+    /// two joined by a stroke keeps the larger one's; a tie with the cells
+    /// that hold none is a crag, so a stroke never gives a rock a look more
+    /// of it did not have.
+    /// </summary>
+    public Dictionary<Vector2I, RockNote> Rocking()
+    {
+        var said = new Dictionary<Vector2I, RockNote>();
+        if (_rocks.Count == 0)
+            return said;
+        foreach (List<Vector2I> rock in Rocks())
+        {
+            var count = new Dictionary<RockNote, int>();
+            int plain = 0;
+            foreach (Vector2I c in rock)
+                if (_rocks.TryGetValue(c, out RockNote? n))
+                    count[n] = count.GetValueOrDefault(n) + 1;
+                else
+                    plain++;
+            RockNote? best = null;
+            int most = 0;
+            foreach ((RockNote n, int k) in count)
+                if (k > most)
+                    (best, most) = (n, k);
+            if (best is not null && most > plain)
+                said[rock[0]] = best;
+        }
+        return said;
     }
 
     // --- reading -------------------------------------------------------------
@@ -243,17 +356,21 @@ public sealed class MapEdit
     private readonly record struct Snap(char[] Ground, bool[] Ramps,
                                         List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls,
+                                        Dictionary<Vector2I, RockNote> Rocks,
+                                        RockClimate Climate,
                                         int Columns, int Rows);
 
     private Snap Taken() => new((char[])_ground.Clone(),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
                                                     kv => kv.Value.Copy()),
+                                new Dictionary<Vector2I, RockNote>(_rocks), Climate,
                                 Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _ramps, _homes, _walls, Columns, Rows) =
-            (was.Ground, was.Ramps, was.Homes, was.Walls, was.Columns, was.Rows);
+        (_ground, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+            (was.Ground, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
+             was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
 
@@ -292,7 +409,10 @@ public sealed class MapEdit
                     && was.Ground.SequenceEqual(_ground) && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
-                                           && now.Say() == kv.Value.Say());
+                                           && now.Say() == kv.Value.Say())
+                    && was.Climate == Climate && was.Rocks.Count == _rocks.Count
+                    && was.Rocks.All(kv => _rocks.TryGetValue(kv.Key, out RockNote? now)
+                                           && now == kv.Value);
         if (same)
             _back.RemoveAt(_back.Count - 1);
         return !same;
@@ -366,6 +486,8 @@ public sealed class MapEdit
             _walls.TryAdd(cell, new Masonry());
         else
             _walls.Remove(cell);
+        if (GlyphAt(cell).Floor != Foundation.Rock)
+            _rocks.Remove(cell);
     }
 
     private static string Say(Foundation floor, Cover over, int level, bool water)
@@ -581,6 +703,8 @@ public sealed class MapEdit
         _ramps = (bool[])_ramps.Clone(),
         _homes = _homes.ToList(),
         _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
+        _rocks = new Dictionary<Vector2I, RockNote>(_rocks),
+        Climate = Climate,
     };
 
     /// <summary>
@@ -1024,9 +1148,12 @@ public sealed class MapEdit
 
     // --- pieces: copy, cut, paste, move ----------------------------------------
 
-    /// <summary>One cell of a <see cref="Piece"/>: its letter, its ramp and its
-    /// masonry, on the cell it was taken from.</summary>
-    public readonly record struct Bit(Vector2I Cell, char Letter, bool Ramp, Masonry? Wall);
+    /// <summary>One cell of a <see cref="Piece"/>: its letter, its ramp, its
+    /// masonry and its rock's note, on the cell it was taken from. A stamp
+    /// file keeps no notes (<see cref="MapFile.SaveStamp"/>), so a rock comes
+    /// out of one a crag.</summary>
+    public readonly record struct Bit(Vector2I Cell, char Letter, bool Ramp, Masonry? Wall,
+                                      RockNote? Rock = null);
 
     /// <summary>
     /// A part of a board lifted off it - the clipboard, a stamp, the selection
@@ -1087,7 +1214,8 @@ public sealed class MapEdit
             if (!OnBoard(cell) || !taken.Add(cell))
                 continue;
             bits.Add(new Bit(cell, LetterAt(cell), IsRamp(cell),
-                             _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null));
+                             _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null,
+                             RockAt(cell)));
         }
         var homes = new List<Parking>();
         foreach (Lineup.Unit u in Lineup.Of(_homes))
@@ -1158,6 +1286,9 @@ public sealed class MapEdit
             _walls.Remove(to);
             if (bit.Wall is { } wall && GlyphAt(to).Wall)
                 _walls[to] = wall.Copy();
+            _rocks.Remove(to);
+            if (bit.Rock is { } note)
+                _rocks[to] = note;
             Sync(to);
             written++;
         }
@@ -1233,6 +1364,7 @@ public sealed class MapEdit
         var ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
         var ramps = new bool[columns * rows];
         var walls = new Dictionary<Vector2I, Masonry>();
+        var rocks = new Dictionary<Vector2I, RockNote>();
         for (int r = 0; r < Rows; r++)
         for (int q = 0; q < Columns; q++)
         {
@@ -1244,8 +1376,11 @@ public sealed class MapEdit
             ramps[to.Y * columns + to.X] = _ramps[At(from)];
             if (_walls.TryGetValue(from, out Masonry? wall))
                 walls[to] = wall;
+            if (_rocks.TryGetValue(from, out RockNote? note))
+                rocks[to] = note;
         }
-        (Columns, Rows, _ground, _ramps, _homes, _walls) = (columns, rows, ground, ramps, homes, walls);
+        (Columns, Rows, _ground, _ramps, _homes, _walls, _rocks) =
+            (columns, rows, ground, ramps, homes, walls, rocks);
         return true;
     }
 
@@ -1266,7 +1401,9 @@ public sealed class MapEdit
     /// back through <see cref="BoardMap.FromGround"/>, which would refuse it.
     /// </summary>
     public static MapEdit Raw(string name, string[] ground, string[] ramps, IReadOnlyList<Parking> homes,
-                              IReadOnlyDictionary<Vector2I, Masonry>? walls, string? paint, bool height, int plinth)
+                              IReadOnlyDictionary<Vector2I, Masonry>? walls, string? paint, bool height, int plinth,
+                              IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
+                              RockClimate climate = default)
     {
         int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
         if (columns < 1 || ground.Any(row => row.Length != columns))
@@ -1278,6 +1415,7 @@ public sealed class MapEdit
             _ground = new char[columns * rows],
             _ramps = new bool[columns * rows],
             _homes = homes.ToList(),
+            Climate = climate,
         };
         for (int r = 0; r < rows; r++)
         for (int q = 0; q < columns; q++)
@@ -1292,6 +1430,7 @@ public sealed class MapEdit
                 edit._walls[cell] = wall.Copy();
             edit.Sync(cell);
         }
+        edit.Spread(rocking);
         return edit;
     }
 
@@ -1510,7 +1649,8 @@ public sealed class MapEdit
                                    Paint ?? MapFile.PaintFor(Ground()), Height,
                                    Plinth,
                                    _walls.ToDictionary(kv => kv.Key,
-                                                       kv => kv.Value.Copy()));
+                                                       kv => kv.Value.Copy()),
+                                   Rocking(), Climate);
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

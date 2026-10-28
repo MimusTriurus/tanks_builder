@@ -65,11 +65,18 @@ public sealed partial class MapEditor
         string?[] painted = ring.Spread(kinds, null);
         Cover[] covered = ring.Spread(cover, Cover.None);
         string paint = _field.Paint ?? "";
+        // the rocks' notes and the climate, on the ring's cells (format 3,
+        // docs/rocks-plan.md С5): a note is a new relief, as a level is
+        var rocking = _edit.Rocking().ToDictionary(kv => kv.Key + ring.Shift, kv => kv.Value);
+        RockStyles? rocks = RockStyles.Of(rocking, _edit.Climate);
         string want = $"{ring.Columns}x{ring.Rows}:{paint}:"
                       + string.Join(",", levels) + "|" + string.Concat(wet.Select(w => w ? '1' : '0'))
                       + "|" + string.Concat(ground.Select(g => (char)('a' + (int)g)))
                       + "|" + string.Join(",", painted.Select(k => k ?? "")) + "|"
-                      + string.Concat(covered.Select(c => (char)('a' + (int)c)));
+                      + string.Concat(covered.Select(c => (char)('a' + (int)c)))
+                      + "|" + _edit.Climate + "|"
+                      + string.Join(";", rocking.OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
+                                                .Select(kv => $"{kv.Key}{kv.Value}"));
         if (want == _reliefAs)
             return;
         _reliefAs = want;
@@ -98,13 +105,14 @@ public sealed partial class MapEditor
             return;
         }
 
-        _relief = Relief.Build(_board);
+        _relief = Relief.Build(_board, rocks: rocks);
         Vector2 offset = _board.FlatAnchor(ring.Shift) - _field.FlatAnchor(Vector2I.Zero);
         Relief? relief = _relief;
         _board.Surface = relief is null ? null : relief.HeightAt;
         _field.Surface = relief is null ? null : flat => relief.HeightAt(flat + offset);
         if (_stage is not null)
         {
+            _stage.RockIce = _edit.Climate.Ice;
             _stage.Origin = -offset;
             _stage.Relief = relief;
             // the ring and its frame from the middle, along the camera's

@@ -101,6 +101,16 @@ public sealed class RockPalette
 
     private static Color[] Six(Color c) => new[] { c, c, c, c, c, c };
 
+    /// <summary>Every palette's name, in the table's order.</summary>
+    public static IEnumerable<string> Names
+    {
+        get
+        {
+            foreach (RockPalette p in All)
+                yield return p.Name;
+        }
+    }
+
     public static RockPalette? Named(string name)
     {
         foreach (RockPalette p in All)
@@ -129,15 +139,7 @@ public readonly record struct RockLook(RockType Type, RockPalette Palette, int P
     public static RockLook? Parse(string said)
     {
         string[] part = said.Split(':');
-        RockType? type = part[0].ToLowerInvariant() switch
-        {
-            "crag" => RockType.Crag,
-            "mesa" => RockType.Mesa,
-            "yardang" => RockType.Yardang,
-            "moutonnee" => RockType.Moutonnee,
-            _ => null,
-        };
-        if (type is not { } t)
+        if (RockNote.TypeNamed(part[0]) is not { } t)
             return null;
         RockPalette palette = RockPalette.For(t);
         if (part.Length > 1 && part[1].Length > 0)
@@ -156,21 +158,106 @@ public readonly record struct RockLook(RockType Type, RockPalette Palette, int P
 }
 
 /// <summary>
-/// The looks a board's rocks take, and its climate: the wind the yardangs lie
-/// along and the way the ice ran over the moutonnees - one each a board, or the
-/// ridges read as noise (docs/rocks-plan.md). Until the map carries them
-/// (stage 3) the bench's <c>--rock</c> hands them out: one look to every rock,
-/// or a list dealt out to the rocks in reading order.
+/// What a map says about one rock: format 3's <c>rocks</c> block
+/// (docs/map-format3-plan.md, docs/rocks-plan.md С3). Every field may be
+/// silent, and silence is the rock as it always was rather than a default
+/// written down: no type is a crag, no palette the type's own, no preset the
+/// first, no seed the board's moved by the rock's first cell.
+/// </summary>
+public sealed record RockNote
+{
+    public RockType? Type { get; init; }
+    /// <summary>A palette's name, one <see cref="RockPalette.Named"/> knows.</summary>
+    public string? Palette { get; init; }
+    /// <summary>1 to <see cref="Presets"/>.</summary>
+    public int? Preset { get; init; }
+    public int? Seed { get; init; }
+
+    public const int Presets = 3;
+
+    /// <summary>A note saying nothing - not written to a file.</summary>
+    public bool Plain => Type is null && Palette is null && Preset is null && Seed is null;
+
+    public RockLook Look
+    {
+        get
+        {
+            RockType type = Type ?? RockType.Crag;
+            return new RockLook(type, Palette is { } p ? RockPalette.Named(p)! : RockPalette.For(type),
+                                Preset ?? 1);
+        }
+    }
+
+    /// <summary>The type as the file and the editor say it.</summary>
+    public static string Say(RockType type) => type.ToString().ToLowerInvariant();
+
+    public static RockType? TypeNamed(string said) => said.ToLowerInvariant() switch
+    {
+        "crag" => RockType.Crag,
+        "mesa" => RockType.Mesa,
+        "yardang" => RockType.Yardang,
+        "moutonnee" => RockType.Moutonnee,
+        _ => null,
+    };
+}
+
+/// <summary>
+/// A board's climate (format 3's <c>climate</c>): the wind the yardangs lie
+/// along and the way the ice ran over the moutonnees, degrees on the ground
+/// (0 along +X, 90 along +Z) - one each a board, or the ridges read as noise
+/// (docs/rocks-plan.md). A null is silence and reads as the default.
+/// </summary>
+public readonly record struct RockClimate(float? SaidWind, float? SaidIce)
+{
+    public const float DefaultWind = 25.0f, DefaultIce = -30.0f;
+    public float Wind => SaidWind ?? DefaultWind;
+    public float Ice => SaidIce ?? DefaultIce;
+    public bool Plain => SaidWind is null && SaidIce is null;
+}
+
+/// <summary>
+/// The looks a board's rocks take, and its climate. The map says them a rock
+/// at a time (<see cref="Notes"/>, by any of its cells); the bench's
+/// <c>--rock</c> dresses over them (<see cref="Looks"/>): one look to every
+/// rock, or a list dealt out to the rocks in reading order - the look changes,
+/// the map does not.
 /// </summary>
 public sealed class RockStyles
 {
     public readonly List<RockLook> Looks = new();
+    /// <summary>The map's notes, by cell; a rock takes the note of the first
+    /// of its cells that has one.</summary>
+    public readonly Dictionary<Vector2I, RockNote> Notes = new();
     /// <summary>The wind, degrees on the ground (0 along +X, 90 along +Z).</summary>
-    public float Wind = 25.0f;
+    public float Wind = RockClimate.DefaultWind;
     /// <summary>Where the ice ran, degrees, the same way.</summary>
-    public float Ice = -30.0f;
+    public float Ice = RockClimate.DefaultIce;
 
-    public RockLook For(int rock) => Looks.Count == 0 ? RockLook.Crag : Looks[rock % Looks.Count];
+    /// <summary>A map's rocks and climate, by its cells (shift them with the
+    /// board's sea, <see cref="BoardMap.Moated"/>, before asking) - null when
+    /// it says nothing of either, and the relief takes the one path it always
+    /// did.</summary>
+    public static RockStyles? Of(IReadOnlyDictionary<Vector2I, RockNote> rocking, RockClimate climate)
+    {
+        if (rocking.Count == 0 && climate.Plain)
+            return null;
+        var styles = new RockStyles { Wind = climate.Wind, Ice = climate.Ice };
+        foreach ((Vector2I cell, RockNote note) in rocking)
+            styles.Notes[cell] = note;
+        return styles;
+    }
+
+    /// <summary>The rock's look and seed: the flag's deal if there is one,
+    /// else its note, else a crag.</summary>
+    public (RockLook Look, int? Seed) For(int rock, List<Vector2I> cells)
+    {
+        if (Looks.Count > 0)
+            return (Looks[rock % Looks.Count], null);
+        foreach (Vector2I c in cells)
+            if (Notes.TryGetValue(c, out RockNote? note))
+                return (note.Look, note.Seed);
+        return (RockLook.Crag, null);
+    }
 
     /// <summary>Whether every rock stays a crag: the relief is then built by
     /// the one path it always was.</summary>
@@ -178,8 +265,15 @@ public sealed class RockStyles
     {
         get
         {
-            foreach (RockLook look in Looks)
-                if (look.Type != RockType.Crag)
+            if (Looks.Count > 0)
+            {
+                foreach (RockLook look in Looks)
+                    if (look.Type != RockType.Crag)
+                        return false;
+                return true;
+            }
+            foreach (RockNote note in Notes.Values)
+                if (note.Type is { } t && t != RockType.Crag)
                     return false;
             return true;
         }
@@ -212,6 +306,9 @@ public sealed class RockGroup
     public required RockLook Look { get; init; }
     /// <summary>Its top, lift px: its highest cell's.</summary>
     public required float Top { get; init; }
+    /// <summary>The seed its note asked for; null - the board's, moved by its
+    /// first cell.</summary>
+    public int? Seed { get; init; }
 
     /// <summary>A mesa's ledge only on a rock of three cells or more (the
     /// user's call, 2026-10-27): on a smaller one the upper tier does not fit
@@ -277,38 +374,19 @@ internal static class ReliefRocks
     /// with the look the styles deal it.</summary>
     public static List<RockGroup> Groups(HexField field, RockStyles? styles)
     {
-        var left = new HashSet<Vector2I>();
-        for (int row = 0; row < field.Rows; row++)
-            for (int q = 0; q < field.Columns; q++)
-            {
-                var c = new Vector2I(q, row);
-                if (field.InBounds(c) && field.FoundationAt(c) == Foundation.Rock)
-                    left.Add(c);
-            }
         var groups = new List<RockGroup>();
-        for (int row = 0; row < field.Rows; row++)
-            for (int q = 0; q < field.Columns; q++)
+        foreach (List<Vector2I> cells in BoardMap.RockGroups(field.Columns, field.Rows,
+                     c => field.InBounds(c) && field.FoundationAt(c) == Foundation.Rock))
+        {
+            float top = float.MinValue;
+            foreach (Vector2I c in cells)
+                top = Mathf.Max(top, field.TopAt(c));
+            (RockLook look, int? seed) = styles?.For(groups.Count, cells) ?? (RockLook.Crag, null);
+            groups.Add(new RockGroup
             {
-                var start = new Vector2I(q, row);
-                if (!left.Remove(start))
-                    continue;
-                var cells = new List<Vector2I> { start };
-                for (int k = 0; k < cells.Count; k++)
-                    for (int h = 30; h < 360; h += 60)
-                    {
-                        Vector2I o = HexField.Step(cells[k], h);
-                        if (left.Remove(o))
-                            cells.Add(o);
-                    }
-                float top = float.MinValue;
-                foreach (Vector2I c in cells)
-                    top = Mathf.Max(top, field.TopAt(c));
-                groups.Add(new RockGroup
-                {
-                    Index = groups.Count, Cells = cells, Top = top,
-                    Look = styles?.For(groups.Count) ?? RockLook.Crag,
-                });
-            }
+                Index = groups.Count, Cells = cells, Top = top, Look = look, Seed = seed,
+            });
+        }
         return groups;
     }
 
@@ -377,7 +455,7 @@ internal static class ReliefRocks
         Relief.Blur(wide, f.Nx, f.Ny, 0.35f * r / f.Cell);
         foreach (RockGroup g in groups)
         {
-            int s = seed + 7919 * (g.Cells[0].X + 131 * g.Cells[0].Y);
+            int s = g.Seed ?? seed + 7919 * (g.Cells[0].X + 131 * g.Cells[0].Y);
             switch (g.Look.Type)
             {
                 case RockType.Mesa: Mesa(f, g, cliff0, flat, soft, lift, hr, r, s); break;

@@ -507,6 +507,7 @@ public sealed partial class MapEditor : SceneRoot
         ClipProbe();
         SymmetryProbe();
         BoardProbe();
+        RockProbe();
         ToolsProbe();
         AutosaveTick(delta);
         CrownsFollow();
@@ -929,6 +930,7 @@ public sealed partial class MapEditor : SceneRoot
                 $"({walled.X},{walled.Y}) carries masonry, and the relief stands no "
                 + "wall, capon or bunker - kept in the file, not played", false,
                 $"({walled.X},{walled.Y}) masonry"));
+        Stones(faults);
         // where the board breaks the symmetry that is up (MapEditor.Symmetry)
         Symmetric(faults);
 
@@ -954,6 +956,37 @@ public sealed partial class MapEditor : SceneRoot
         _dressStale = true;
         Bricks();
         Say();
+    }
+
+    /// <summary>
+    /// What a rock's note asks that the relief will not draw (docs/rocks-plan.md
+    /// С5), both warnings: the file keeps the note either way.
+    /// <c>rock.bench</c> - a mesa's ledge on a rock under three cells, laid
+    /// without it (the user's call, С0); <c>rock.wind</c> - yardangs with the
+    /// wind within 20° of the camera's way up the board, where their ridges
+    /// read as teeth (render E2).
+    /// </summary>
+    private void Stones(List<MapRules.Fault> faults)
+    {
+        Vector2I? yardang = null;
+        foreach ((Vector2I at, RockNote note) in _edit.Rocking())
+        {
+            RockLook look = note.Look;
+            if (look.Type == RockType.Yardang)
+                yardang ??= at;
+            int cells = _edit.RockOf(at).Count;
+            if (look.Type == RockType.Mesa && look.Preset == 2 && cells < RockGroup.BenchCells)
+                faults.Add(new MapRules.Fault(at, "rock.bench",
+                    $"the mesa at ({at.X},{at.Y}) asks for a ledge and is {cells} cell"
+                    + $"{(cells == 1 ? "" : "s")} - a ledge needs {RockGroup.BenchCells}; "
+                    + "laid without it", false, $"({at.X},{at.Y}) mesa ledge"));
+        }
+        // the camera looks up the board, along Z: 90 or -90 on the ground
+        float off = Mathf.Abs(Mathf.Wrap(_edit.Climate.Wind - 90.0f, -90.0f, 90.0f));
+        if (yardang is Vector2I first && off < 20.0f)
+            faults.Add(new MapRules.Fault(first, "rock.wind",
+                $"the wind runs at {_edit.Climate.Wind:0}°, {off:0}° off the camera's "
+                + "way - the yardangs' ridges will read as teeth", false, "wind along the view"));
     }
 
     private readonly List<WallProp> _bricks = new();
@@ -1773,6 +1806,9 @@ public sealed partial class MapEditor : SceneRoot
         string cell = _edit.Inside(_under)
             ? $"({_under.X},{_under.Y}) '{glyph.Letter}' "
               + $"{glyph.Floor.ToString().ToLowerInvariant()}"
+              // the rock's look, as the panel names it (MapEditor.Panels.Stone)
+              + (glyph.Floor == Foundation.Rock && _edit.RockAt(_under) is { } rock
+                  ? $", {RockNote.Say(rock.Look.Type)} / {rock.Look.Palette.Name}" : "")
               + (glyph.Over == Cover.None
                   ? "" : "/" + glyph.Over.ToString().ToLowerInvariant())
               + $" level {glyph.Level}"

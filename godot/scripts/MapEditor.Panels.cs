@@ -492,6 +492,8 @@ public sealed partial class MapEditor
 
         into.AddChild(Ticked("water", glyph.Water,
             wet => _edit.Water(_picked, wet, out string why) ? "" : why));
+        if (glyph.Floor == Foundation.Rock)
+            Stone(into);
         into.AddChild(Does("take it off the board",
             () => _edit.Plot(_picked, false, out string why) ? "" : why));
 
@@ -641,6 +643,137 @@ public sealed partial class MapEditor
                     return;
                 Wrote(() => _edit.Shape(_picked, which, (int)value,
                     out string why) ? "" : why);
+            };
+            row.AddChild(own);
+            row.AddChild(box);
+            into.AddChild(row);
+        }
+    }
+
+    /// <summary>
+    /// The rock group: type, palette, preset and seed of the whole rock the
+    /// cell is part of (format 3's <c>rocks</c>, docs/rocks-plan.md С5).
+    ///
+    /// <b>"crag" and "the type's" are the first entries and they are
+    /// silence</b>, as "anybody" is for a home's class: a rock nobody named is
+    /// the crag a bare letter always was, and naming one is the thing you go
+    /// and pick. The preset and the seed are a tick and a number, as a wall's
+    /// dials are, for the same reason.
+    /// </summary>
+    private void Stone(VBoxContainer into)
+    {
+        RockNote note = _edit.RockAt(_picked) ?? new RockNote();
+        IReadOnlyList<Vector2I> rock = _edit.RockOf(_picked);
+        into.AddChild(Note($"rock of {rock.Count} cell{(rock.Count == 1 ? "" : "s")}, "
+                           + $"from ({rock[0].X},{rock[0].Y}) - {note.Look}"));
+        void Put(RockNote next) =>
+            Wrote(() => _edit.Note(_picked, next, out string why) ? "" : why);
+
+        RockType[] types = Enum.GetValues<RockType>();
+        var type = new OptionButton();
+        foreach (RockType t in types)
+            type.AddItem(RockNote.Say(t));
+        type.Selected = Array.IndexOf(types, note.Type ?? RockType.Crag);
+        type.ItemSelected += index =>
+        {
+            if (!_loading)
+                Put(note with { Type = index == 0 ? null : types[(int)index] });
+        };
+        into.AddChild(Field("rock", type));
+
+        string[] names = RockPalette.Names.ToArray();
+        var palette = new OptionButton();
+        palette.AddItem($"the type's ({RockPalette.For(note.Type ?? RockType.Crag).Name})");
+        foreach (string name in names)
+            palette.AddItem(name);
+        palette.Selected = note.Palette is { } p ? Array.IndexOf(names, p) + 1 : 0;
+        palette.ItemSelected += index =>
+        {
+            if (!_loading)
+                Put(note with { Palette = index == 0 ? null : names[(int)index - 1] });
+        };
+        into.AddChild(Field("palette", palette));
+
+        foreach (bool seed in new[] { false, true })
+        {
+            bool isSeed = seed;
+            int? said = isSeed ? note.Seed : note.Preset;
+            var row = new HBoxContainer();
+            var own = new CheckBox
+            {
+                Text = isSeed ? "seed" : "preset",
+                ButtonPressed = said is not null,
+                CustomMinimumSize = new Vector2(94.0f, 0.0f),
+            };
+            own.AddThemeFontSizeOverride("font_size", 12);
+            var box = new SpinBox
+            {
+                MinValue = isSeed ? 0 : 1, MaxValue = isSeed ? 9999 : RockNote.Presets, Step = 1,
+                Value = said ?? (isSeed ? 0 : 1),
+                Editable = said is not null,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            RockNote With(int? v) => isSeed ? note with { Seed = v } : note with { Preset = v };
+            own.Toggled += on =>
+            {
+                if (_loading)
+                    return;
+                box.Editable = on;
+                Put(With(on ? (int)box.Value : null));
+            };
+            box.ValueChanged += value =>
+            {
+                if (!_loading && own.ButtonPressed)
+                    Put(With((int)value));
+            };
+            row.AddChild(own);
+            row.AddChild(box);
+            into.AddChild(row);
+        }
+        if (note.Type == RockType.Mesa && note.Look.Preset == 2 && rock.Count < RockGroup.BenchCells)
+            into.AddChild(Note($"preset 2 has a ledge, and a rock under {RockGroup.BenchCells} "
+                               + "cells is laid without it"));
+
+        // The board's, not the rock's - one wind and one ice a board - and here
+        // because the rocks are all that read it until the dunes do (Ф4 of
+        // docs/map-format3-plan.md).
+        into.AddChild(Note("climate, the whole board's: degrees on the ground, 0 along +X"));
+        foreach (bool ice in new[] { false, true })
+        {
+            bool isIce = ice;
+            float? said = isIce ? _edit.Climate.SaidIce : _edit.Climate.SaidWind;
+            var row = new HBoxContainer();
+            var own = new CheckBox
+            {
+                Text = isIce ? "ice" : "wind",
+                ButtonPressed = said is not null,
+                CustomMinimumSize = new Vector2(94.0f, 0.0f),
+            };
+            own.AddThemeFontSizeOverride("font_size", 12);
+            var box = new SpinBox
+            {
+                MinValue = -180, MaxValue = 180, Step = 5,
+                Value = said ?? (isIce ? RockClimate.DefaultIce : RockClimate.DefaultWind),
+                Editable = said is not null,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            void Blow(float? v) => Wrote(() =>
+            {
+                _edit.Climate = isIce ? _edit.Climate with { SaidIce = v }
+                                      : _edit.Climate with { SaidWind = v };
+                return "";
+            });
+            own.Toggled += on =>
+            {
+                if (_loading)
+                    return;
+                box.Editable = on;
+                Blow(on ? (float)box.Value : null);
+            };
+            box.ValueChanged += value =>
+            {
+                if (!_loading && own.ButtonPressed)
+                    Blow((float)value);
             };
             row.AddChild(own);
             row.AddChild(box);

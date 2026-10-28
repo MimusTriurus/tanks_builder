@@ -21794,6 +21794,38 @@ public static class SelfTest
             Check("a key no field answers to is refused, not skipped",
                 Refusal(With(good, "\"roadz\": []"), "test").Contains("roadz"),
                 Refusal(With(good, "\"roadz\": []"), "test"));
+            // The rocks and the climate (Ф2, docs/rocks-plan.md С3): rocktest
+            // carries three notes and a climate, and both writers - the map's
+            // and the editor's draft built back into a map - must give its text
+            // back letter for letter; then what the map refuses.
+            if (MapFile.Has("rocktest"))
+            {
+                string rockText = System.IO.File.ReadAllText(MapFile.PathOf("rocktest"))
+                    .Replace("\r\n", "\n");
+                BoardMap rocky = MapFile.Load("rocktest");
+                Check("rocktest reads its three rock notes and its climate",
+                    rocky.Rocking.Count == 3 && rocky.Climate.SaidWind == 25.0f,
+                    $"{rocky.Rocking.Count} notes, wind {rocky.Climate.SaidWind}");
+                Check("and writes them back letter for letter",
+                    MapFile.Write(rocky) == rockText, "the map's writer moved rocktest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(rocky).Build()) == rockText,
+                    "the editor's round trip moved rocktest");
+                string RockRefusal(string from, string to) =>
+                    Refusal(rockText.Replace(from, to), "rocktest");
+                Check("a rock note off a rock is refused",
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [0, 0]").Contains("no rock"),
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [0, 0]"));
+                Check("and a second note on one rock",
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [3, 1]").Contains("second note"),
+                    RockRefusal("\"at\": [5, 6]", "\"at\": [3, 1]"));
+                Check("and a type, a palette or a preset nothing answers to",
+                    RockRefusal("\"yardang\"", "\"butte\"").Length > 0
+                    && RockRefusal("\"ochre\"", "\"teal\"").Length > 0
+                    && RockRefusal("\"preset\": 2", "\"preset\": 4").Length > 0,
+                    "a rock note that means nothing was read");
+            }
+
             Vector2I stray = BoardMap.Test.Homes[0];
             Check("and so is a stray field on a home",
                 Refusal(good.Replace($"[{stray.X}, {stray.Y}]",

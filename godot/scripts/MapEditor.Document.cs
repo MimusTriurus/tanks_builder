@@ -510,4 +510,51 @@ public sealed partial class MapEditor
         GD.Print($"board: recent {string.Join(", ", Recent())}");
         Say();
     }
+
+    /// <summary>
+    /// <c>--map rocktest --menu rocks</c>: Ф2's notes without a mouse
+    /// (docs/rocks-plan.md С5). The board written back as the file it was
+    /// opened from; the mesa cut in two by a stroke, both halves holding its
+    /// note; a whole rock given a note and the climate a wind; a draft of that
+    /// through the disk; and undo back to the file.
+    /// </summary>
+    private void RockProbe()
+    {
+        if (_open != "rocks" || _frame != 10)
+            return;
+        string Notes() => string.Join("; ", _edit.Rocking().OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
+            .Select(kv => $"{kv.Key.X},{kv.Key.Y} {kv.Value.Look}"));
+        string file = MapFile.Has(_edit.Name)
+            ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
+        string opened = MapFile.Write(_edit.Build());
+        GD.Print($"rocks: opened - {Notes()}; writes the file back: {opened == file}");
+
+        // (3,1) out of the mesa leaves (4,1) a rock of its own
+        _edit.Begin();
+        _edit.Floor(new Vector2I(3, 1), Foundation.Solid, out string why);
+        _edit.End();
+        Settle();
+        GD.Print($"rocks: cut at 3,1 ({(why.Length > 0 ? why : "done")}) - {Notes()}");
+
+        _edit.Begin();
+        _edit.Note(new Vector2I(9, 8), new RockNote { Type = RockType.Mesa, Palette = "red", Seed = 7 }, out why);
+        _edit.Climate = _edit.Climate with { SaidWind = 90.0f };
+        _edit.End();
+        Settle();
+        GD.Print($"rocks: 9,8 noted ({(why.Length > 0 ? why : "done")}), wind 90 - {Notes()}; "
+                 + $"faults {string.Join(", ", _faults.Where(f => f.Rule.StartsWith("rock.")).Select(f => f.Rule))}");
+
+        string draft = MapFile.WriteDraft(_edit);
+        string tmp = Path.Combine(AutosaveDir, "zz_rocks" + MapFile.Extension);
+        Directory.CreateDirectory(AutosaveDir);
+        File.WriteAllText(tmp, draft);
+        MapEdit back = MapFile.ReadDraft(tmp);
+        File.Delete(tmp);
+        GD.Print($"rocks: the draft read back the same: {MapFile.WriteDraft(back) == draft}");
+
+        Take(_edit.Undo(), "undone");
+        Take(_edit.Undo(), "undone");
+        GD.Print($"rocks: two undos - {Notes()}; writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        Say();
+    }
 }

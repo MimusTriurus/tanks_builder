@@ -194,7 +194,66 @@ public static class MapFile
 
         return BoardMap.FromGround(name, file.Ground, file.Ramps, homes, paint,
                                    file.Height ?? true, file.Plinth ?? 0,
-                                   Walling(file.Walls, name));
+                                   Walling(file.Walls, name),
+                                   Rocking(file.Rocks, name), Climate(file.Climate, name));
+    }
+
+    /// <summary>
+    /// The rocks block (format 3, docs/rocks-plan.md С3): a note a rock, at
+    /// any of its cells. Which cell is a rock and that no rock has two notes is
+    /// the map's to judge (<see cref="BoardMap.FromGround"/>), as for the
+    /// walls; here a name or a figure that means nothing is refused rather
+    /// than read as a crag.
+    /// </summary>
+    private static IReadOnlyDictionary<Vector2I, RockNote>? Rocking(RockShape[]? said, string name)
+    {
+        if (said is null || said.Length == 0)
+            return null;
+        var rocking = new Dictionary<Vector2I, RockNote>();
+        foreach (RockShape shape in said)
+        {
+            if (shape.At is not { Length: 2 })
+                throw new InvalidOperationException(
+                    $"{name}: a rock's at is a pair of numbers, and one of them "
+                    + $"has {shape.At?.Length ?? 0}");
+            var cell = new Vector2I(shape.At[0], shape.At[1]);
+            if (rocking.ContainsKey(cell))
+                throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) has two rock notes, and the "
+                    + "second would win silently");
+            RockType? type = null;
+            if (shape.Type is { } t)
+                type = RockNote.TypeNamed(t) ?? throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) is a \"{t}\", and a rock is a "
+                    + "crag, a mesa, a yardang or a moutonnee");
+            string? palette = null;
+            if (shape.Palette is { } p)
+                palette = RockPalette.Named(p.ToLowerInvariant())?.Name
+                          ?? throw new InvalidOperationException(
+                              $"{name}: ({cell.X},{cell.Y}) wears \"{p}\", and the "
+                              + "palettes are " + string.Join(", ", RockPalette.Names));
+            if (shape.Preset is int preset && (preset < 1 || preset > RockNote.Presets))
+                throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) asks for preset {preset}, and a "
+                    + $"rock has 1 to {RockNote.Presets}");
+            rocking[cell] = new RockNote
+            {
+                Type = type, Palette = palette, Preset = shape.Preset, Seed = shape.Seed,
+            };
+        }
+        return rocking;
+    }
+
+    /// <summary>The climate block: two headings, each said or silent.</summary>
+    private static RockClimate Climate(ClimateShape? said, string name)
+    {
+        if (said is null)
+            return default;
+        foreach ((string what, float? deg) in new[] { ("wind", said.Wind), ("ice", said.Ice) })
+            if (deg is float d && (d < -360.0f || d > 360.0f || float.IsNaN(d)))
+                throw new InvalidOperationException(
+                    $"{name}: the {what} runs at {d}, and a heading is -360 to 360 degrees");
+        return new RockClimate(said.Wind, said.Ice);
     }
 
     /// <summary>
@@ -251,29 +310,30 @@ public static class MapFile
             ? $"{at}: no such field in a map file"
             : e.Message;
 
-    /// <summary>The blocks format 3 brought, by the key the file writes, and
-    /// whether this file said each.</summary>
-    private static IEnumerable<(string Key, bool Said)> Blocks(Shape file)
+    /// <summary>The blocks format 3 brought, by the key the file writes:
+    /// whether this file said each, and whether this build reads it.</summary>
+    private static IEnumerable<(string Key, bool Said, bool Read)> Blocks(Shape file)
     {
-        yield return ("floor", file.Floor is not null);
-        yield return ("climate", file.Climate is not null);
-        yield return ("rocks", file.Rocks is not null);
-        yield return ("soil", file.Soil is not null);
-        yield return ("roads", file.Roads is not null);
-        yield return ("wood", file.Wood is not null);
-        yield return ("trees", file.Trees is not null);
+        yield return ("floor", file.Floor is not null, false);
+        yield return ("climate", file.Climate is not null, true);
+        yield return ("rocks", file.Rocks is not null, true);
+        yield return ("soil", file.Soil is not null, false);
+        yield return ("roads", file.Roads is not null, false);
+        yield return ("wood", file.Wood is not null, false);
+        yield return ("trees", file.Trees is not null, false);
     }
 
     /// <summary>
     /// A block of format 3 this build does not read yet, refused by name.
     ///
     /// Each comes off this list in the stage that reads it
-    /// (docs/map-format3-plan.md, Ф2-Ф6). Until then a file that says one is
-    /// a board this build would show wrong, so it is not shown at all.
+    /// (docs/map-format3-plan.md, Ф2-Ф6): <c>climate</c> and <c>rocks</c>
+    /// came off in Ф2. Until then a file that says one is a board this build
+    /// would show wrong, so it is not shown at all.
     /// </summary>
     private static void Unread(Shape file, string name)
     {
-        if (Blocks(file).FirstOrDefault(b => b.Said) is { Key: { } key })
+        if (Blocks(file).FirstOrDefault(b => b.Said && !b.Read) is { Key: { } key })
             throw new InvalidOperationException(
                 $"{name}: \"{key}\" is a block of format 3 this build does not read yet");
     }
@@ -732,8 +792,52 @@ public static class MapFile
                 said.Select(c => "    " + Line(c, map.Walling[c]))));
             text.Append("\n  ]");
         }
+        Look(text, map.Rocking, map.Climate);
         text.Append("\n}\n");
         return text.ToString();
+    }
+
+    /// <summary>
+    /// Format 3's look blocks under the picture and the masonry, each only
+    /// when it said something: a board that never named a rock or a wind
+    /// writes as it did in format 2, bar the number.
+    /// </summary>
+    private static void Look(StringBuilder text, IReadOnlyDictionary<Vector2I, RockNote> rocking,
+                             RockClimate climate)
+    {
+        if (!climate.Plain)
+        {
+            var parts = new List<string>();
+            if (climate.SaidWind is float wind)
+                parts.Add($"\"wind\": {Number(wind)}");
+            if (climate.SaidIce is float ice)
+                parts.Add($"\"ice\": {Number(ice)}");
+            text.Append(",\n\n  \"climate\": { " + string.Join(", ", parts) + " }");
+        }
+        var notes = rocking.Where(kv => !kv.Value.Plain)
+                           .OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X).ToList();
+        if (notes.Count > 0)
+            text.Append(",\n\n  \"rocks\": [\n"
+                        + string.Join(",\n", notes.Select(kv => "    " + Line(kv.Key, kv.Value)))
+                        + "\n  ]");
+    }
+
+    private static string Number(float x) =>
+        x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>One rock's note on one line, only the fields it said.</summary>
+    private static string Line(Vector2I cell, RockNote note)
+    {
+        var parts = new List<string> { $"\"at\": [{cell.X}, {cell.Y}]" };
+        if (note.Type is { } type)
+            parts.Add($"\"type\": {Quote(RockNote.Say(type))}");
+        if (note.Palette is { } palette)
+            parts.Add($"\"palette\": {Quote(palette)}");
+        if (note.Preset is int preset)
+            parts.Add($"\"preset\": {preset}");
+        if (note.Seed is int seed)
+            parts.Add($"\"seed\": {seed}");
+        return "{ " + string.Join(", ", parts) + " }";
     }
 
     /// <summary>Write a board to <c>maps/</c> and return the path it went to.
@@ -849,6 +953,7 @@ public static class MapFile
             text.Append(",\n\n  \"walls\": [\n"
                         + string.Join(",\n", said.Select(c => "    " + Line(c, edit.MasonryAt(c)!)))
                         + "\n  ]");
+        Look(text, edit.Rocking(), edit.Climate);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -873,7 +978,8 @@ public static class MapFile
         return MapEdit.Raw(file.Name is { Length: > 0 } said ? said : name, ground,
                            file.Ramps ?? Array.Empty<string>(), Parkings(file.Homes, name),
                            Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
-                           file.Height ?? true, file.Plinth ?? 0);
+                           file.Height ?? true, file.Plinth ?? 0,
+                           Rocking(file.Rocks, name), Climate(file.Climate, name));
     }
 
     // --- stamps ----------------------------------------------------------------
@@ -973,6 +1079,11 @@ public static class MapFile
         if (file?.Ground is not { Length: > 0 } ground)
             throw new InvalidOperationException($"stamp {name}: no ground grid");
         Unread(file, "stamp " + name);
+        // a piece carries cells, not a board's look: a note in one would be
+        // read and dropped
+        if (file.Rocks is not null || file.Climate is not null)
+            throw new InvalidOperationException(
+                $"stamp {name}: a stamp carries no rocks or climate block");
         string[] ramps = file.Ramps ?? Array.Empty<string>();
         IReadOnlyDictionary<Vector2I, Masonry> walling =
             Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
@@ -1018,12 +1129,27 @@ public static class MapFile
         // is refused by Unread rather than read without it; each gets its own
         // shape in the stage that reads it
         [JsonPropertyName("floor")] public JsonElement? Floor { get; set; }
-        [JsonPropertyName("climate")] public JsonElement? Climate { get; set; }
-        [JsonPropertyName("rocks")] public JsonElement? Rocks { get; set; }
+        [JsonPropertyName("climate")] public ClimateShape? Climate { get; set; }
+        [JsonPropertyName("rocks")] public RockShape[]? Rocks { get; set; }
         [JsonPropertyName("soil")] public JsonElement? Soil { get; set; }
         [JsonPropertyName("roads")] public JsonElement? Roads { get; set; }
         [JsonPropertyName("wood")] public JsonElement? Wood { get; set; }
         [JsonPropertyName("trees")] public JsonElement? Trees { get; set; }
+    }
+
+    private sealed class RockShape
+    {
+        [JsonPropertyName("at")] public int[]? At { get; set; }
+        [JsonPropertyName("type")] public string? Type { get; set; }
+        [JsonPropertyName("palette")] public string? Palette { get; set; }
+        [JsonPropertyName("preset")] public int? Preset { get; set; }
+        [JsonPropertyName("seed")] public int? Seed { get; set; }
+    }
+
+    private sealed class ClimateShape
+    {
+        [JsonPropertyName("wind")] public float? Wind { get; set; }
+        [JsonPropertyName("ice")] public float? Ice { get; set; }
     }
 
     private sealed class WallShape

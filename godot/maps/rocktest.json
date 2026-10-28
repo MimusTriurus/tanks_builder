@@ -1,5 +1,5 @@
 {
-  "format": 2,
+  "format": 3,
   "name": "rocktest",
   "size": [12, 10],
   "paint": "soil",
@@ -30,5 +30,13 @@
     "............",
     "............",
     "............"
+  ],
+
+  "climate": { "wind": 25, "ice": -30 },
+
+  "rocks": [
+    { "at": [2, 1], "type": "mesa", "palette": "ochre", "preset": 2 },
+    { "at": [8, 2], "type": "yardang" },
+    { "at": [5, 6], "type": "moutonnee" }
   ]
 }

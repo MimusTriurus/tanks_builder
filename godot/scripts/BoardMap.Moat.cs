@@ -48,11 +48,12 @@ public sealed partial class BoardMap
         Foundation[] ground = ring.Spread(Ground, Foundation.Deep);
         var homes = Parked.Select(p => p with { Cell = p.Cell + ring.Shift }).ToList();
         var walling = Walling.ToDictionary(kv => kv.Key + ring.Shift, kv => kv.Value);
+        var rocking = Rocking.ToDictionary(kv => kv.Key + ring.Shift, kv => kv.Value);
         return new BoardMap(Name, ring.Columns, ring.Rows, homes, levels,
                             ring.Spread(Ramps, false), water, ring.Spread(Kinds, null),
                             ring.Spread(Cliffs, false), ring.Spread(Walls, false), ground,
                             ring.Spread(Over, Cover.None), ring.Plot, Paint, Height, Plinth,
-                            walling)
+                            walling, rocking, Climate)
         {
             Sea = ring.Sea,
             Shift = ring.Shift,
