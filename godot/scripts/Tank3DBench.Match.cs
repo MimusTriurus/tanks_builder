@@ -429,6 +429,14 @@ public sealed partial class Tank3DBench
             _passIn = PassDelay;
             _matchNote = "ход сделан";
         }
+        // Knocked out on its own move - a mine under it (Tank3DBench.Mines):
+        // it can do no more, so the turn goes on, once the hull has rolled to
+        // a stop. It waited for a shot that could not come (2026-10-29).
+        if (_passIn is null && !busy && _side == _turn && _fate != Fate.Alive && _coastTo is null)
+        {
+            _passIn = PassDelay;
+            _matchNote = $"{_modelTag} подбит";
+        }
         if (_passIn is float left && !busy)
         {
             _passIn = left - dt;

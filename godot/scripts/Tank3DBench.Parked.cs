@@ -195,6 +195,8 @@ public sealed partial class Tank3DBench
         Vector2I wasCell = CellHere;
         float wasHeading = _heading;
         Side wasSide = _side;
+        // and its fate: a unit knocked out on the rig stands knocked out
+        Fate wasFate = _fate;
         // the turret and the gun stay where the last shot left them, both ways
         float wasYaw = _model.Yaw, wasElevation = _model.Elevation;
         _parked.Remove(next);
@@ -245,10 +247,34 @@ public sealed partial class Tank3DBench
                 Stand(kept, was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
             else
                 Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
+        if (wasFate != Fate.Alive && _parked.Count > 0 && _parked[^1].Cell == wasCell)
+            StandKnocked(_parked[^1], wasFate);
         using (Prof.Measure("takeover.choose"))
             Choose(true);
         // No log line: a print in a frame costs up to 100 ms (docs/perf.md, BOT-7).
         _orderNote = $"ведёшь {next.Tag}";
+    }
+
+    /// <summary>
+    /// The rig's unit handed back knocked out - by a mine under it on its own
+    /// move (Tank3DBench.Mines): its fate goes with it, and the pose and the
+    /// pyre a standing unit knocked out has (<c>Fall</c>). The model was wiped
+    /// as it left the rig, and the parking stood it up alive - it came back to
+    /// life when the turn was passed (2026-10-29).
+    /// </summary>
+    private void StandKnocked(Parked p, Fate fate)
+    {
+        p.Fate = fate;
+        if (fate != Fate.Knocked)
+            return;
+        p.Model.Cant = 1.0f;
+        p.Model.Droop = 1.0f;
+        p.Model.Slackness = 1.0f;
+        p.Model.Apply();
+        if (_field is not null && _field.IsDeep(p.Cell))
+            Founder(p.Model, p.Cell);
+        else
+            Kindle(p.Model);
     }
 
     /// <summary>What the bench keeps against a standing model - its marks
