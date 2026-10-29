@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -131,6 +132,7 @@ public sealed partial class Tank3DBench
         if (_noUi)
             return;
         UnderTick();
+        ReachTick();
         HaloTick();
         _judged = null;
         _judgedNote = "";
@@ -144,9 +146,8 @@ public sealed partial class Tank3DBench
         if (!ram && _rules && _chosen && _fate == Fate.Alive && _overTarget && _other is { } o && _field is not null && !RamRunning
             && !MatchShotSpent)
         {
-            bool driving = RouteMoving && !_routeRams && _route is { Count: > 0 };
-            Vector2I from = driving ? _route![^1]
-                : _lockCell is Vector2I fixedAt && (!_profile.FreeOrder || _postLock) ? fixedAt : CellHere;
+            bool driving = Driving;
+            Vector2I from = ShotFrom;
             // the ghost's gun on the target first: Judge takes the tip of its
             // barrel, and the ghost is stood afresh each frame turret ahead
             CasemateGhost(from, o);
@@ -176,7 +177,111 @@ public sealed partial class Tank3DBench
         _aimInk?.QueueRedraw();
     }
 
+    private bool Driving => RouteMoving && !_routeRams && _route is { Count: > 0 };
+
+    /// <summary>Where the shot is judged from: the drive's end while driving,
+    /// the fixed cell once one is fixed (LT's only after the move), else
+    /// where the tank stands.</summary>
+    private Vector2I ShotFrom => Driving ? _route![^1]
+        : _lockCell is Vector2I fixedAt && (!_profile.FreeOrder || _postLock) ? fixedAt : CellHere;
+
+    /// <summary>Where the rims of the units in reach are judged from: as
+    /// <see cref="ShotFrom"/>, but never the bench's own firing post
+    /// (<c>Tank3DBench.Post</c>) - that one comes up for the target under the
+    /// pointer, and with it the rims of the others went.</summary>
+    private Vector2I ReachFrom => Driving ? _route![^1]
+        : _lockCell is Vector2I fixedAt && !_profile.FreeOrder && !_postLock ? fixedAt : CellHere;
+
     // --- the outlines -------------------------------------------------------
+
+    /// <summary>
+    /// The enemy units the selected tank may fire at from
+    /// <see cref="ReachFrom"/> - the right button's own gate
+    /// (<see cref="ShotWhy"/>, a gun's empty hex between, a wall on the axis):
+    /// each gets the thin hostile rim the pointer gives a target, from the
+    /// moment the tank is chosen, so who can be hit reads before any hover
+    /// (the author's note, 2026-10-29). Judged again only when what it
+    /// depends on changes (<see cref="ReachStamp"/>): the gate allocates.
+    /// </summary>
+    private readonly HashSet<TankModel> _inReach = new();
+    private int _reachStamp;
+
+    private void ReachTick()
+    {
+        bool open = Match && _rules && _chosen && _fate == Fate.Alive && _field is not null && !RamRunning;
+        int stamp = open ? ReachStamp() : 0;
+        if (stamp == _reachStamp)
+            return;
+        _reachStamp = stamp;
+        _inReach.Clear();
+        if (!open)
+            return;
+        Vector2I from = ReachFrom;
+        bool after = MayMoveFirst;
+        for (int i = 0; i < _parked.Count; i++)
+        {
+            Parked p = _parked[i];
+            if (p.Side != _side && p.Fate != Fate.Destroyed && (MayHit(from, p.Cell) || (after && MayHitAfter(p.Cell))))
+                _inReach.Add(p.Model);
+        }
+        if (_other is { Unit: true } o && o.Side != _side && o.Fate != Fate.Destroyed
+            && (MayHit(from, OtherCell(o)) || (after && MayHitAfter(OtherCell(o)))))
+            _inReach.Add(o.Model);
+    }
+
+    /// <summary>The move is still to be given - nothing fixed by the player,
+    /// no drive under way: a target is in reach from any cell of it too
+    /// (fire after the move, <c>Tank3DBench.Post</c>; the author's note,
+    /// 2026-10-29).</summary>
+    private bool MayMoveFirst => CourseShown && _reach is not null && (_lockCell is null || _postLock);
+
+    /// <summary>Whether a cell of the move (<see cref="_reach"/>) has a shot at
+    /// <paramref name="target"/> - <see cref="FindPost"/>'s reading, the
+    /// outcome aside: a casemate turns on to the axis out of the same
+    /// steps, so a cell without them for that turn does not count.</summary>
+    private bool MayHitAfter(Vector2I target)
+    {
+        Steps.Reach reach = _reach!;
+        foreach ((Vector2I cell, int _) in reach.Cells)
+        {
+            if (cell == reach.Start.Cell || !MayHit(cell, target))
+                continue;
+            if (_model.Turreted)
+                return true;
+            (int axis, _) = AxisTo(cell, target);
+            List<Steps.Route> ways = reach.RoutesTo(cell);
+            for (int w = 0; w < ways.Count; w++)
+                if (reach.TurnTo(ways[w], axis) is not null)
+                    return true;
+        }
+        return false;
+    }
+
+    /// <summary>What <see cref="ReachTick"/>'s judging reads: the cell fired
+    /// from, the move's cells, the turn and the shot spent, and where every
+    /// unit stands. Never 0, which is «nothing in reach».</summary>
+    private int ReachStamp()
+    {
+        int h = HashCode.Combine(ReachFrom, MayMoveFirst, _reachVersion, _turn, _side, _fired, _passIn is null, MatchOver);
+        h = HashCode.Combine(h, _parked.Count);
+        for (int i = 0; i < _parked.Count; i++)
+            h = HashCode.Combine(h, _parked[i].Cell, _parked[i].Fate);
+        if (_other is { } o)
+            h = HashCode.Combine(h, OtherCell(o), o.Fate);
+        return h == 0 ? 1 : h;
+    }
+
+    /// <summary>Whether a shot from <paramref name="from"/> at a unit on
+    /// <paramref name="cell"/> would be fired: <see cref="Judge"/>'s refusals
+    /// without the rest of its reading.</summary>
+    private bool MayHit(Vector2I from, Vector2I cell)
+    {
+        if (ShotWhy(from, cell, out int axis, out int cells, out _).Length > 0)
+            return false;
+        if (_profile.Lobs)
+            return true;
+        return cells >= DirectNearest && WallOnAxis(from, axis, cells, passOne: ShootsThrough) is null;
+    }
 
     /// <summary>The own tank, the target or a standing one under the pointer -
     /// or under <c>--hover</c>.</summary>
@@ -227,10 +332,11 @@ public sealed partial class Tank3DBench
         bool alive = _fate == Fate.Alive;
         SetHalo(_model, !alive ? 0.0f : _chosen ? HaloChosen : _overOwn ? HaloHover : 0.0f, SelectionRing.Friendly);
         if (_other is { } o)
-            SetHalo(o.Model, _overTarget ? HaloHover : 0.0f, SelectionRing.Hostile);
-        // in a match, the other side's in its colour (Tank3DBench.Match)
+            SetHalo(o.Model, _overTarget || _inReach.Contains(o.Model) ? HaloHover : 0.0f, SelectionRing.Hostile);
+        // in a match, the other side's in its colour (Tank3DBench.Match); the
+        // ones in reach of the selected tank's gun at all times (ReachTick)
         foreach (Parked p in _parked)
-            SetHalo(p.Model, ReferenceEquals(p, _overParked) && p.Fate != Fate.Destroyed ? HaloHover : 0.0f,
+            SetHalo(p.Model, (ReferenceEquals(p, _overParked) || _inReach.Contains(p.Model)) && p.Fate != Fate.Destroyed ? HaloHover : 0.0f,
                     Match && p.Side != _side ? SelectionRing.Hostile : SelectionRing.Friendly);
     }
 
@@ -834,7 +940,9 @@ void fragment() {
         over.Y = Mathf.Max(over.Y, 100.0f + size * 2.0f);
         // The outcome is the line's colour and its course - no words over the
         // target for it; only why there is no shot, which nothing else says.
-        if (!shot.Fires && !shot.Screened)
+        // Off the axes it says nothing: the rims of the units in reach do
+        // (ReachTick, the author's note 2026-10-29).
+        if (!shot.Fires && !shot.Screened && shot.Axis >= 0)
             Pill(ink, font, over + new Vector2(0, -size), shot.Says, shot.Ink, new Color(0.12f, 0.12f, 0.12f), size);
         int semi = _judgedNote.IndexOf("; после хода", System.StringComparison.Ordinal);
         if (semi >= 0)
