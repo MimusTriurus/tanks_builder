@@ -1354,6 +1354,8 @@ public sealed partial class Tank3DBench : Node3D
             case "friendly": _friendlyHeld = !_friendlyHeld; break;
             // the pointer on the end-turn button, for a capture (Tank3DBench.Badges)
             case "pass-hover": _passHeld = !_passHeld; break;
+            // the turn on the spot's rose (Tank3DBench.Spin)
+            case "spin": _spinPinned = !_spinPinned; break;
             case "douse": Douse(); break;
             case "restart": if (Match) Restart(); break;
             case "way": NextWay(); break;
@@ -1426,6 +1428,15 @@ public sealed partial class Tank3DBench : Node3D
                     if (xy.Length == 2)
                         ZoomBy(up ? WheelStep : 1.0f / WheelStep, new Vector2(F(xy[0], 0), F(xy[1], 0)));
                 }
+                else if (what.StartsWith("tap=", StringComparison.Ordinal))
+                {
+                    // tap=X,Y: the left button on that screen pixel - a rose's
+                    // disc, where no hex's middle is
+                    string[] xy = what[4..].Split(',');
+                    if (xy.Length == 2 && float.TryParse(xy[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
+                        && float.TryParse(xy[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float y))
+                        OrderClick(new Vector2(x, y), false);
+                }
                 else if (what.StartsWith("click=", StringComparison.Ordinal))
                 {
                     // click=Q,R: the left button where the camera shows that hex's
@@ -1460,6 +1471,12 @@ public sealed partial class Tank3DBench : Node3D
                 }
                 else if (what.StartsWith("face=", StringComparison.Ordinal))
                     FaceTo((int)F(what[5..], 90));
+                else if (what.StartsWith("rose-hover=", StringComparison.Ordinal))
+                    _roseHeld = (int)F(what[11..], 90);
+                else if (what.StartsWith("spin-hover=", StringComparison.Ordinal))
+                    _spinHeld = (int)F(what[11..], 90);
+                else if (what.StartsWith("spin-to=", StringComparison.Ordinal))
+                    SpinTo((int)F(what[8..], 90));
                 else if (what.StartsWith("go=", StringComparison.Ordinal))
                 {
                     // go=Q,R: the left button on that hex, under the rules.
@@ -2135,15 +2152,23 @@ public sealed partial class Tank3DBench : Node3D
                 case Key.W: if (_chosen) OrderStep(back: false); return;
                 case Key.S: if (_chosen) OrderStep(back: true); return;
                 // with a cell fixed, A/D turn its ghost (Tank3DBench.Ghost)
-                case Key.A: if (_lockCell is not null) FaceStep(left: true); else if (_chosen) OrderTurn(left: true); return;
-                case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen) OrderTurn(left: false); return;
+                // with none, the rose round the tank opens and they walk its
+                // pick (Tank3DBench.Spin); where the rose may not be had, the
+                // old sixty degrees an order
+                case Key.A: if (_lockCell is not null) FaceStep(left: true); else if (_chosen && (_spinOpen || SpinMay)) SpinStep(left: true); else if (_chosen) OrderTurn(left: true); return;
+                case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen && (_spinOpen || SpinMay)) SpinStep(left: false); else if (_chosen) OrderTurn(left: false); return;
                 // Ctrl+Enter in a match: the turn handed over (Tank3DBench.Match)
-                case Key.Enter or Key.KpEnter: if (Match && order.CtrlPressed) EndTurn(); else Confirm(); return;
+                case Key.Enter or Key.KpEnter:
+                    if (Match && order.CtrlPressed) EndTurn();
+                    else if (_spinOpen && _spinPick is int pick) SpinTo(pick);
+                    else Confirm();
+                    return;
                 // the fixed cell let go; an order in hand dropped; with none,
                 // the tank let go
                 case Key.Escape:
                     // the ram (Tank3DBench.RamPlan) off first
-                    if (_ramMode && _ramWaiting is null) RamToggle();
+                    if (_spinPick is not null || _spinPinned) SpinLetGo();
+                    else if (_ramMode && _ramWaiting is null) RamToggle();
                     else if (_lockCell is not null && !_ramLock) Unlock();
                     else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null || _ramWaiting is not null) CancelOrder();
                     else Choose(false);

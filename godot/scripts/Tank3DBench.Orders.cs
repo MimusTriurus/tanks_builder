@@ -84,6 +84,7 @@ public sealed partial class Tank3DBench
         _orderNote = "";
         RamCancel();
         Unlock();
+        SpinLetGo();
     }
 
     /// <summary>An order to go to <paramref name="cell"/> - or, with
@@ -479,6 +480,13 @@ public sealed partial class Tank3DBench
     /// click rams it; anywhere else - go.</summary>
     private void OrderClick(Vector2 screen, bool twice)
     {
+        // a disc of the rose round the own tank: the turn on the spot, at once
+        // (Tank3DBench.Spin) - before the standing tank a disc lies over
+        if (SpinAt(screen) is int spin)
+        {
+            SpinTo(spin);
+            return;
+        }
         // A standing tank under the pointer is taken rather than driven at
         // (Tank3DBench.Parked).
         if (ParkedAt(screen) is { } standing)
@@ -489,9 +497,12 @@ public sealed partial class Tank3DBench
             return;
         }
         // a disc of the rose round the fixed cell (Tank3DBench.Ghost)
+        // - the order at once, the hull to that side on arrival (2026-10-29,
+        // the author's note): the ghost turned to it under the pointer already
         if (RoseAt(screen) is int side)
         {
-            FaceTo(side);
+            if (FaceTo(side))
+                Confirm();
             return;
         }
         if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
@@ -500,6 +511,8 @@ public sealed partial class Tank3DBench
             : onOwn ? CellHere : _field.FlatCellAt(Board(point));
         if (cell == CellHere)
         {
+            // the chosen tank again: an order or a fixed cell dropped (the
+            // turn's rose is the pointer's, Tank3DBench.Spin)
             if (!_chosen)
                 Choose(true);
             else

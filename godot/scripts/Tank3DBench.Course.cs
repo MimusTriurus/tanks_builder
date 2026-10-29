@@ -17,7 +17,7 @@ namespace TankSpriteTest;
 /// ends: mud, wood, a mine, deep water without the snorkel.</item>
 /// <item><b>The way</b> - a ribbon through the cells' middles lying on the
 /// ground, chevrons along it, the steps spent by each cell in a disc (brown on
-/// sand, which costs two), "+N пов." where it turns, a pill for what it risks
+/// sand, which costs two), a pill for what it risks
 /// (мина, огонь, утонет), and an arrowhead at the end for where the hull will
 /// point.</item>
 /// <item><b>One way, the next by Tab.</b> Ways of the same cost are the
@@ -38,7 +38,6 @@ public sealed partial class Tank3DBench
     private static readonly Color CourseInk = new(0.09f, 0.37f, 0.65f);
     private static readonly Color StopInk = new(0.64f, 0.18f, 0.18f);
     private static readonly Color SandInk = new(0.52f, 0.31f, 0.04f);
-    private static readonly Color TurnInk = new(0.98f, 0.78f, 0.46f);
 
     private MeshInstance3D? _course;
     private Control? _courseInk;
@@ -161,6 +160,8 @@ public sealed partial class Tank3DBench
             return;
         mesh.ClearSurfaces();
         _courseNote = "";
+        SpinTick();
+        RoseFadeTick();
         if (_zone is not null)
             _zone.Visible = CourseShown;
         if (!CourseShown)
@@ -209,6 +210,9 @@ public sealed partial class Tank3DBench
             Vector2I? cell = _hoverFixed;
             if (cell is null && PickAt(mouse) is var (point, onTank, onOwn) && !onTank && !onOwn)
                 cell = _field!.FlatCellAt(Board(point));
+            // a disc of the turn's rose over the cell beside: the disc's (Tank3DBench.Spin)
+            if (SpinAt(mouse) is not null)
+                cell = null;
             if (cell != _hoverCell || fresh)
             {
                 if (cell != _hoverCell)
@@ -233,9 +237,11 @@ public sealed partial class Tank3DBench
         }
 
         Steps.Route? shown = _ways.Count > 0 ? _ways[_wayIx % _ways.Count] : null;
+        RoseHoverTick();
         GhostTick(shown);
         // the unit's card lights the steps it spends (Tank3DBench.Card)
-        _wayCost = shown is null ? 0 : shown.Spent + (_reach!.TurnTo(shown, GhostFace(shown)) ?? 0);
+        _wayCost = shown is not null ? shown.Spent + (_reach!.TurnTo(shown, GhostFace(shown)) ?? 0)
+            : SpinShown() is int spin ? SpinCost(spin) ?? 0 : 0;
         if (shown is not null)
         {
             string tab = _ways.Count > 1 ? $", Tab — другой ({_wayIx % _ways.Count + 1}/{_ways.Count})" : "";
@@ -658,7 +664,22 @@ public sealed partial class Tank3DBench
 
     private void DrawCourse()
     {
-        if (_courseInk is not { } ink || !CourseShown || _reach is null)
+        if (_courseInk is not { } ink)
+            return;
+        DrawWay(ink);
+        // The roses over the way, and on their way out after it: an order
+        // given or a cell let go hides the course at once, the rose fades
+        // (Tank3DBench.Spin, RoseFadeTime).
+        if (_field is null || _tile is null)
+            return;
+        int size = Mathf.RoundToInt(RoseDisc() * 1.15f);
+        DrawRose(ink, ThemeDB.FallbackFont, size);
+        DrawSpin(ink, ThemeDB.FallbackFont, size);
+    }
+
+    private void DrawWay(Control ink)
+    {
+        if (!CourseShown || _reach is null)
             return;
         Font font = ThemeDB.FallbackFont;
         float hex = (Screen(_reach.Start.Cell) - _camera.UnprojectPosition(
@@ -699,7 +720,7 @@ public sealed partial class Tank3DBench
         }
         for (int i = 0; i < stops.Count; i++)
         {
-            (Vector2I cell, int spent, int turns) = stops[i];
+            (Vector2I cell, int spent, _) = stops[i];
             Vector2 at = Screen(cell);
             // the last disc steps back along the ribbon, off the ghost standing there
             if (i > 0 && i == stops.Count - 1 && _ghost is not null)
@@ -713,14 +734,14 @@ public sealed partial class Tank3DBench
                 Vector2 w = font.GetStringSize(n, HorizontalAlignment.Left, -1, size);
                 ink.DrawString(font, at + new Vector2(-w.X * 0.5f, size * 0.36f), n, HorizontalAlignment.Left, -1, size, Colors.White);
             }
-            if (turns > 0)
-                Pill(ink, font, at + new Vector2(-hex * 0.45f, hex * 0.32f), $"+{turns} пов.", TurnInk, new Color(0.25f, 0.14f, 0.01f), size);
+            // no "+N пов." pill where the way turns (the author's note,
+            // 2026-10-29): the chevrons bend there, and the next disc's
+            // count takes in the turn's steps
         }
         // The way's risk - a mine, deep water, fire - is the ghost's to show
         // and the sign's over it (Tank3DBench.Ghost, Tank3DBench.Badges), not
         // a word at the end (the author's note, 2026-10-29).
         Vector2 end = Screen(way.End.Cell);
-        DrawRose(ink, font, size);
         // Where the hull will point: the ghost says it (Tank3DBench.Ghost); the
         // arrowhead only stands in when its model did not load.
         if (_ghost is not null)

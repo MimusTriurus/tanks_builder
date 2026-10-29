@@ -21,14 +21,16 @@ namespace TankSpriteTest;
 /// the rose; the second on it, or Enter, gives the order - which cannot be
 /// taken back (GDD match.md). A click on another cell in reach fixes that one
 /// instead; ESC lets the cell go, then as before.</item>
-/// <item><b>The rose</b> - six discs toward the six sides: 0 on the side the
-/// way arrives facing, +1 a side and so on, grey where the budget runs out or
-/// the cell ends the move (<see cref="Steps.Reach.TurnTo"/>). A click on a
-/// disc, A/D, or the wheel over the fixed cell turns the ghost; the order
-/// turns the hull there on arrival, out of the same steps.</item>
+/// <item><b>The rose</b> - five discs toward the sides but the one the way
+/// arrives facing (that turn is none): +1 a side and so on, grey where the
+/// budget runs out or the cell ends the move (<see cref="Steps.Reach.TurnTo"/>).
+/// The pointer on a disc turns the ghost to it, a click on it is the order
+/// with that turn at the end (2026-10-29); A/D or the wheel over the fixed
+/// cell turn the ghost, and the second click or Enter orders it. The hull
+/// turns there on arrival, out of the same steps.</item>
 /// </list>
 ///
-/// <c>--do lock=Q,R</c>, <c>face=S</c> (a side, 30..330), <c>confirm</c>,
+/// <c>--do lock=Q,R</c>, <c>face=S</c> (a side, 30..330), <c>rose-hover=S</c>, <c>confirm</c>,
 /// <c>unlock</c> do from the command line what the clicks do.
 /// </summary>
 public sealed partial class Tank3DBench
@@ -164,9 +166,29 @@ void fragment() {
     /// <summary>The bench's heading for a flat side, from a cell.</summary>
     private float HeadingFor(Vector2I cell, int side) => HeadingOf(HexWay(cell, side));
 
-    /// <summary>The side the ghost faces: the fixed one, else where the way
-    /// arrives.</summary>
-    private int GhostFace(Steps.Route way) => _lockCell == way.End.Cell && _lockFace is int f ? f : way.End.Heading;
+    /// <summary>The side the ghost faces: the rose's disc under the pointer,
+    /// the fixed one, else where the way arrives.</summary>
+    private int GhostFace(Steps.Route way) =>
+        _lockCell != way.End.Cell ? way.End.Heading
+        : _roseHover is int h ? h
+        : _lockFace is int f ? f : way.End.Heading;
+
+    /// <summary>The disc of the fixed cell's rose the pointer is on, the
+    /// budget having it - the ghost turns to it before the click
+    /// (2026-10-29, the author's note); set each frame in <c>CourseTick</c>.</summary>
+    private int? _roseHover;
+    /// <summary><c>--do rose-hover=S</c>: a disc held under the pointer.</summary>
+    private int? _roseHeld;
+
+    private void RoseHoverTick()
+    {
+        _roseHover = null;
+        if (_lockCell is null || _ways.Count == 0 || _postLock || _reach is null)
+            return;
+        int? side = _roseHeld ?? RoseAt(GetViewport().GetMousePosition());
+        if (side is int s && _reach.TurnTo(_ways[_wayIx % _ways.Count], s) is not null)
+            _roseHover = s;
+    }
 
     /// <summary>Every frame from <see cref="CourseTick"/>: the ghost on the
     /// way's end, or put away.</summary>
@@ -178,6 +200,14 @@ void fragment() {
         // the way's risk is the ghost's on its end - a mine or fire on the way
         _ghostRiskCell = way?.End.Cell;
         _ghostRisk = way?.Risk ?? Steps.Risk.None;
+        // the turn on the spot: the ghost on the own cell, turned to the disc
+        // under the pointer, over the own hull by design (Tank3DBench.Spin)
+        if (SpinShown() is int spin && spin != HullSide())
+        {
+            _ghostRiskCell = null;
+            GhostAt(CellHere, spin, true, overOwn: true);
+            return;
+        }
         // the plan sees no mines (Steps.Mover.MinesUnseen): the ghost goes up
         // only with the pointer on the mine itself, not on a cell past it
         if (way is not null && _field is { } f && f.CoverAt(way.End.Cell) == Cover.Minefield
@@ -417,19 +447,10 @@ void fragment() {
                 return;
     }
 
-    /// <summary>The rose's discs on the screen, side by side.</summary>
-    private List<(int Side, Vector2 At)> Rose(Vector2I cell)
-    {
-        var discs = new List<(int, Vector2)>();
-        Vector2 mid = Screen(cell);
-        foreach (int side in HexField.EdgeHeadings)
-        {
-            Vector2 way = _camera.UnprojectPosition(OnTop(cell, CellFlat(cell)
-                + (CellFlat(HexField.Step(cell, side)) - CellFlat(cell)) * 0.5f)) - mid;
-            discs.Add((side, mid + way * 1.25f));
-        }
-        return discs;
-    }
+    /// <summary>The side the way arrives facing: its disc is not drawn - the
+    /// ghost faces it already, a turn to it is none (the author's note,
+    /// 2026-10-29).</summary>
+    private int RoseHome() => _ways[_wayIx % _ways.Count].End.Heading;
 
     /// <summary>The disc of the rose under <paramref name="screen"/>, if any.</summary>
     private int? RoseAt(Vector2 screen)
@@ -438,8 +459,10 @@ void fragment() {
         if (_lockCell is not Vector2I cell || _ways.Count == 0 || _postLock)
             return null;
         float r = RoseDisc();
-        foreach ((int side, Vector2 at) in Rose(cell))
-            if (at.DistanceTo(screen) <= r * 1.3f)
+        Vector2 mid = Screen(cell);
+        int home = RoseHome();
+        foreach (int side in HexField.EdgeHeadings)
+            if (side != home && SpinDisc(cell, mid, side).DistanceTo(screen) <= r * 1.3f)
                 return side;
         return null;
     }
@@ -464,23 +487,41 @@ void fragment() {
         return true;
     }
 
+    /// <summary>How much of the fixed cell's rose is drawn, 0..1, and what it
+    /// was drawn for - kept while it fades out after the cell is let go or
+    /// ordered (Tank3DBench.Spin, <c>RoseFadeTime</c>).</summary>
+    private float _roseFade;
+    private Vector2I _roseCell;
+    private Steps.Route? _roseWay;
+    private int _roseFace;
+
+    /// <summary>Every frame from <c>CourseTick</c>, before it may return:
+    /// the rose in while a cell is fixed, out after.</summary>
+    private void RoseFadeTick()
+    {
+        bool on = _lockCell is Vector2I cell && _ways.Count > 0 && !_postLock && _reach is not null && CourseShown;
+        if (on)
+        {
+            _roseCell = _lockCell!.Value;
+            _roseWay = _ways[_wayIx % _ways.Count];
+            _roseFace = GhostFace(_roseWay);
+        }
+        _roseFade = Mathf.MoveToward(_roseFade, on ? 1.0f : 0.0f, (float)GetProcessDeltaTime() / RoseFadeTime);
+    }
+
     private void DrawRose(Control ink, Font font, int size)
     {
-        if (_lockCell is not Vector2I cell || _reach is null || _ways.Count == 0 || _postLock)
+        if (_roseFade <= 0.0f || _roseWay is not { } way || _reach is null)
             return;
-        Steps.Route way = _ways[_wayIx % _ways.Count];
         float r = RoseDisc();
-        foreach ((int side, Vector2 at) in Rose(cell))
+        Vector2 mid = Screen(_roseCell);
+        foreach (int side in HexField.EdgeHeadings)
         {
+            if (side == way.End.Heading)
+                continue;
             int? cost = _reach.TurnTo(way, side);
-            bool on = side == GhostFace(way);
-            Color fill = on ? CourseInk : cost is null ? new Color(0.62f, 0.62f, 0.60f, 0.85f) : new Color(0.92f, 0.95f, 0.98f);
-            Color letters = on ? Colors.White : cost is null ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.05f, 0.27f, 0.49f);
-            ink.DrawCircle(at, r, fill);
-            ink.DrawArc(at, r, 0, Mathf.Tau, 24, cost is null ? new Color(0.45f, 0.45f, 0.43f) : CourseInk, 1.5f, true);
-            string text = cost is null ? "–" : cost == 0 ? "0" : $"+{cost}";
-            Vector2 w = font.GetStringSize(text, HorizontalAlignment.Left, -1, size);
-            ink.DrawString(font, at + new Vector2(-w.X * 0.5f, size * 0.36f), text, HorizontalAlignment.Left, -1, size, letters);
+            RoseDraw(ink, font, size, SpinDisc(_roseCell, mid, side), r, _roseFade, side == _roseFace, false,
+                     cost is null ? null : SpinCosts[Mathf.Clamp(cost.Value, 0, 3)]);
         }
     }
 }
