@@ -164,17 +164,21 @@ public sealed partial class Tank3DBench
         Parked? best = null;
         float near = float.MaxValue;
         foreach (Parked p in _parked)
-        {
-            Vector3 middle = p.Rig.Position + Vector3.Up * (p.Model.Size.Y * p.Model.PixelsPerUnit * 0.4f);
-            float d = _camera.UnprojectPosition(middle).DistanceTo(screen);
-            float reach = 0.5f * p.Model.HullLength * p.Model.PixelsPerUnit * _zoom;
-            if (d < reach && d < near)
+            if (Drawn(p.Rig, p.Model, screen) is float d && d < near)
             {
                 near = d;
                 best = p;
             }
-        }
         return best;
+    }
+
+    /// <summary>How far <paramref name="screen"/> is from where a hull is
+    /// drawn, if within half a hull of it; null past that.</summary>
+    private float? Drawn(Node3D rig, TankModel model, Vector2 screen)
+    {
+        Vector3 middle = rig.Position + Vector3.Up * (model.Size.Y * model.PixelsPerUnit * 0.4f);
+        float d = _camera.UnprojectPosition(middle).DistanceTo(screen);
+        return d < 0.5f * model.HullLength * model.PixelsPerUnit * _zoom ? d : null;
     }
 
     /// <summary>

@@ -32,8 +32,8 @@ namespace TankSpriteTest;
 /// goes on down to the bed without it, dimming into the water's blue - the HUD
 /// says which.
 ///
-/// One's own is rammed with Ctrl held, which makes it the target
-/// (<c>Tank3DBench.Match</c>, <c>FriendlyFire</c>).
+/// One's own is rammed as an enemy is: the pointer on it makes it the
+/// target (<c>Tank3DBench.Match</c>, <c>MatchAims</c>).
 ///
 /// Not yet: what a mine on the hex behind does to the shoved in the preview.
 /// </summary>
@@ -299,7 +299,7 @@ public sealed partial class Tank3DBench
         }
         _ramMode = !_ramMode;
         _ramKey = "";
-        _orderNote = _ramMode ? "таран: наведи на вражеский танк, с Ctrl — на свой" : "таран выключен";
+        _orderNote = _ramMode ? "таран: наведи на танк, свой тоже" : "таран выключен";
     }
 
     // --- the picture -------------------------------------------------------------

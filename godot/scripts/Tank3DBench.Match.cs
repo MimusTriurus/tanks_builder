@@ -238,8 +238,6 @@ public sealed partial class Tank3DBench
             return "ход передаётся";
         if (_fired)
             return $"{_modelTag} уже стрелял в этом ходу";
-        if (!FriendlyFire && _parked.Find(p => p.Cell == cell && p.Fate != Fate.Destroyed) is { } on && on.Side == _side)
-            return $"на {MapAt(cell)} свой {on.Tag} — Ctrl: огонь по своему";
         return "";
     }
 
@@ -457,36 +455,18 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>
-    /// Friendly fire (2026-10-28, GDD units.md: "Выстрелы, рикошеты и тараны не
-    /// различают своих и чужих. По своему танку можно выстрелить, свой танк
-    /// можно протаранить"). The pointer on an own unit takes it, so the own
-    /// side is aimed at with <c>Ctrl</c> held: the unit becomes the target -
-    /// the line of fire, the ram's and the blast's previews - and the right
-    /// button fires at it or rams it. Let go, and it is one's own again.
-    /// <c>--do friendly</c> holds it for a capture.
+    /// The pointer on a standing unit: it is made the target, of either side -
+    /// friendly fire (GDD units.md: "Выстрелы, рикошеты и тараны не различают
+    /// своих и чужих. По своему танку можно выстрелить, свой танк можно
+    /// протаранить"). The line of fire, the ram's and the blast's previews
+    /// come up on an own unit as on an enemy, and the right button fires at
+    /// it or rams it; the left one still takes it (<c>OrderClick</c>). It
+    /// used to want Ctrl held (2026-10-28) and wants nothing now
+    /// (2026-10-29, the author's note). True when it now is the target.
     /// </summary>
-    private bool FriendlyFire => _friendlyHeld || Input.IsKeyPressed(Key.Ctrl);
-
-    private bool _friendlyHeld;
-
-    /// <summary>Every frame, before the pointer is read: an own unit made the
-    /// target goes back to standing once Ctrl is let go - not while a round,
-    /// a ram or an order is on it.</summary>
-    private void FriendlyTick()
-    {
-        if (!Match || FriendlyFire || _other is not { Unit: true } o || o.Side != _side
-            || RamRunning || _aim is not null || (_shells?.Rounds.Count ?? 0) > 0
-            || _ramWaiting is not null || _shotWaiting is not null || _chain.Count > 0)
-            return;
-        DropTarget();
-    }
-
-    /// <summary>The pointer on a standing unit: an enemy still on the board is
-    /// made the target - an own one too, with friendly fire held. True when it
-    /// now is.</summary>
     private bool MatchAims(Parked p)
     {
-        if (!Match || p.Fate == Fate.Destroyed || (p.Side == _side && !FriendlyFire))
+        if (!Match || p.Fate == Fate.Destroyed)
             return false;
         MakeTarget(p);
         return _other is { } o && ReferenceEquals(o.Model, p.Model);
@@ -900,5 +880,5 @@ public sealed partial class Tank3DBench
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
         + Roll() + "\n"
         + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран\n"
-        + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять), с Ctrl — по своему   J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
+        + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
 }

@@ -514,6 +514,19 @@ public sealed partial class Tank3DBench
             SpinTo(spin);
             return;
         }
+        // An own unit under the pointer is the target as well as one's own
+        // (friendly fire, Tank3DBench.Match): the left button takes it all the
+        // same - back to standing first, then over.
+        // Found as a standing one is (ParkedAt: within half a hull of where it
+        // is drawn), not by the ray - the pointer that made it the target
+        // was read that way.
+        if (Match && _other is { Unit: true } own && own.Side == _side && Drawn(own.Rig, own.Model, screen) is not null)
+        {
+            DropTarget();
+            if (_parked.Count > 0 && _parked[^1].Model == own.Model && MatchTakes(_parked[^1]))
+                TakeOver(_parked[^1]);
+            return;
+        }
         // A standing tank under the pointer is taken rather than driven at
         // (Tank3DBench.Parked).
         if (ParkedAt(screen) is { } standing)

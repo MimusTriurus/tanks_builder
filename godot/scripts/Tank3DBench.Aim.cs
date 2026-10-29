@@ -184,8 +184,6 @@ public sealed partial class Tank3DBench
     {
         _overOwn = _overTarget = false;
         _overParked = null;
-        // an own unit aimed at with Ctrl goes back to standing without it (Tank3DBench.Match)
-        FriendlyTick();
         if (_hoverFixed is Vector2I held)
         {
             // an enemy standing there is the target now (Tank3DBench.Match)
