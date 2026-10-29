@@ -778,6 +778,7 @@ void fragment() {
             DrawBadges(ramInk);
             DrawShotSign(ramInk);
             DrawRamSign(ramInk);
+            DrawGhostSign(ramInk);
             DrawRam(ramInk);
             DrawBlast(ramInk);
         }

@@ -172,6 +172,8 @@ void fragment() {
     /// way's end, or put away.</summary>
     private void GhostTick(Steps.Route? way)
     {
+        _ghostSea += (float)GetProcessDeltaTime();
+        _ghostWet = null;
         if (way is not null)
         {
             GhostAt(way.End.Cell, GhostFace(way), _lockCell == way.End.Cell);
@@ -197,16 +199,78 @@ void fragment() {
         GhostFor(_modelTag);
         if (_ghostRig is null || _ghostFill is null || _ghostInk is null)
             return;
-        _ghostRig.Position = CellMiddle(cell);
+        Vector3 at = CellMiddle(cell);
+        float roll = 0.0f, fade = 1.0f;
+        Color tint = SelectionRing.Friendly;
+        _ghostWet = GhostAfloat(cell, ref at, ref roll, ref tint, ref fade);
+        _ghostRig.Position = at;
         _ghostRig.Rotation = new Vector3(0.0f, Mathf.DegToRad(HeadingFor(cell, side)), 0.0f);
+        _ghostRig.RotateObjectLocal(Vector3.Forward, roll);
         // the turret ahead, until a target under the pointer turns it (Tank3DBench.Aim)
         _ghost!.Yaw = 0.0f;
         _ghost.Elevation = 0.0f;
         _ghost.Apply();
         float clear = GhostClear(_ghostRig.Position);
-        _ghostFill.Param("alpha", (firm ? GhostFirm : GhostFaint) * clear);
-        _ghostInk.Param("alpha", (firm ? 1.0f : 0.7f) * clear);
+        _ghostClearNow = clear;
+        _ghostFill.Param("tint", tint);
+        _ghostFill.Param("alpha", (firm ? GhostFirm : GhostFaint) * clear * fade);
+        _ghostInk.Param("alpha", (firm ? 1.0f : 0.7f) * clear * fade);
         _ghostRig.Visible = clear > 0.01f;
+    }
+
+    /// <summary>The ghost's clock on water: the swell and the sinking loop.</summary>
+    private float _ghostSea;
+    private Vector2I? _ghostSeaCell;
+    /// <summary>The ghost stands on deep water: where the sign over it goes
+    /// (<c>Tank3DBench.Badges</c>), and how much of the ghost is drawn.</summary>
+    private (Vector2I Cell, Vector3 Line)? _ghostWet;
+    private float _ghostClearNow;
+
+    /// <summary>The swell's size and pace, read off a hull's (never ridden).</summary>
+    private static readonly Buoy GhostSwell = new();
+
+    /// <summary>The ghost's sinking loop, s: on the water, down, held under.</summary>
+    private const float GhostSinkLoop = 2.6f;
+
+    /// <summary>
+    /// The move's ghost on deep water, as the hull will be there (GDD
+    /// states.md «Плывёт», «Утоплен»; the real hull - <c>Tank3DBench.Water</c>):
+    /// with the wading gear on its swimming line, riding a swell of its own
+    /// - a heave and a little roll; without it, down from the line to most of
+    /// its deck under, dimming into the water's blue, as the ram's preview
+    /// sinks its target (<see cref="RamPlungeY"/>) - and again, faded in at the
+    /// top of each loop rather than popped up. Null on dry land.
+    /// </summary>
+    private (Vector2I, Vector3)? GhostAfloat(Vector2I cell, ref Vector3 at, ref float roll, ref Color tint, ref float fade)
+    {
+        if (_ghost is null || SwimY(cell, _ghost, _profile) is not float line)
+        {
+            _ghostSeaCell = null;
+            return null;
+        }
+        if (_ghostSeaCell != cell)
+        {
+            _ghostSeaCell = cell;
+            _ghostSea = 0.0f;
+        }
+        Vector3 surface = new(at.X, line, at.Z);
+        if (_amphibious)
+        {
+            // the real hull's swell (Buoy.Idle), a little larger: a ghost is
+            // faint, and a heave of a pixel or two read as standing still
+            float s = Mathf.Tau * _ghostSea / (float)GhostSwell.SwellPeriod;
+            at.Y = line + 2.0f * (float)GhostSwell.SwellAmplitude * Mathf.Sin(s) / RiseFactor;
+            roll = 0.035f * Mathf.Sin(s * 0.5f + 1.0f);
+            return (cell, surface);
+        }
+        float t = (_ghostSea % GhostSinkLoop) / GhostSinkLoop;
+        float under = Mathf.Max(BedPx(cell) / RiseFactor, line - RamUnder * _decks[_ghost] / RiseFactor);
+        float down = Mathf.SmoothStep(0.0f, 1.0f, Mathf.Clamp((t - 0.2f) / 0.45f, 0.0f, 1.0f));
+        at.Y = Mathf.Lerp(line, under, down);
+        tint = tint.Lerp(RamDrowned, down);
+        // dimmed as it goes under; in from nothing at the top of the loop
+        fade = (1.0f - 0.3f * down) * Mathf.SmoothStep(0.0f, 1.0f, t / 0.12f);
+        return (cell, surface);
     }
 
     /// <summary>How much of a ghost at <paramref name="at"/> to draw, 0..1:

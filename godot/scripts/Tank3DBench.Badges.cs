@@ -342,6 +342,24 @@ public sealed partial class Tank3DBench
         Sign(ink, _amphibious ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up);
     }
 
+    /// <summary>Over the move's ghost on deep water (<see cref="GhostAfloat"/>):
+    /// the lifebuoy or the circle under water, over the water line - not over
+    /// the sinking hull, which would take the sign down with it.</summary>
+    private void DrawGhostSign(Control ink)
+    {
+        if (_ghostWet is not var (_, line) || _ghost is null || _ghostRig is not { Visible: true })
+        {
+            _ghostSignUp = 0.0f;
+            return;
+        }
+        float up = SignUp(ref _ghostSignUp);
+        Vector2 at = _camera.UnprojectPosition(line + Vector3.Up * (_ghost.Size.Y * _ghost.PixelsPerUnit * 1.15f));
+        float r = Mathf.Max(8.0f, HexScreen() * 0.11f) * Mathf.Lerp(0.75f, 1.0f, up);
+        Sign(ink, _amphibious ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up * _ghostClearNow);
+    }
+
+    private float _ghostSignUp;
+
     /// <summary>A forecast coming up: its clock on by a frame, and how far up
     /// it is, 0 to 1.</summary>
     private float SignUp(ref float clock)
