@@ -22,7 +22,7 @@ namespace TankSpriteTest;
 /// taken back (GDD match.md). A click on another cell in reach fixes that one
 /// instead; ESC lets the cell go, then as before.</item>
 /// <item><b>The rose</b> - five discs toward the sides but the one the way
-/// arrives facing (that turn is none): +1 a side and so on, grey where the
+/// arrives facing (that turn is none): +1 a side and so on, none where the
 /// budget runs out or the cell ends the move (<see cref="Steps.Reach.TurnTo"/>).
 /// The pointer on a disc turns the ghost to it, a click on it is the order
 /// with that turn at the end (2026-10-29); A/D or the wheel over the fixed
@@ -456,13 +456,14 @@ void fragment() {
     private int? RoseAt(Vector2 screen)
     {
         // a firing post has no rose: its side is the one it fires from (Tank3DBench.Post)
-        if (_lockCell is not Vector2I cell || _ways.Count == 0 || _postLock)
+        if (_lockCell is not Vector2I cell || _ways.Count == 0 || _postLock || _reach is null)
             return null;
         float r = RoseDisc();
         Vector2 mid = Screen(cell);
-        int home = RoseHome();
+        Steps.Route way = _ways[_wayIx % _ways.Count];
         foreach (int side in HexField.EdgeHeadings)
-            if (side != home && SpinDisc(cell, mid, side).DistanceTo(screen) <= r * 1.3f)
+            if (side != way.End.Heading && SpinDisc(cell, mid, side).DistanceTo(screen) <= r * 1.3f
+                && _reach.TurnTo(way, side) is not null)
                 return side;
         return null;
     }
@@ -517,11 +518,12 @@ void fragment() {
         Vector2 mid = Screen(_roseCell);
         foreach (int side in HexField.EdgeHeadings)
         {
-            if (side == way.End.Heading)
+            // a side the steps left after the drive do not reach has no disc
+            // either (the author's note, 2026-10-29)
+            if (side == way.End.Heading || _reach.TurnTo(way, side) is not int cost)
                 continue;
-            int? cost = _reach.TurnTo(way, side);
             RoseDraw(ink, font, size, SpinDisc(_roseCell, mid, side), r, _roseFade, side == _roseFace, false,
-                     cost is null ? null : SpinCosts[Mathf.Clamp(cost.Value, 0, 3)]);
+                     SpinCosts[Mathf.Clamp(cost, 0, 3)]);
         }
     }
 }

@@ -7,7 +7,7 @@ namespace TankSpriteTest;
 /// 2026-10-29): the rose round the chosen tank itself. The pointer on the
 /// tank with no order in hand opens it - five discs, one to each side but
 /// the one the hull faces, each with what the turn there costs
-/// (<see cref="Steps.Turning"/>, the short way round), grey past the budget -
+/// (<see cref="Steps.Turning"/>, the short way round), none past the budget -
 /// and it stays open while the pointer is within reach of its discs. The
 /// pointer on a disc stands the ghost on the own cell turned that way; a
 /// click on a disc is the order, at once - a disc is a choice made, not a
@@ -84,7 +84,7 @@ public sealed partial class Tank3DBench
         Vector2 mid = Screen(cell);
         int here = HullSide();
         foreach (int side in HexField.EdgeHeadings)
-            if (side != here && SpinDisc(cell, mid, side).DistanceTo(screen) <= r * 1.3f)
+            if (side != here && SpinDisc(cell, mid, side).DistanceTo(screen) <= r * 1.3f && SpinCost(side) is not null)
                 return side;
         return null;
     }
@@ -181,40 +181,36 @@ public sealed partial class Tank3DBench
         foreach (int side in HexField.EdgeHeadings)
         {
             // the side the hull faces already has no disc: a turn to it is
-            // none (the author's note, 2026-10-29)
-            if (side == here)
+            // none; nor has one past the budget (the author's notes, 2026-10-29)
+            if (side == here || SpinCost(side) is not int cost)
                 continue;
-            int? cost = SpinCost(side);
-            RoseDraw(ink, font, size, SpinDisc(cell, mid, side), r, _spinFade, false, side == shown,
-                     cost is null ? null : SpinCosts[cost.Value]);
+            RoseDraw(ink, font, size, SpinDisc(cell, mid, side), r, _spinFade, false, side == shown, SpinCosts[cost]);
         }
     }
 
     private static readonly string[] SpinCosts = { "0", "+1", "+2", "+3" };
 
     /// <summary>
-    /// One disc of a rose: white with its cost in blue, or grey with a dash
-    /// where <paramref name="text"/> is null (out of the budget); in the
-    /// course's blue when <paramref name="on"/> (the side the ghost faces),
-    /// a thicker ring when <paramref name="picked"/>. <paramref name="a"/> is
-    /// the rose's coming and going: the disc grows from a little smaller as
-    /// it fades in.
+    /// One disc of a rose: white with its cost in blue; in the course's blue
+    /// when <paramref name="on"/> (the side the ghost faces), a thicker ring
+    /// when <paramref name="picked"/>. A side past the budget has no disc - it
+    /// was grey with a dash (the author's note, 2026-10-29: not shown at
+    /// all). <paramref name="a"/> is the rose's coming and going: the disc
+    /// grows from a little smaller as it fades in.
     /// </summary>
-    private static void RoseDraw(Control ink, Font font, int size, Vector2 at, float r, float a, bool on, bool picked, string? text)
+    private static void RoseDraw(Control ink, Font font, int size, Vector2 at, float r, float a, bool on, bool picked, string text)
     {
         float k = Mathf.SmoothStep(0.0f, 1.0f, a);
         r *= (picked ? 1.15f : 1.0f) * Mathf.Lerp(0.6f, 1.0f, k);
-        bool can = text is not null;
-        Color fill = on ? CourseInk : can ? new Color(0.92f, 0.95f, 0.98f) : new Color(0.62f, 0.62f, 0.60f, 0.85f);
-        Color ring = can ? CourseInk : new Color(0.45f, 0.45f, 0.43f);
-        Color letters = on ? Colors.White : can ? new Color(0.05f, 0.27f, 0.49f) : new Color(0.3f, 0.3f, 0.3f);
+        Color fill = on ? CourseInk : new Color(0.92f, 0.95f, 0.98f);
+        Color ring = CourseInk;
+        Color letters = on ? Colors.White : new Color(0.05f, 0.27f, 0.49f);
         fill.A *= k;
         ring.A *= k;
         letters.A *= k;
         ink.DrawCircle(at, r, fill);
         ink.DrawArc(at, r, 0, Mathf.Tau, 24, ring, picked ? 3.0f : 1.5f, true);
-        string t = text ?? "–";
-        Vector2 w = font.GetStringSize(t, HorizontalAlignment.Left, -1, size);
-        ink.DrawString(font, at + new Vector2(-w.X * 0.5f, size * 0.36f), t, HorizontalAlignment.Left, -1, size, letters);
+        Vector2 w = font.GetStringSize(text, HorizontalAlignment.Left, -1, size);
+        ink.DrawString(font, at + new Vector2(-w.X * 0.5f, size * 0.36f), text, HorizontalAlignment.Left, -1, size, letters);
     }
 }
