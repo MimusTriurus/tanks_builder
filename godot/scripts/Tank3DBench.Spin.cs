@@ -5,12 +5,12 @@ namespace TankSpriteTest;
 /// <summary>
 /// The turn on the spot (docs/hud3d-plan.md, «Разворот на месте»,
 /// 2026-10-29): the rose round the chosen tank itself. The pointer on the
-/// tank with no order in hand opens it - five discs, one to each side but
-/// the one the hull faces, each with what the turn there costs
-/// (<see cref="Steps.Turning"/>, the short way round), none past the budget -
-/// and it stays open while the pointer is within reach of its discs. The
-/// pointer on a disc stands the ghost on the own cell turned that way; a
-/// click on a disc is the order, at once - a disc is a choice made, not a
+/// tank with no order in hand opens it - up to five arrows, one to each side
+/// but the one the hull faces that the budget has the turn for
+/// (<see cref="Steps.Turning"/>, the short way round; <see cref="RoseDraw"/>)
+/// - and it stays open while the pointer is within reach of them. The
+/// pointer on an arrow stands the ghost on the own cell turned that way; a
+/// click on one is the order, at once - an arrow is a choice made, not a
 /// cell that could be missed. A/D open it too and walk the pick round, Enter
 /// orders the pick, ESC lets the pick go. The wheel stays the zoom's. Both
 /// roses come and go over <see cref="RoseFadeTime"/>, not at once.
@@ -169,7 +169,7 @@ public sealed partial class Tank3DBench
         _spinFade = Mathf.MoveToward(_spinFade, keep ? 1.0f : 0.0f, (float)GetProcessDeltaTime() / RoseFadeTime);
     }
 
-    private void DrawSpin(Control ink, Font font, int size)
+    private void DrawSpin(Control ink)
     {
         if (_spinFade <= 0.0f || _reach is null || _field is null || _tile is null)
             return;
@@ -182,35 +182,60 @@ public sealed partial class Tank3DBench
         {
             // the side the hull faces already has no disc: a turn to it is
             // none; nor has one past the budget (the author's notes, 2026-10-29)
-            if (side == here || SpinCost(side) is not int cost)
+            if (side == here || SpinCost(side) is null)
                 continue;
-            RoseDraw(ink, font, size, SpinDisc(cell, mid, side), r, _spinFade, false, side == shown, SpinCosts[cost]);
+            Vector2 at = SpinDisc(cell, mid, side);
+            // the side shown blue, as the fixed cell's rose shows the ghost's
+            RoseDraw(ink, at, at - mid, r, _spinFade, side == shown, side == shown);
         }
     }
 
-    private static readonly string[] SpinCosts = { "0", "+1", "+2", "+3" };
+    /// <summary>A rose's arrow, filled and its outline closed: kept, not new
+    /// each frame.</summary>
+    private static readonly Vector2[] RoseTri = new Vector2[3], RoseRim = new Vector2[4];
 
     /// <summary>
-    /// One disc of a rose: white with its cost in blue; in the course's blue
-    /// when <paramref name="on"/> (the side the ghost faces), a thicker ring
-    /// when <paramref name="picked"/>. A side past the budget has no disc - it
-    /// was grey with a dash (the author's note, 2026-10-29: not shown at
-    /// all). <paramref name="a"/> is the rose's coming and going: the disc
-    /// grows from a little smaller as it fades in.
+    /// One mark of a rose: a filled arrowhead pointing out along
+    /// <paramref name="way"/>, white on a soft dark one, its edge in the
+    /// course's blue; all blue when <paramref name="on"/> (the side the ghost
+    /// faces), a thicker edge and a little bigger when
+    /// <paramref name="picked"/>. It was a disc with the turn's cost on it
+    /// (+1..+3): an arrow says «turn here» without being read, and the cost
+    /// is the card's step dots under the pointer (the author's call,
+    /// 2026-10-29). A side past the budget has no mark. <paramref name="a"/>
+    /// is the rose's coming and going: the mark grows from a little smaller
+    /// as it fades in. Filled, not a chevron: the way's own chevrons are
+    /// lines (<c>DrawWay</c>).
     /// </summary>
-    private static void RoseDraw(Control ink, Font font, int size, Vector2 at, float r, float a, bool on, bool picked, string text)
+    private static void RoseDraw(Control ink, Vector2 at, Vector2 way, float r, float a, bool on, bool picked)
     {
+        if (way.LengthSquared() < 1e-6f)
+            return;
         float k = Mathf.SmoothStep(0.0f, 1.0f, a);
-        r *= (picked ? 1.15f : 1.0f) * Mathf.Lerp(0.6f, 1.0f, k);
+        r *= (picked ? 1.2f : 1.0f) * Mathf.Lerp(0.6f, 1.0f, k);
+        Vector2 d = way.Normalized(), n = new(-d.Y, d.X);
         Color fill = on ? CourseInk : new Color(0.92f, 0.95f, 0.98f);
-        Color ring = CourseInk;
-        Color letters = on ? Colors.White : new Color(0.05f, 0.27f, 0.49f);
+        Color edge = on ? new Color(0.92f, 0.95f, 0.98f) : CourseInk;
         fill.A *= k;
-        ring.A *= k;
-        letters.A *= k;
-        ink.DrawCircle(at, r, fill);
-        ink.DrawArc(at, r, 0, Mathf.Tau, 24, ring, picked ? 3.0f : 1.5f, true);
-        Vector2 w = font.GetStringSize(text, HorizontalAlignment.Left, -1, size);
-        ink.DrawString(font, at + new Vector2(-w.X * 0.5f, size * 0.36f), text, HorizontalAlignment.Left, -1, size, letters);
+        edge.A *= k;
+        // the soft dark under it, for the grass and the water
+        Arrow(at, d, n, r * 1.25f);
+        ink.DrawColoredPolygon(RoseTri, new Color(0.0f, 0.0f, 0.0f, 0.35f * k));
+        Arrow(at, d, n, r);
+        ink.DrawColoredPolygon(RoseTri, fill);
+        RoseRim[0] = RoseTri[0];
+        RoseRim[1] = RoseTri[1];
+        RoseRim[2] = RoseTri[2];
+        RoseRim[3] = RoseTri[0];
+        ink.DrawPolyline(RoseRim, edge, picked ? 3.0f : 1.5f, true);
+    }
+
+    /// <summary>The arrowhead about <paramref name="at"/> into
+    /// <see cref="RoseTri"/>: its tip out along <paramref name="d"/>.</summary>
+    private static void Arrow(Vector2 at, Vector2 d, Vector2 n, float r)
+    {
+        RoseTri[0] = at + d * (r * 1.05f);
+        RoseTri[1] = at - d * (r * 0.65f) + n * (r * 0.95f);
+        RoseTri[2] = at - d * (r * 0.65f) - n * (r * 0.95f);
     }
 }

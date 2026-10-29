@@ -21,8 +21,8 @@ namespace TankSpriteTest;
 /// the rose; the second on it, or Enter, gives the order - which cannot be
 /// taken back (GDD match.md). A click on another cell in reach fixes that one
 /// instead; ESC lets the cell go, then as before.</item>
-/// <item><b>The rose</b> - five discs toward the sides but the one the way
-/// arrives facing (that turn is none): +1 a side and so on, none where the
+/// <item><b>The rose</b> - up to five arrows toward the sides but the one the way
+/// arrives facing (that turn is none), none where the
 /// budget runs out or the cell ends the move (<see cref="Steps.Reach.TurnTo"/>).
 /// The pointer on a disc turns the ghost to it, a click on it is the order
 /// with that turn at the end (2026-10-29); A/D or the wheel over the fixed
@@ -510,7 +510,7 @@ void fragment() {
         _roseFade = Mathf.MoveToward(_roseFade, on ? 1.0f : 0.0f, (float)GetProcessDeltaTime() / RoseFadeTime);
     }
 
-    private void DrawRose(Control ink, Font font, int size)
+    private void DrawRose(Control ink)
     {
         if (_roseFade <= 0.0f || _roseWay is not { } way || _reach is null)
             return;
@@ -520,10 +520,10 @@ void fragment() {
         {
             // a side the steps left after the drive do not reach has no disc
             // either (the author's note, 2026-10-29)
-            if (side == way.End.Heading || _reach.TurnTo(way, side) is not int cost)
+            if (side == way.End.Heading || _reach.TurnTo(way, side) is null)
                 continue;
-            RoseDraw(ink, font, size, SpinDisc(_roseCell, mid, side), r, _roseFade, side == _roseFace, false,
-                     SpinCosts[Mathf.Clamp(cost, 0, 3)]);
+            Vector2 at = SpinDisc(_roseCell, mid, side);
+            RoseDraw(ink, at, at - mid, r, _roseFade, side == _roseFace, false);
         }
     }
 }

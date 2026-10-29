@@ -672,9 +672,8 @@ public sealed partial class Tank3DBench
         // (Tank3DBench.Spin, RoseFadeTime).
         if (_field is null || _tile is null)
             return;
-        int size = Mathf.RoundToInt(RoseDisc() * 1.15f);
-        DrawRose(ink, ThemeDB.FallbackFont, size);
-        DrawSpin(ink, ThemeDB.FallbackFont, size);
+        DrawRose(ink);
+        DrawSpin(ink);
     }
 
     private void DrawWay(Control ink)
