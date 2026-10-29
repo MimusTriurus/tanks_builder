@@ -78,6 +78,10 @@ public sealed partial class Tank3DBench
         /// target: where the line crosses it.</summary>
         public Vector3? Breach { get; init; }
 
+        /// <summary>A standing tank shuts the lane: the line ends on its
+        /// plate, drawn without the cross and the word.</summary>
+        public bool Screened { get; init; }
+
         public Color Ink => !Fires ? AimOff : Pierces ? AimPierce : Glances ? AimGlance : AimHeld;
 
         public string Says
@@ -277,6 +281,20 @@ public sealed partial class Tank3DBench
         }
         else if (stop is Vector2I shut)
             end = CellWorld(shut) + Vector3.Up * (0.3f * tall);
+        // A tank in the lane: the line runs on into its plate, as the round
+        // would - no cross short of it, no word over the target; the order
+        // is still refused, and the HUD says why (the author's note, 2026-10-29).
+        Parked? screen = null;
+        if (stop is Vector2I s && !_profile.Lobs)
+            for (int i = 0; i < _parked.Count; i++)
+                if (_parked[i].Cell == s && _parked[i].Fate != Fate.Destroyed)
+                    screen = _parked[i];
+        if (screen is not null)
+        {
+            Vector3 tip0 = TipAt(from);
+            Vector3 body = screen.Rig.Position + Vector3.Up * (0.45f * screen.Model.Size.Y * screen.Model.PixelsPerUnit);
+            end = HitsOf(screen).Cast(tip0, (body - tip0).Normalized()) is { } on ? on.At : body;
+        }
         string face = "roof";
         Gunnery.Plate plate = Gunnery.Plate.Roof;
         int level;
@@ -298,7 +316,7 @@ public sealed partial class Tank3DBench
                 end = hit.At;
         }
         var judged = new Judged(from, cell, muzzle, end, axis, face, plate, level, why, _profile.Lobs, cells, stop, TipAt(from));
-        judged = judged with { Breach = breach };
+        judged = judged with { Breach = breach, Screened = screen is not null };
         // where it goes on to past the target - the round's own leg (Strike):
         // held by a flank, or a destroyer's with its pass still in hand
         if (judged.Glances && !judged.Lob)
@@ -408,7 +426,7 @@ public sealed partial class Tank3DBench
         {
             if (from != CellHere || Mathf.Abs(BoreOff(_model, _rig, Centre(o))) < CasemateOff)
                 return;
-            GhostAt(from, HullSide(), true);
+            GhostAt(from, HullSide(), true, overOwn: true);
             if (_ghostRig is null)
                 return;
         }
@@ -803,7 +821,7 @@ void fragment() {
             if (shot.Breach is Vector3 wall && _fireAxis && OnTarget(shot))
                 Burst(ink, _camera.UnprojectPosition(wall), Mathf.Max(size * 0.8f, hex * 0.18f), AimPierce);
         }
-        else if (shot.Axis >= 0)
+        else if (shot.Axis >= 0 && !shot.Screened)
         {
             // the lane shut: a cross where the round would stop
             var dark = new Color(0.0f, 0.0f, 0.0f, 0.55f);
@@ -818,7 +836,7 @@ void fragment() {
         over.Y = Mathf.Max(over.Y, 100.0f + size * 2.0f);
         // The outcome is the line's colour and its course - no words over the
         // target for it; only why there is no shot, which nothing else says.
-        if (!shot.Fires)
+        if (!shot.Fires && !shot.Screened)
             Pill(ink, font, over + new Vector2(0, -size), shot.Says, shot.Ink, new Color(0.12f, 0.12f, 0.12f), size);
         int semi = _judgedNote.IndexOf("; после хода", System.StringComparison.Ordinal);
         if (semi >= 0)

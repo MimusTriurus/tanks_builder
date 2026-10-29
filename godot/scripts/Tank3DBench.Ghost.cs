@@ -194,7 +194,7 @@ void fragment() {
             _ghostRig.Visible = false;
     }
 
-    private void GhostAt(Vector2I cell, int side, bool firm)
+    private void GhostAt(Vector2I cell, int side, bool firm, bool overOwn = false)
     {
         GhostFor(_modelTag);
         if (_ghostRig is null || _ghostFill is null || _ghostInk is null)
@@ -210,7 +210,7 @@ void fragment() {
         _ghost!.Yaw = 0.0f;
         _ghost.Elevation = 0.0f;
         _ghost.Apply();
-        float clear = GhostClear(_ghostRig.Position);
+        float clear = GhostClear(_ghostRig.Position, overOwn);
         _ghostClearNow = clear;
         _ghostFill.Param("tint", tint);
         _ghostFill.Param("alpha", (firm ? GhostFirm : GhostFaint) * clear * fade);
@@ -278,9 +278,12 @@ void fragment() {
     /// one. Drawn whole, a ghost met by its tank as it arrived, or played
     /// into a standing one by the ram's preview, was a hull through a hull.
     /// </summary>
-    private float GhostClear(Vector3 at)
+    private float GhostClear(Vector3 at, bool overOwn = false)
     {
-        float near = Flat(at - _rig.Position).Length();
+        // a casemate's ghost laid over its own hull (Tank3DBench.Aim,
+        // CasemateGhost) stands there by design: faded by that hull, it went,
+        // and the line of fire, taken off it, went with it
+        float near = overOwn ? float.MaxValue : Flat(at - _rig.Position).Length();
         if (_other is { } o)
             near = Mathf.Min(near, Flat(at - o.Rig.Position).Length());
         foreach (Parked p in _parked)
