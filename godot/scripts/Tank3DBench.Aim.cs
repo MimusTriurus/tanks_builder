@@ -195,13 +195,15 @@ public sealed partial class Tank3DBench
     // --- the outlines -------------------------------------------------------
 
     /// <summary>
-    /// The enemy units the selected tank may fire at from
+    /// The units the selected tank may fire at from
     /// <see cref="ReachFrom"/> - the right button's own gate
     /// (<see cref="ShotWhy"/>, a gun's empty hex between, a wall on the axis):
-    /// each gets the thin hostile rim the pointer gives a target, from the
-    /// moment the tank is chosen, so who can be hit reads before any hover
-    /// (the author's note, 2026-10-29). Judged again only when what it
-    /// depends on changes (<see cref="ReachStamp"/>): the gate allocates.
+    /// each enemy among them gets the thin hostile rim the pointer gives a
+    /// target, from the moment the tank is chosen, so who can be hit reads
+    /// before any hover (the author's note, 2026-10-29). The own ones are in
+    /// it for the pointer: a unit under it is red when in reach, grey when
+    /// not (<see cref="HaloTick"/>). Judged again only when what it depends
+    /// on changes (<see cref="ReachStamp"/>): the gate allocates.
     /// </summary>
     private readonly HashSet<TankModel> _inReach = new();
     private int _reachStamp;
@@ -221,10 +223,10 @@ public sealed partial class Tank3DBench
         for (int i = 0; i < _parked.Count; i++)
         {
             Parked p = _parked[i];
-            if (p.Side != _side && p.Fate != Fate.Destroyed && (MayHit(from, p.Cell) || (after && MayHitAfter(p.Cell))))
+            if (p.Fate != Fate.Destroyed && (MayHit(from, p.Cell) || (after && MayHitAfter(p.Cell))))
                 _inReach.Add(p.Model);
         }
-        if (_other is { Unit: true } o && o.Side != _side && o.Fate != Fate.Destroyed
+        if (_other is { Unit: true } o && o.Fate != Fate.Destroyed
             && (MayHit(from, OtherCell(o)) || (after && MayHitAfter(OtherCell(o)))))
             _inReach.Add(o.Model);
     }
@@ -332,12 +334,24 @@ public sealed partial class Tank3DBench
         bool alive = _fate == Fate.Alive;
         SetHalo(_model, !alive ? 0.0f : _chosen ? HaloChosen : _overOwn ? HaloHover : 0.0f, SelectionRing.Friendly);
         if (_other is { } o)
-            SetHalo(o.Model, _overTarget || _inReach.Contains(o.Model) ? HaloHover : 0.0f, SelectionRing.Hostile);
+        {
+            // under the pointer in a match: red when the gun reaches it, grey
+            // when not (the author's note, 2026-10-29); off it, the rim of an
+            // enemy in reach (ReachTick)
+            bool reached = _inReach.Contains(o.Model);
+            bool shown = _overTarget || (reached && o.Unit && o.Side != _side);
+            SetHalo(o.Model, shown ? HaloHover : 0.0f,
+                    !Match || reached ? SelectionRing.Hostile : AimOff);
+        }
         // in a match, the other side's in its colour (Tank3DBench.Match); the
-        // ones in reach of the selected tank's gun at all times (ReachTick)
+        // enemies in reach of the selected tank's gun at all times (ReachTick)
         foreach (Parked p in _parked)
-            SetHalo(p.Model, (ReferenceEquals(p, _overParked) || _inReach.Contains(p.Model)) && p.Fate != Fate.Destroyed ? HaloHover : 0.0f,
-                    Match && p.Side != _side ? SelectionRing.Hostile : SelectionRing.Friendly);
+        {
+            bool enemy = Match && p.Side != _side;
+            bool shown = ReferenceEquals(p, _overParked) || (enemy && _inReach.Contains(p.Model));
+            SetHalo(p.Model, shown && p.Fate != Fate.Destroyed ? HaloHover : 0.0f,
+                    enemy ? SelectionRing.Hostile : SelectionRing.Friendly);
+        }
     }
 
     /// <summary>The rim on <paramref name="model"/>, hung on first need.</summary>
