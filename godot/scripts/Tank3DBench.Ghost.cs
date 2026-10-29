@@ -173,7 +173,11 @@ void fragment() {
     private void GhostTick(Steps.Route? way)
     {
         _ghostSea += (float)GetProcessDeltaTime();
-        _ghostWet = null;
+        _ghostSign = null;
+        _ghostBurst = null;
+        // the way's risk is the ghost's on its end - a mine or fire on the way
+        _ghostRiskCell = way?.End.Cell;
+        _ghostRisk = way?.Risk ?? Steps.Risk.None;
         if (way is not null)
         {
             GhostAt(way.End.Cell, GhostFace(way), _lockCell == way.End.Cell);
@@ -200,15 +204,36 @@ void fragment() {
         if (_ghostRig is null || _ghostFill is null || _ghostInk is null)
             return;
         Vector3 at = CellMiddle(cell);
-        float roll = 0.0f, fade = 1.0f;
+        float roll = 0.0f, pitch = 0.0f, fade = 1.0f, knocked = 0.0f;
         Color tint = SelectionRing.Friendly;
-        _ghostWet = GhostAfloat(cell, ref at, ref roll, ref tint, ref fade);
+        if (_ghostSeaCell != cell)
+        {
+            _ghostSeaCell = cell;
+            _ghostSea = 0.0f;
+        }
+        // What the way does to the hull there, one picture and one sign: deep
+        // water first - it ends the way, and puts a fire out - then a mine, then fire.
+        Steps.Risk risk = _ghostRiskCell == cell ? _ghostRisk : Steps.Risk.None;
+        if (GhostAfloat(cell, ref at, ref roll, ref tint, ref fade) is var (_, line))
+            _ghostSign = (_amphibious ? Badge.Afloat : Badge.Drowned, line);
+        else if (risk.HasFlag(Steps.Risk.Mine))
+        {
+            knocked = GhostMined(at, ref at, ref pitch, ref tint, ref fade);
+            _ghostSign = (Badge.Knocked, CellMiddle(cell));
+        }
+        else if (risk.HasFlag(Steps.Risk.Fire))
+            _ghostSign = (Badge.Burning, at);
         _ghostRig.Position = at;
         _ghostRig.Rotation = new Vector3(0.0f, Mathf.DegToRad(HeadingFor(cell, side)), 0.0f);
         _ghostRig.RotateObjectLocal(Vector3.Forward, roll);
+        _ghostRig.RotateObjectLocal(Vector3.Right, pitch);
         // the turret ahead, until a target under the pointer turns it (Tank3DBench.Aim)
         _ghost!.Yaw = 0.0f;
         _ghost.Elevation = 0.0f;
+        // the knock-out pose, as Fall gives the real hull (Tank3DBench.Match)
+        _ghost.Cant = knocked;
+        _ghost.Droop = knocked;
+        _ghost.Slackness = knocked;
         _ghost.Apply();
         float clear = GhostClear(_ghostRig.Position, overOwn);
         _ghostClearNow = clear;
@@ -218,13 +243,51 @@ void fragment() {
         _ghostRig.Visible = clear > 0.01f;
     }
 
-    /// <summary>The ghost's clock on water: the swell and the sinking loop.</summary>
+    /// <summary>The ghost's clock on its cell: the swell, the sinking loop,
+    /// the mine's loop - from nought each new cell.</summary>
     private float _ghostSea;
     private Vector2I? _ghostSeaCell;
-    /// <summary>The ghost stands on deep water: where the sign over it goes
-    /// (<c>Tank3DBench.Badges</c>), and how much of the ghost is drawn.</summary>
-    private (Vector2I Cell, Vector3 Line)? _ghostWet;
+    /// <summary>The way's risk, and the cell it ends on (<see cref="GhostTick"/>).</summary>
+    private Steps.Risk _ghostRisk;
+    private Vector2I? _ghostRiskCell;
+    /// <summary>The sign over the ghost and where it stands, world - over the
+    /// hull at rest or the water line, not over the hull as it moves
+    /// (<c>Tank3DBench.Badges</c>, <c>DrawGhostSign</c>).</summary>
+    private (Badge Kind, Vector3 Anchor)? _ghostSign;
+    /// <summary>The mine going off under the ghost: where, and how much of the
+    /// flash is left, 0..1.</summary>
+    private (Vector3 At, float A)? _ghostBurst;
     private float _ghostClearNow;
+
+    /// <summary>The ghost's mine loop, s: drives on, the mine, knocked out, held.</summary>
+    private const float GhostMineLoop = 2.6f;
+    /// <summary>What a knocked-out ghost dims into: the wreck's soot.</summary>
+    private static readonly Color GhostWreck = new(0.42f, 0.38f, 0.34f);
+
+    /// <summary>
+    /// The move's ghost on a mine (GDD field.md «мины»: it goes off under the
+    /// hull, the hull is knocked out, the way ends there): standing whole, a
+    /// flash under it (<see cref="_ghostBurst"/>), the hull thrown up and its
+    /// nose with it, and down into the knock-out pose - turret sat over, gun
+    /// on its stop, belts slack - dimming to soot, where it stays the rest of
+    /// the loop. Faded in and out at the loop's ends, not popped back whole.
+    /// Returns how far into the pose it is, 0..1.
+    /// </summary>
+    private float GhostMined(Vector3 rest, ref Vector3 at, ref float pitch, ref Color tint, ref float fade)
+    {
+        float t = (_ghostSea % GhostMineLoop) / GhostMineLoop;
+        float tall = _ghost!.Size.Y * _ghost.PixelsPerUnit;
+        float s = Mathf.Clamp((t - 0.28f) / 0.16f, 0.0f, 1.0f);
+        float hop = Mathf.Sin(Mathf.Pi * s);
+        at.Y = rest.Y + 0.14f * tall * hop;
+        pitch = 0.14f * hop;
+        if (t >= 0.28f && t < 0.52f)
+            _ghostBurst = (rest + Vector3.Up * (0.1f * tall), 1.0f - (t - 0.28f) / 0.24f);
+        float knocked = Mathf.SmoothStep(0.0f, 1.0f, Mathf.Clamp((t - 0.32f) / 0.18f, 0.0f, 1.0f));
+        tint = tint.Lerp(GhostWreck, 0.85f * knocked);
+        fade = Mathf.Min(Mathf.SmoothStep(0.0f, 1.0f, t / 0.1f), Mathf.SmoothStep(0.0f, 1.0f, (1.0f - t) / 0.08f));
+        return knocked;
+    }
 
     /// <summary>The swell's size and pace, read off a hull's (never ridden).</summary>
     private static readonly Buoy GhostSwell = new();
@@ -244,15 +307,7 @@ void fragment() {
     private (Vector2I, Vector3)? GhostAfloat(Vector2I cell, ref Vector3 at, ref float roll, ref Color tint, ref float fade)
     {
         if (_ghost is null || SwimY(cell, _ghost, _profile) is not float line)
-        {
-            _ghostSeaCell = null;
             return null;
-        }
-        if (_ghostSeaCell != cell)
-        {
-            _ghostSeaCell = cell;
-            _ghostSea = 0.0f;
-        }
         Vector3 surface = new(at.X, line, at.Z);
         if (_amphibious)
         {

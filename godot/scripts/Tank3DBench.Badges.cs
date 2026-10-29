@@ -342,20 +342,27 @@ public sealed partial class Tank3DBench
         Sign(ink, _amphibious ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up);
     }
 
-    /// <summary>Over the move's ghost on deep water (<see cref="GhostAfloat"/>):
-    /// the lifebuoy or the circle under water, over the water line - not over
-    /// the sinking hull, which would take the sign down with it.</summary>
+    /// <summary>Over the move's ghost, what the way does to it there
+    /// (<see cref="GhostAt"/>, in place of the way's words - «мина», «утонет»,
+    /// «огонь» - 2026-10-29): on deep water the lifebuoy or the circle under
+    /// water, over the water line - not over the sinking hull, which would take
+    /// the sign down with it; on a mine the cracked shield, and the mine's
+    /// flash under the hull as it goes off; through fire the flame.</summary>
     private void DrawGhostSign(Control ink)
     {
-        if (_ghostWet is not var (_, line) || _ghost is null || _ghostRig is not { Visible: true })
+        if (_ghostSign is not var (kind, anchor) || _ghost is null || _ghostRig is not { Visible: true })
         {
             _ghostSignUp = 0.0f;
             return;
         }
+        float hex = HexScreen();
+        if (_ghostBurst is var (blast, a))
+            Burst(ink, _camera.UnprojectPosition(blast), Mathf.Max(12.0f, hex * 0.22f) * (1.4f - 0.4f * a), BlastFire,
+                  a * _ghostClearNow);
         float up = SignUp(ref _ghostSignUp);
-        Vector2 at = _camera.UnprojectPosition(line + Vector3.Up * (_ghost.Size.Y * _ghost.PixelsPerUnit * 1.15f));
-        float r = Mathf.Max(8.0f, HexScreen() * 0.11f) * Mathf.Lerp(0.75f, 1.0f, up);
-        Sign(ink, _amphibious ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up * _ghostClearNow);
+        Vector2 at = _camera.UnprojectPosition(anchor + Vector3.Up * (_ghost.Size.Y * _ghost.PixelsPerUnit * 1.15f));
+        float r = Mathf.Max(8.0f, hex * 0.11f) * Mathf.Lerp(0.75f, 1.0f, up);
+        Sign(ink, kind, at, r, 0.0f, up * _ghostClearNow);
     }
 
     private float _ghostSignUp;

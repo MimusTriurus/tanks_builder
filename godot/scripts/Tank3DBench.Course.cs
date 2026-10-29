@@ -508,12 +508,10 @@ public sealed partial class Tank3DBench
             if (turns > 0)
                 Pill(ink, font, at + new Vector2(-hex * 0.45f, hex * 0.32f), $"+{turns} пов.", TurnInk, new Color(0.25f, 0.14f, 0.01f), size);
         }
-        string? risk = way.Risk.HasFlag(Steps.Risk.Mine) ? "мина"
-            : way.Risk.HasFlag(Steps.Risk.Drown) ? "утонет"
-            : way.Risk.HasFlag(Steps.Risk.Fire) ? "огонь" : null;
+        // The way's risk - a mine, deep water, fire - is the ghost's to show
+        // and the sign's over it (Tank3DBench.Ghost, Tank3DBench.Badges), not
+        // a word at the end (the author's note, 2026-10-29).
         Vector2 end = Screen(way.End.Cell);
-        if (risk is not null)
-            Pill(ink, font, end + new Vector2(0, -hex * 0.48f), risk, new Color(0.94f, 0.58f, 0.58f), new Color(0.31f, 0.07f, 0.07f), size);
         DrawRose(ink, font, size);
         // Where the hull will point: the ghost says it (Tank3DBench.Ghost); the
         // arrowhead only stands in when its model did not load.
