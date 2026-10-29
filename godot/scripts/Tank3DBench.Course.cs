@@ -183,7 +183,10 @@ public sealed partial class Tank3DBench
             // a set of its own: the search keeps it
             _reachBarred = new HashSet<Vector2I>(_barredNow);
             _reachVersion++;
-            _reach = Steps.Plan(_field!, new Steps.Pose(here, side), Steps.Mover.Of(_profile, _amphibious, _reachBarred));
+            Steps.Mover mover = Steps.Mover.Of(_profile, _amphibious, _reachBarred);
+            // the zone gives no mine away (Steps.Mover.MinesUnseen); the hull finds it
+            mover.MinesUnseen = true;
+            _reach = Steps.Plan(_field!, new Steps.Pose(here, side), mover);
         }
         // A fixed cell holds the way shown until it is ordered or let go - or
         // falls out of reach, when the board moved under it.
@@ -408,7 +411,15 @@ public sealed partial class Tank3DBench
         _edgeFrom.Clear();
         _edgeTo.Clear();
         _band.Clear();
-        foreach ((Vector2I cell, int _) in reach.Cells)
+        // the cells a move ends on and the one the tank stands on - filled
+        // with them (ZoneTone), it is ringed with them: before, the edges
+        // facing it were skipped and its own never walked, and the outline
+        // broke off on every side of it toward a tank or a wall
+        _zoneFill.Clear();
+        foreach ((Vector2I c, int _) in reach.Cells)
+            _zoneFill.Add(c);
+        _zoneFill.Add(reach.Start.Cell);
+        foreach (Vector2I cell in _zoneFill)
         {
             Vector2 mid = CellFlat(cell);
             foreach (int side in HexField.EdgeHeadings)
@@ -654,8 +665,10 @@ public sealed partial class Tank3DBench
         int size = Mathf.RoundToInt(r * 1.15f);
 
         foreach (Vector2I cell in _reach.Cells.Keys)
-            if (Steps.Stops(_field!, cell) || _field!.CoverAt(cell) == Cover.Minefield
-                || (_field.IsDeep(cell) && !_amphibious))
+            // a mine is no stop sign (2026-10-29, the author's note): it is
+            // driven on to and goes off - the ghost on it shows that
+            // (Tank3DBench.Ghost, GhostMined), the mine is seen on the board
+            if (Steps.Stops(_field!, cell) || (_field!.IsDeep(cell) && !_amphibious))
             {
                 Vector2 at = Screen(cell) + new Vector2(hex * 0.42f, -hex * 0.30f);
                 ink.DrawCircle(at, r * 0.8f, StopInk);

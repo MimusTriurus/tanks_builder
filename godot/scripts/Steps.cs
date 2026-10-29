@@ -67,6 +67,11 @@ public static class Steps
         public bool Trawl;
         /// <summary>Cells no step may enter - the other tanks.</summary>
         public IReadOnlySet<Vector2I>? Barred;
+        /// <summary>The way is planned as if the board had no mines: the HUD's
+        /// zone must not give one away by stopping short of it (the author's
+        /// call, 2026-10-29). The mine still goes off under the hull that
+        /// drives on to it and ends the move there - the bench's, not the plan's.</summary>
+        public bool MinesUnseen;
 
         public static Mover Of(MovementProfile profile, bool amphibious = false,
                                IReadOnlySet<Vector2I>? barred = null) => new()
@@ -373,7 +378,7 @@ public static class Steps
         int price = field.FoundationAt(to) == Foundation.Sand ? 2 : 1;
         bool ends = Stops(field, to);
         Risk risk = Risk.None;
-        if (field.CoverAt(to) == Cover.Minefield && field.CoverStateAt(to) != CoverState.Cleared
+        if (!mover.MinesUnseen && field.CoverAt(to) == Cover.Minefield && field.CoverStateAt(to) != CoverState.Cleared
             && !(mover.Trawl && forward))
         {
             risk |= Risk.Mine;

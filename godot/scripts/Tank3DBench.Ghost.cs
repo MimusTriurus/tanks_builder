@@ -178,6 +178,11 @@ void fragment() {
         // the way's risk is the ghost's on its end - a mine or fire on the way
         _ghostRiskCell = way?.End.Cell;
         _ghostRisk = way?.Risk ?? Steps.Risk.None;
+        // the plan sees no mines (Steps.Mover.MinesUnseen): the ghost goes up
+        // only with the pointer on the mine itself, not on a cell past it
+        if (way is not null && _field is { } f && f.CoverAt(way.End.Cell) == Cover.Minefield
+            && f.CoverStateAt(way.End.Cell) != CoverState.Cleared)
+            _ghostRisk |= Steps.Risk.Mine;
         if (way is not null)
         {
             GhostAt(way.End.Cell, GhostFace(way), _lockCell == way.End.Cell);
