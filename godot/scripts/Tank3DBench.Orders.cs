@@ -462,17 +462,44 @@ public sealed partial class Tank3DBench
         // destroyed one does not (Tank3DBench.Match).
         Shot shot = Gunnery.Solve(_field, own, cell, _profile.Lobs,
                                   c => (_other is { } o && o.Fate != Fate.Destroyed && OtherCell(o) == c)
-                                       || (Match && ParkedCells.Contains(c)), masonry: false);
+                                       || (Match && ParkedCells.Contains(c)), masonry: false,
+                                  standing: c => StandingLevel(c, own));
         if (shot.Clear || shot.BlockedAt is not Vector2I at)
             return "";
         stop = at;
-        return shot.Stop switch
-        {
-            Barrier.Tank => $"на линии огня танк {at}",
-            Barrier.Ground => $"линию огня закрывает рельеф {at}",
-            _ => $"линию огня закрывает {(_field.CoverAt(at) == Cover.Forest ? "лес" : "дым")} {at}",
-        };
+        return LaneWhy(shot, at);
     }
+
+    /// <summary>
+    /// The level a hull on <paramref name="cell"/> fires from and is shot at:
+    /// its cell's, but afloat - alive in deep water - the bank's, one over the
+    /// pond's bed (GDD field.md, «Уровни и линия огня», the author's call
+    /// 2026-10-29: «визуально так и должно быть» - the hull rides the surface,
+    /// <see cref="HexField.DeepDepth"/> of a level up, the shore's height).
+    /// The shooter on <paramref name="own"/> is alive by being the shooter;
+    /// a drowned one stays down on its bed.
+    /// </summary>
+    private int StandingLevel(Vector2I cell, Vector2I own)
+    {
+        int level = _field!.LevelAt(cell);
+        if (!_field.IsDeep(cell) || _field.RampHeading(cell) >= 0)
+            return level;
+        bool alive = cell == own;
+        if (_other is { Fate: Fate.Alive } o && OtherCell(o) == cell)
+            alive = true;
+        foreach (Parked p in _parked)
+            if (p.Fate == Fate.Alive && p.Cell == cell)
+                alive = true;
+        return alive ? level + 1 : level;
+    }
+
+    /// <summary>What shut the lane, in the player's words.</summary>
+    private string LaneWhy(Shot shot, Vector2I at) => shot.Stop switch
+    {
+        Barrier.Tank => $"на линии огня танк {at}",
+        Barrier.Ground => $"линию огня закрывает рельеф {at}",
+        _ => $"линию огня закрывает {(_field!.CoverAt(at) == Cover.Forest ? "лес" : "дым")} {at}",
+    };
 
     /// <summary>The left button under the rules, as the 2D harness reads it:
     /// the own tank - selected, or, selected already, its order cancelled;

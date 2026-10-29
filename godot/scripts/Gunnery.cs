@@ -119,8 +119,13 @@ public static class Gunnery
     /// </summary>
     public static bool Overtops(HexField field, Vector2I cell, Vector2I from,
                                 Vector2I onto) =>
-        field.LevelAt(cell)
-        > Math.Min(field.LevelAt(from), field.LevelAt(onto));
+        Overtops(field, cell, field.LevelAt(from), field.LevelAt(onto));
+
+    /// <summary>The same, with the two ends' levels given: a hull afloat
+    /// stands on its water's surface, the bank's level, not on the bed's
+    /// (GDD field.md, «Уровни и линия огня»; <see cref="Solve(HexField, Vector2I, Vector2I, bool, Func{Vector2I, bool}, bool, Func{Vector2I, int})"/>).</summary>
+    public static bool Overtops(HexField field, Vector2I cell, int fromLevel, int ontoLevel) =>
+        field.LevelAt(cell) > Math.Min(fromLevel, ontoLevel);
 
     /// <summary>
     /// Whether a mounting can be laid down a slope this steep: at most one level
@@ -200,12 +205,20 @@ public static class Gunnery
     /// walls on the edges to whoever flies the round: on the 3D board a wall
     /// takes the shot and falls, and the destroyer's goes through it, so a wall
     /// there is a thing to shoot rather than a refusal.
+    ///
+    /// <paramref name="standing"/>, when given, is the level the hull on an
+    /// end stands at, where it is not its cell's: a tank afloat stands on the
+    /// surface of its water, level with the bank (GDD field.md, «Уровни и
+    /// линия огня», 2026-10-29). Without it both ends are their cells'.
     /// </summary>
     public static Shot Solve(HexField field, Vector2I from, Vector2I onto, bool lobs,
-                             Func<Vector2I, bool> occupied, bool masonry = true)
+                             Func<Vector2I, bool> occupied, bool masonry = true,
+                             Func<Vector2I, int>? standing = null)
     {
         if (onto == from)
             return None;
+        int fromLevel = standing?.Invoke(from) ?? field.LevelAt(from);
+        int ontoLevel = standing?.Invoke(onto) ?? field.LevelAt(onto);
         (int heading, int range) = field.LaneTo(from, onto);
         if (heading < 0)
             return None;
@@ -263,7 +276,7 @@ public static class Gunnery
             // flat is out of this shot because of where it is standing, and
             // "move it or shoot it first" would be advice about a tank that
             // cannot be shot either.
-            if (!lobs && Overtops(field, lane[i], from, onto))
+            if (!lobs && Overtops(field, lane[i], fromLevel, ontoLevel))
             {
                 blocked = lane[i];
                 stop = Barrier.Ground;
@@ -285,7 +298,7 @@ public static class Gunnery
         // Reported at the target's own cell, because that is where the round
         // stops - against the face under it.
         if (blocked is null && !lobs
-            && !Reaches(field.LevelAt(onto) - field.LevelAt(from), range))
+            && !Reaches(ontoLevel - fromLevel, range))
         {
             blocked = onto;
             stop = Barrier.Ground;
