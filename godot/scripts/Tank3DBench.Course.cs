@@ -326,16 +326,33 @@ public sealed partial class Tank3DBench
         Tri(mesh, ink, cell, a, c, d);
     }
 
+    /// <summary>
+    /// The zone's fill (2026-10-29, the author's note: some hexes of the
+    /// zone looked bare, the joints and the tank's own hex unfilled). One
+    /// tone, the whole hexagon, and the cell the tank stands on with them.
+    /// Before, the last step's cells were drawn at 0.13 against 0.30 - on
+    /// grass, not there at all - every hexagon at 0.95 of its size, so the
+    /// board's grid showed between them, and the start was left out, it not
+    /// being a cell a move ends on (<see cref="Steps.Reach.Cells"/>).
+    /// </summary>
+    private const float ZoneTone = 0.30f;
+
+    private readonly List<Vector2I> _zoneFill = new();
+
+    private void ZoneCell(ImmediateMesh mesh, Color tint, Vector2I cell, Vector2[] corner)
+    {
+        Vector2 mid = CellFlat(cell);
+        for (int i = 0; i < 6; i++)
+            Tri(mesh, tint, cell, mid, mid + corner[i], mid + corner[(i + 1) % 6]);
+    }
+
     private void Zone(ImmediateMesh mesh, Steps.Reach reach)
     {
         Vector2[] corner = Corners();
-        foreach ((Vector2I cell, int cost) in reach.Cells)
-        {
-            Vector2 mid = CellFlat(cell);
-            var tint = new Color(CourseInk, reach.Budget - cost >= 1 ? 0.30f : 0.13f);
-            for (int i = 0; i < 6; i++)
-                Tri(mesh, tint, cell, mid, mid + corner[i] * 0.95f, mid + corner[(i + 1) % 6] * 0.95f);
-        }
+        var tint = new Color(CourseInk, ZoneTone);
+        foreach ((Vector2I cell, int _) in reach.Cells)
+            ZoneCell(mesh, tint, cell, corner);
+        ZoneCell(mesh, tint, reach.Start.Cell, corner);
         var line = new Color(CourseInk, 0.95f);
         ZoneBand(reach, corner, 1);
         for (int i = 0; i < _band.Count; i++)
@@ -548,13 +565,18 @@ public sealed partial class Tank3DBench
             st.SetColor(ink);
             st.AddVertex(OnGround(cell, p));
         }
-        foreach ((Vector2I cell, int cost) in reach.Cells)
+        var tint = new Color(CourseInk, ZoneTone);
+        // the cells a move ends on, and the one the tank stands on (ZoneTone)
+        _zoneFill.Clear();
+        foreach ((Vector2I c, int _) in reach.Cells)
+            _zoneFill.Add(c);
+        _zoneFill.Add(reach.Start.Cell);
+        foreach (Vector2I cell in _zoneFill)
         {
             Vector2 mid = CellFlat(cell);
-            var tint = new Color(CourseInk, reach.Budget - cost >= 1 ? 0.30f : 0.13f);
             for (int i = 0; i < 6; i++)
             {
-                Vector2 a = corner[i] * 0.95f, b = corner[(i + 1) % 6] * 0.95f;
+                Vector2 a = corner[i], b = corner[(i + 1) % 6];
                 // the fan triangle (mid, a, b) cut into ZoneCuts² pieces
                 for (int u = 0; u < ZoneCuts; u++)
                     for (int v = 0; u + v < ZoneCuts; v++)
