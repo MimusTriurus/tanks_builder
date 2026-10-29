@@ -926,6 +926,15 @@ public sealed class Relief
     /// clamped to the raster's edge.</summary>
     public float HeightAt(Vector2 flat) => Sample(Height, flat.X, flat.Y / Squash);
 
+    /// <summary>The water's surface over a flat-space point, lift px, where
+    /// the drawn water covers the ground there - else NaN (dry, or a shore
+    /// point the bilinear read takes a dry neighbour into).</summary>
+    public float WaterAt(Vector2 flat)
+    {
+        float s = Sample(Surface, flat.X, flat.Y / Squash);
+        return !float.IsNaN(s) && s > HeightAt(flat) ? s : float.NaN;
+    }
+
     /// <summary>How steep the ground is at a flat-space point: rise over run
     /// in world units (<paramref name="rise"/>, the board's, turns lift px
     /// into world Y), from the heights a raster step either side.</summary>

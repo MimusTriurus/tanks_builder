@@ -261,8 +261,19 @@ public sealed partial class Tank3DBench
     /// world, nudged toward the eye like the marks.</summary>
     private Vector3 OnTop(Vector2I cell, Vector2 flat) =>
         _relief is not null ? OnGround(cell, flat)
-        : new Vector3(flat.X, _field!.TopOn(cell, flat) / RiseFactor, flat.Y / Squash)
+        : new Vector3(flat.X, TopOrWater(cell, flat) / RiseFactor, flat.Y / Squash)
           + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
+
+    /// <summary>The cell's top, or over a water cell (a ramp's face aside)
+    /// its water's surface: the zone and the way laid on the top of a pond
+    /// cell hung over the water by the bank's height, and the outline broke
+    /// where the cell met the shore (the author's note, 2026-10-29; the
+    /// relief's zone had it already, <see cref="OnGround"/>).</summary>
+    private float TopOrWater(Vector2I cell, Vector2 flat)
+    {
+        HexField f = _field!;
+        return f.InBounds(cell) && f.IsWater(cell) && !f.IsRamp(cell) ? f.WaterTop(cell) : f.TopOn(cell, flat);
+    }
 
     /// <summary>The hexagon's corners about its middle, board units: the
     /// marks' (<see cref="Band"/>).</summary>
@@ -324,18 +335,181 @@ public sealed partial class Tank3DBench
             var tint = new Color(CourseInk, reach.Budget - cost >= 1 ? 0.30f : 0.13f);
             for (int i = 0; i < 6; i++)
                 Tri(mesh, tint, cell, mid, mid + corner[i] * 0.95f, mid + corner[(i + 1) % 6] * 0.95f);
+        }
+        var line = new Color(CourseInk, 0.95f);
+        ZoneBand(reach, corner, 1);
+        for (int i = 0; i < _band.Count; i++)
+        {
+            mesh.SurfaceSetColor(line);
+            mesh.SurfaceAddVertex(_band[i]);
+        }
+    }
+
+    /// <summary>An edge of the zone's outline: from <see cref="A"/> to
+    /// <see cref="B"/> on the rim of <see cref="Cell"/>, flat-space points,
+    /// <see cref="In"/> toward its middle on the ground.</summary>
+    private struct Edge
+    {
+        public Vector2 A, B, In;
+        public Vector2I Cell;
+        public bool Done;
+    }
+
+    private readonly List<Edge> _edges = new();
+    private readonly Dictionary<Vector2I, int> _edgeFrom = new(), _edgeTo = new();
+    /// <summary>The outline's band, as triangles in the world (<see cref="ZoneBand"/>).</summary>
+    private readonly List<Vector3> _band = new();
+    private readonly List<Vector3> _rim = new();
+    private readonly List<Vector3> _rimIn = new();
+
+    /// <summary>The outline's width, of a hexagon's circumradius.</summary>
+    private const float ZoneLine = 0.08f;
+
+    /// <summary>
+    /// The zone's outline as one band, as wide all round.
+    /// <list type="bullet">
+    /// <item><b>At the joints</b> (2026-10-29, the author's note: it narrowed
+    /// where hexes met). Each cell drew its own edges as trapezoids toward
+    /// its middle, and where the outline went on into the next cell the two
+    /// inner ends met at an angle and the band pinched. Now the rim's edges
+    /// are chained into loops - every cell's corners go round the same way,
+    /// so an edge's end is the next one's start - and walked as one line.</item>
+    /// <item><b>Over the ground's levels</b> (the same day: it changed width
+    /// where the ground rose or fell). Its inner side was offset on the
+    /// ground and laid on it, so a slope toward the eye drew it wide and one
+    /// away thin. Now the outer side is the rim laid on the ground, and the
+    /// inner side is that point moved a width in the camera's own plane,
+    /// square to the line as the eye sees it and mitred at each bend - the
+    /// camera is orthographic, so a width there is the same on the screen
+    /// at any height.</item>
+    /// </list>
+    /// <paramref name="pieces"/> cuts each edge for the relief's ground.
+    /// </summary>
+    private void ZoneBand(Steps.Reach reach, Vector2[] corner, int pieces)
+    {
+        _edges.Clear();
+        _edgeFrom.Clear();
+        _edgeTo.Clear();
+        _band.Clear();
+        foreach ((Vector2I cell, int _) in reach.Cells)
+        {
+            Vector2 mid = CellFlat(cell);
             foreach (int side in HexField.EdgeHeadings)
             {
                 Vector2I next = HexField.Step(cell, side);
                 if (reach.Reaches(next) || next == reach.Start.Cell)
                     continue;
-                int e = EdgeOf(cell, side, corner);
-                Vector2 a = corner[e], b = corner[(e + 1) % 6];
-                Quad(mesh, new Color(CourseInk, 0.95f), cell,
-                     mid + a * 0.99f, mid + b * 0.99f, mid + b * 0.90f, mid + a * 0.90f);
+                int k = EdgeOf(cell, side, corner);
+                Vector2 a = mid + corner[k], b = mid + corner[(k + 1) % 6];
+                _edgeFrom[CornerKey(a)] = _edges.Count;
+                _edgeTo[CornerKey(b)] = _edges.Count;
+                _edges.Add(new Edge { A = a, B = b, In = mid - (a + b) * 0.5f, Cell = cell });
             }
         }
+        Basis eye = _camera.GlobalBasis;
+        float w = ZoneLine * _tile!.HexRect.Size.X * 0.5f;
+        // open chains from their first edge, then the closed loops left
+        for (int pass = 0; pass < 2; pass++)
+            for (int s = 0; s < _edges.Count; s++)
+            {
+                if (_edges[s].Done || (pass == 0 && _edgeTo.ContainsKey(CornerKey(_edges[s].A))))
+                    continue;
+                Chain(s, pieces, eye, w);
+            }
     }
+
+    /// <summary>One run of the outline from edge <paramref name="start"/>: its
+    /// rim on the ground, its inner side a width off it in the camera's plane.
+    /// Where two edges meet at two heights - a prism's step between levels -
+    /// the run is cut there, rather than drawn up the step and mitred on it
+    /// into a hook.</summary>
+    private void Chain(int start, int pieces, Basis eye, float w)
+    {
+        _rim.Clear();
+        int i = start;
+        bool cut = false;
+        Vector3 inward = Vector3.Zero;
+        Vector3 end = Vector3.Zero;
+        while (true)
+        {
+            Edge e = _edges[i];
+            e.Done = true;
+            _edges[i] = e;
+            Vector3 from = OnTop(e.Cell, e.A);
+            if (_rim.Count > 0 && Mathf.Abs(from.Y - end.Y) > 1e-3f)
+            {
+                _rim.Add(end);
+                Run(false, inward, eye, w);
+                _rim.Clear();
+                inward = Vector3.Zero;
+                cut = true;
+            }
+            inward += new Vector3(e.In.X, 0.0f, e.In.Y / Squash);
+            _rim.Add(from);
+            for (int k = 1; k < pieces; k++)
+                _rim.Add(OnTop(e.Cell, e.A.Lerp(e.B, (float)k / pieces)));
+            end = OnTop(e.Cell, e.B);
+            if (!_edgeFrom.TryGetValue(CornerKey(e.B), out int n) || _edges[n].Done)
+            {
+                bool closed = !cut && n == start && Mathf.Abs(end.Y - _rim[0].Y) <= 1e-3f;
+                if (!closed)
+                    _rim.Add(end);
+                Run(closed, inward, eye, w);
+                return;
+            }
+            i = n;
+        }
+    }
+
+    /// <summary>A run of the rim in <see cref="_rim"/> made into band triangles.</summary>
+    private void Run(bool closed, Vector3 inward, Basis eye, float w)
+    {
+        _rimIn.Clear();
+        int count = _rim.Count;
+        if (count < 2)
+            return;
+        // the line on the camera's plane, and which of its sides is inside
+        Vector2 Plane(Vector3 p) => new(p.Dot(eye.X), p.Dot(eye.Y));
+        Vector2 Square(int a, int b)
+        {
+            Vector2 d = Plane(_rim[b]) - Plane(_rim[a]);
+            return d.LengthSquared() < 1e-8f ? Vector2.Zero : d.Normalized().Orthogonal();
+        }
+        float sign = Square(0, 1).Dot(Plane(inward)) >= 0.0f ? 1.0f : -1.0f;
+        for (int k = 0; k < count; k++)
+        {
+            int prev = k > 0 ? k - 1 : closed ? count - 1 : -1;
+            int next = k + 1 < count ? k + 1 : closed ? 0 : -1;
+            Vector2 n0 = prev >= 0 ? Square(prev, k) : Vector2.Zero;
+            Vector2 n1 = next >= 0 ? Square(k, next) : Vector2.Zero;
+            Vector2 m = Mitre(n0 == Vector2.Zero ? n1 : n0, n1 == Vector2.Zero ? n0 : n1) * (w * sign);
+            _rimIn.Add(_rim[k] + eye.X * m.X + eye.Y * m.Y);
+        }
+        int last = closed ? count : count - 1;
+        for (int k = 0; k < last; k++)
+        {
+            int j = (k + 1) % count;
+            _band.Add(_rim[k]); _band.Add(_rim[j]); _band.Add(_rimIn[j]);
+            _band.Add(_rim[k]); _band.Add(_rimIn[j]); _band.Add(_rimIn[k]);
+        }
+    }
+
+
+    /// <summary>The way and length, per unit of width, to offset a joint of
+    /// two segments with normals <paramref name="n"/> and <paramref name="m"/>.</summary>
+    private static Vector2 Mitre(Vector2 n, Vector2 m)
+    {
+        Vector2 half = n + m;
+        if (half.LengthSquared() < 1e-6f)
+            return n;
+        half = half.Normalized();
+        // a sharp turn would send the mitre far off: held to twice the width
+        return half / Mathf.Max(0.5f, half.Dot(n));
+    }
+
+    /// <summary>A corner's key: the same point reached from two cells.</summary>
+    private static Vector2I CornerKey(Vector2 p) => new(Mathf.RoundToInt(p.X * 4.0f), Mathf.RoundToInt(p.Y * 4.0f));
+
 
     private MeshInstance3D? _zone;
     private int _zoneBuilt = -1;
@@ -393,33 +567,30 @@ public sealed partial class Tank3DBench
                         }
                     }
             }
-            var line = new Color(CourseInk, 0.95f);
-            foreach (int side in HexField.EdgeHeadings)
-            {
-                Vector2I next = HexField.Step(cell, side);
-                if (reach.Reaches(next) || next == reach.Start.Cell)
-                    continue;
-                int e = EdgeOf(cell, side, corner);
-                Vector2 a = corner[e], b = corner[(e + 1) % 6];
-                for (int k = 0; k < ZoneCuts; k++)
-                {
-                    Vector2 a0 = a.Lerp(b, (float)k / ZoneCuts), a1 = a.Lerp(b, (float)(k + 1) / ZoneCuts);
-                    Vector2 o0 = mid + a0 * 0.99f, o1 = mid + a1 * 0.99f, i0 = mid + a0 * 0.90f, i1 = mid + a1 * 0.90f;
-                    Put(line, cell, o0); Put(line, cell, o1); Put(line, cell, i1);
-                    Put(line, cell, o0); Put(line, cell, i1); Put(line, cell, i0);
-                }
-            }
+        }
+        var line = new Color(CourseInk, 0.95f);
+        ZoneBand(reach, corner, ZoneCuts);
+        foreach (Vector3 p in _band)
+        {
+            st.SetColor(line);
+            st.AddVertex(p);
         }
         _zone.Mesh = st.Commit();
     }
 
     /// <summary><see cref="OnTop"/> on the relief: the drawn ground, or the
-    /// water's surface where a water cell's is over it.</summary>
+    /// water's surface where water is drawn over it - a water cell's own, and
+    /// also the water the relief lays over a dry cell's ground: a dry pit
+    /// under the sea's level is drawn flooded, its bowl tens of px under the
+    /// surface, and the outline laid on the bowl bent out of shape under the
+    /// water (the author's note, 2026-10-29; drill10's (3, 0)).</summary>
     private Vector3 OnGround(Vector2I cell, Vector2 flat)
     {
         float top = _field!.TopAtPoint(flat);
         if (_field.IsWater(cell))
             top = Mathf.Max(top, _field.WaterTop(cell));
+        if (_relief?.WaterAt(flat) is float wet && !float.IsNaN(wet))
+            top = Mathf.Max(top, wet);
         return new Vector3(flat.X, top / RiseFactor, flat.Y / Squash)
                + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
     }
