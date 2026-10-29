@@ -166,7 +166,11 @@ public sealed partial class Tank3DBench
                 Vector3 end = standing.Rig.Position + Vector3.Up * (0.45f * standing.Model.Size.Y * standing.Model.PixelsPerUnit);
                 MeshInstance3D? part = null;
                 Vector3 n = -dir;
-                if (HitsOf(standing).Cast(start, dir) is { } hit)
+                // Along the axis at the plate's height; a lower hull than the
+                // one it glanced off has that line pass over its roof, so
+                // then at its middle - else the round met nothing and the hit
+                // was lost, the hull unmarked and its fate untouched.
+                if ((HitsOf(standing).Cast(start, dir) ?? HitsOf(standing).Cast(start, end - start)) is { } hit)
                 {
                     end = hit.At;
                     part = hit.Part;
@@ -257,22 +261,88 @@ public sealed partial class Tank3DBench
     /// knocked out: a standing tank has no fate on the bench.</summary>
     private void StrikeParked(Leg leg, Vector3 way)
     {
-        if (leg.Hull is not { } p || !IsInstanceValid(p.Model) || leg.Part is not { } part || !IsInstanceValid(part))
+        if (leg.Hull is not { } p || !IsInstanceValid(p.Model))
             return;
         CelHit hits = HitsOf(p);
+        // no part, when neither ray found the hull: the mark goes, the hit does not
+        MeshInstance3D? part = leg.Part is { } found && IsInstanceValid(found) ? found : null;
         if (leg.Pierces)
         {
-            hits.Leave(part, leg.End, leg.N, way, CelHit.Kind.Hole);
-            hits.Pierce(part, leg.End, leg.N);
+            if (part is not null)
+            {
+                hits.Leave(part, leg.End, leg.N, way, CelHit.Kind.Hole);
+                hits.Pierce(part, leg.End, leg.N);
+            }
         }
         else
         {
-            hits.Leave(part, leg.End, leg.N, way, CelHit.Kind.Gouge, 0.8f);
+            if (part is not null)
+                hits.Leave(part, leg.End, leg.N, way, CelHit.Kind.Gouge, 0.8f);
             hits.Ricochet(leg.End, leg.N, way - 2.0f * way.Dot(leg.N) * leg.N);
         }
+        // the hull thrown on its springs as the target's is (Tank3DBench.Shell, Strike)
+        JoltParked(p, way, leg.Pierces ? 3.2f : 2.8f);
         Log.Print($"tank3d: {(leg.Through ? "pass" : "ricochet")} on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
                  + (leg.Pierces ? "pierced" : "held, spent"));
         // a match's unit has a fate (Tank3DBench.Match)
         UnitStruck(p, leg.Pierces);
+    }
+
+    /// <summary>A standing hull's rock: the springs the target has
+    /// (<see cref="Other.Pitch"/>, <see cref="Other.Roll"/>), lent while it
+    /// settles. A standing hull leaves its model's pitch and roll at nought,
+    /// so they are free for it.</summary>
+    private sealed class Jolt
+    {
+        public required TankModel Model;
+        public readonly Spring Pitch = new(RockSpring.K, RockSpring.C);
+        public readonly Spring Roll = new(RockSpring.K, RockSpring.C);
+    }
+
+    private readonly List<Jolt> _jolts = new();
+
+    /// <summary>A round on a standing hull, travelling <paramref name="way"/>:
+    /// the struck end and side thrown down by <paramref name="k"/>, as
+    /// <c>Strike</c> throws the target's. Before this a ricochet's second
+    /// tank took the round without a stir.</summary>
+    private void JoltParked(Parked p, Vector3 way, float k)
+    {
+        Jolt? j = null;
+        for (int i = 0; i < _jolts.Count; i++)
+            if (ReferenceEquals(_jolts[i].Model, p.Model))
+                j = _jolts[i];
+        if (j is null)
+        {
+            j = new Jolt { Model = p.Model };
+            _jolts.Add(j);
+        }
+        Vector3 ahead = AheadOf(p.Heading), left = new(ahead.Z, 0.0f, -ahead.X);
+        j.Pitch.Kick(k * ahead.Dot(way));
+        j.Roll.Kick(-k * left.Dot(way));
+    }
+
+    /// <summary>Every frame: the jolted hulls rock and settle; settled, or made
+    /// the target (whose own springs then hold the model), they are let go.</summary>
+    private void JoltTick(float dt)
+    {
+        for (int i = _jolts.Count - 1; i >= 0; i--)
+        {
+            Jolt j = _jolts[i];
+            if (!IsInstanceValid(j.Model) || (_other is { } o && ReferenceEquals(o.Model, j.Model)))
+            {
+                _jolts.RemoveAt(i);
+                continue;
+            }
+            j.Model.Pitch = j.Pitch.Step(dt);
+            j.Model.Roll = j.Roll.Step(dt);            bool still = Mathf.Abs(j.Pitch.X) + Mathf.Abs(j.Roll.X) < 1e-4f
+                         && Mathf.Abs(j.Pitch.V) + Mathf.Abs(j.Roll.V) < 1e-3f;
+            if (still)
+            {
+                j.Model.Pitch = 0.0f;
+                j.Model.Roll = 0.0f;
+                _jolts.RemoveAt(i);
+            }
+            j.Model.Apply();
+        }
     }
 }

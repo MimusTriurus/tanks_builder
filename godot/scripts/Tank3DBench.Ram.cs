@@ -1166,6 +1166,7 @@ public sealed partial class Tank3DBench
     {
         OtherTick(dt);
         FloatTick(dt);
+        JoltTick(dt);
         _other?.Hits.Tick(dt, eye);
         foreach (CelHit? fan in _fans)
             fan?.Tick(dt, eye);
