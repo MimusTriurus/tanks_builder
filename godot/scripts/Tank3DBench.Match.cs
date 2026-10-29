@@ -410,6 +410,7 @@ public sealed partial class Tank3DBench
                 hits.Tick(dt, _camera.GlobalBasis);
         using (Prof.Measure("match.pyre"))
             PyreTick(dt);
+        CharTick();
         using (Prof.Measure("match.blast"))
             BlastTick(dt);
         RamWaitTick();
@@ -693,20 +694,71 @@ public sealed partial class Tank3DBench
         }
     }
 
-    /// <summary>The char of the cel shader's scorch, laid once and left: round
-    /// <paramref name="at"/>, <paramref name="reach"/> world px.</summary>
-    private static void Char(TankModel model, Vector3 at, float reach, float cover = PyreCover)
+    /// <summary>The char of the cel shader's scorch: round
+    /// <paramref name="at"/>, <paramref name="reach"/> world px - and kept
+    /// on the hull after (<see cref="CharTick"/>).</summary>
+    private void Char(TankModel model, Vector3 at, float reach, float cover = PyreCover)
     {
-        var spots = new[] { at, at, at, at };
+        Charred? c = null;
+        foreach (Charred e in _charred)
+            if (e.Model == model)
+                c = e;
+        if (c is null)
+            _charred.Add(c = new Charred { Model = model });
+        c.At = at;
+        c.Spots[0] = c.Spots[1] = c.Spots[2] = c.Spots[3] = at;
         foreach (ShaderMaterial m in model.Cel)
         {
-            m.Param("scorch_at", spots);
+            m.Param("scorch_at", c.Spots);
             m.Param("scorch_n", 1);
             m.Param("scorch_r", reach);
             m.Param("scorch", 1.0f);
             m.Param("ember", 0.0f);
             m.Param("char_cover", cover);
         }
+    }
+
+    /// <summary>A charred hull and where its char was laid. The shader's
+    /// scorch is a point in the world, so a knocked-out unit shoved by a ram
+    /// (GDD states.md: «Подбитый и утопленный танк можно таранить») left its
+    /// char standing on the old hex, a black block the hull drove out of
+    /// (2026-10-29).</summary>
+    private sealed class Charred
+    {
+        public TankModel Model = null!;
+        public Vector3 At;
+        public readonly Vector3[] Spots = new Vector3[4];
+    }
+
+    private readonly List<Charred> _charred = new();
+
+    /// <summary>Each charred hull's char moved with it, when it moved.</summary>
+    private void CharTick()
+    {
+        for (int i = _charred.Count - 1; i >= 0; i--)
+        {
+            Charred c = _charred[i];
+            if (!IsInstanceValid(c.Model))
+            {
+                _charred.RemoveAt(i);
+                continue;
+            }
+            Vector3 now = c.Model.Tank.ToGlobal(c.Model.BlastAt);
+            if (now.DistanceSquaredTo(c.At) < 0.25f)
+                continue;
+            c.At = now;
+            c.Spots[0] = c.Spots[1] = c.Spots[2] = c.Spots[3] = now;
+            foreach (ShaderMaterial m in c.Model.Cel)
+                m.Param("scorch_at", c.Spots);
+        }
+    }
+
+    /// <summary>A model wiped as it changes hands carries no char.</summary>
+    private void Uncharred(TankModel model)
+    {
+        for (int i = _charred.Count - 1; i >= 0; i--)
+            if (_charred[i].Model == model)
+                _charred.RemoveAt(i);
     }
 
     // --- on the screen -----------------------------------------------------------

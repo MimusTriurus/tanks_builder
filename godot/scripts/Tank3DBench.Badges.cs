@@ -339,7 +339,7 @@ public sealed partial class Tank3DBench
         p.Y = _field.WaterTop(onto) / RiseFactor;
         Vector2 at = _camera.UnprojectPosition(p + Vector3.Up * (o.Model.Size.Y * o.Model.PixelsPerUnit * 1.15f));
         float r = Mathf.Max(8.0f, HexScreen() * 0.11f) * Mathf.Lerp(0.75f, 1.0f, up);
-        Sign(ink, _amphibious ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up);
+        Sign(ink, RamFloats ? Badge.Afloat : Badge.Drowned, at, r, 0.0f, up);
     }
 
     /// <summary>Over the move's ghost, what the way does to it there

@@ -312,6 +312,7 @@ public sealed partial class Tank3DBench : Node3D
         // under the panel, which is drawn after it
         BuildCourse(layer);
         BuildAim(layer);
+        BuildCard(layer);
         if (!_noUi)
         {
             BuildPanel(layer);
@@ -461,6 +462,7 @@ public sealed partial class Tank3DBench : Node3D
         if (keep)
         {
             was.Wipe();
+            Uncharred(was);
             return was;
         }
         was.QueueFree();
@@ -1907,6 +1909,7 @@ public sealed partial class Tank3DBench : Node3D
             CourseTick();
         using (Prof.Measure("aim"))
             AimTick();
+        CardTick();
         using (Prof.Measure("ram"))
             RamFrame(dt, _camera.GlobalBasis);
         using (Prof.Measure("shells"))

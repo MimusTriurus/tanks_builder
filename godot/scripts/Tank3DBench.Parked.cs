@@ -285,6 +285,7 @@ public sealed partial class Tank3DBench
     {
         if (_parkedHits.Remove(model, out CelHit? hits))
             hits.QueueFree();
+        Uncharred(model);
         for (int i = _pyres.Count - 1; i >= 0; i--)
             if (_pyres[i].Model == model)
             {

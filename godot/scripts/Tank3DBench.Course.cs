@@ -234,6 +234,8 @@ public sealed partial class Tank3DBench
 
         Steps.Route? shown = _ways.Count > 0 ? _ways[_wayIx % _ways.Count] : null;
         GhostTick(shown);
+        // the unit's card lights the steps it spends (Tank3DBench.Card)
+        _wayCost = shown is null ? 0 : shown.Spent + (_reach!.TurnTo(shown, GhostFace(shown)) ?? 0);
         if (shown is not null)
         {
             string tab = _ways.Count > 1 ? $", Tab — другой ({_wayIx % _ways.Count + 1}/{_ways.Count})" : "";

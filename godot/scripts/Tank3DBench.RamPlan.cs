@@ -108,7 +108,7 @@ public sealed partial class Tank3DBench
         ShowRam(plan);
         _judgedNote = plan.Allowed
             ? $"таран {MapAt(plan.Target)} → {MapAt(plan.Push.Legs[^1])}"
-              + (RamIntoDeep(plan) ? _amphibious ? " — поплывёт (ОПВТ)" : " — утонет (нет ОПВТ)" : "")
+              + (RamIntoDeep(plan) ? RamFloats ? " — поплывёт (ОПВТ)" : _amphibious ? " — утонет (подбит)" : " — утонет (нет ОПВТ)" : "")
               + (_ramWaiting is not null ? "" : plan.From != CellHere ? $" с {MapAt(plan.From)}: {plan.Steps} из {_reach?.Budget}" : plan.Steps > 0 ? $": разворот {plan.Steps}" : "")
               + (_ramWaiting is null ? "; ПКМ — таранить" : "")
             : $"таран нельзя: {plan.Why}";
@@ -385,6 +385,12 @@ public sealed partial class Tank3DBench
         plan.Allowed && _field is not null && plan.Push.Legs.Count > 0 && _field.InBounds(plan.Push.Legs[^1])
         && _field.IsDeep(plan.Push.Legs[^1]) && _field.RampHeading(plan.Push.Legs[^1]) < 0;
 
+    /// <summary>The target thrown into deep water swims: the gear on, and
+    /// the target alive - a knocked-out hull in deep water is drowned, gear
+    /// or none (GDD states.md «Утоплен»), and the shove did that already
+    /// (<c>OtherTick</c>); the forecast said «поплывёт» over it (2026-10-29).</summary>
+    private bool RamFloats => _amphibious && _other is { Fate: Fate.Alive };
+
     /// <summary>The water the drowned ghost dims into - light enough to read
     /// on the dark pond.</summary>
     private static readonly Color RamDrowned = new(0.50f, 0.72f, 0.92f);
@@ -411,7 +417,7 @@ public sealed partial class Tank3DBench
         float y = Mathf.Lerp(bank, line, fall * fall);
         // after the shove: the loop's beat where it ends
         float s = Mathf.Clamp((t - 0.55f) / 0.35f, 0.0f, 1.0f);
-        if (_amphibious)
+        if (RamFloats)
             return y + 0.08f * halfLen * Mathf.Sin(3.0f * Mathf.Pi * s) * (1.0f - s);
         float down = Mathf.SmoothStep(0.0f, 1.0f, s);
         tint = tint.Lerp(RamDrowned, down);
