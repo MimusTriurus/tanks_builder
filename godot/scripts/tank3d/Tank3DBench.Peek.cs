@@ -129,18 +129,40 @@ public sealed partial class Tank3DBench
         // the leader's foot: on the hull, a little over its middle
         Vector2 foot = _camera.UnprojectPosition(rig.GlobalPosition
                                                  + Vector3.Up * (model.Size.Y * model.PixelsPerUnit * 0.6f));
-        // right and up by default; to the other side where the card would
-        // leave the screen
-        float sx = foot.X + PeekLeg + PeekReach + PeekW + 8.0f > screen.X ? -1.0f : 1.0f;
-        float sy = foot.Y - PeekLeg - PeekH * 0.5f - 8.0f < 0.0f ? 1.0f : -1.0f;
-        var knee = foot + new Vector2(sx * PeekLeg, sy * PeekLeg);
-        // the leader comes in at the title's height on the near edge
-        float left = sx > 0.0f ? knee.X + PeekReach : knee.X - PeekReach - PeekW;
-        float top = Mathf.Clamp(knee.Y - 26.0f, 8.0f, Mathf.Max(8.0f, screen.Y - PeekH - 8.0f));
-        left = Mathf.Clamp(left, 8.0f, Mathf.Max(8.0f, screen.X - PeekW - 8.0f));
-        var box = new Rect2(left, top, PeekW, PeekH);
-        float into = Mathf.Clamp(knee.Y, top + 10.0f, top + PeekH - 10.0f);
-        var edge = new Vector2(sx > 0.0f ? left : left + PeekW, into);
+        // Clear of our unit's picture (the author's note, 2026-10-30): the
+        // four corners round the hull are tried, and the card goes where it
+        // covers least of ours - our tank, its ghost, the lane between them
+        // and the line of fire to this hull (PeekCovers). First tried is the
+        // corner away from us, past the hull; with nothing of ours, right and up.
+        float sx0 = 1.0f, sy0 = -1.0f;
+        bool clear = OursOnScreen(model, out Vector2 own, out Vector2 end);
+        if (clear)
+        {
+            sx0 = foot.X >= end.X ? 1.0f : -1.0f;
+            sy0 = foot.Y >= end.Y ? 1.0f : -1.0f;
+        }
+        Rect2 box = default;
+        Vector2 knee = default;
+        float sx = sx0;
+        int best = int.MaxValue;
+        for (int i = 0; i < 4; i++)
+        {
+            float tx = (i & 1) == 0 ? sx0 : -sx0, ty = (i & 2) == 0 ? sy0 : -sy0;
+            Vector2 k = foot + new Vector2(tx * PeekLeg, ty * PeekLeg);
+            Rect2 b = PeekPlace(k, tx, ty, screen, out int pushed);
+            int covers = pushed + (clear ? PeekCovers(b.Grow(10.0f), own, end, foot) : 0);
+            if (covers < best)
+            {
+                best = covers;
+                box = b;
+                knee = k;
+                sx = tx;
+            }
+            if (covers == 0)
+                break;
+        }
+        float into = Mathf.Clamp(knee.Y, box.Position.Y + 10.0f, box.End.Y - 10.0f);
+        var edge = new Vector2(sx > 0.0f ? box.Position.X : box.End.X, into);
 
         PeekLeader(c, foot, knee, edge);
 
@@ -151,6 +173,53 @@ public sealed partial class Tank3DBench
             (_peekTitle, _peekName) = PanelNames(_peekProfile, _peekTag);
         }
         UnitPanel(c, font, box, _peekProfile, _peekTitle, _peekName, _peekSide, Badge.None, turn: false);
+    }
+
+    /// <summary>The card off the knee on the side <paramref name="sx"/>,
+    /// <paramref name="sy"/>: the leader comes in near the title going down,
+    /// near the foot going up. Held on the screen; <paramref name="pushed"/>
+    /// counts against it when the hold moved it far, as it then covers the hull.</summary>
+    private static Rect2 PeekPlace(Vector2 knee, float sx, float sy, Vector2 screen, out int pushed)
+    {
+        float left = sx > 0.0f ? knee.X + PeekReach : knee.X - PeekReach - PeekW;
+        float top = sy > 0.0f ? knee.Y - 26.0f : knee.Y - PeekH + 26.0f;
+        float l = Mathf.Clamp(left, 8.0f, Mathf.Max(8.0f, screen.X - PeekW - 8.0f));
+        float t = Mathf.Clamp(top, 8.0f, Mathf.Max(8.0f, screen.Y - PeekH - 8.0f));
+        pushed = (Mathf.Abs(l - left) > PeekReach ? 50 : 0) + (Mathf.Abs(t - top) > PeekH * 0.5f ? 50 : 0);
+        return new Rect2(l, t, PeekW, PeekH);
+    }
+
+    /// <summary>How much of our unit's picture <paramref name="box"/> covers,
+    /// in samples: our tank and its ghost (worth most), and points along the
+    /// lane between them and the line of fire from the ghost to the hull.</summary>
+    private static int PeekCovers(Rect2 box, Vector2 own, Vector2 end, Vector2 target)
+    {
+        int n = (box.HasPoint(own) ? 10 : 0) + (box.HasPoint(end) ? 10 : 0);
+        const int steps = 12;
+        for (int i = 1; i < steps; i++)
+        {
+            float t = (float)i / steps;
+            if (box.HasPoint(own.Lerp(end, t)))
+                n++;
+            if (box.HasPoint(end.Lerp(target, t)))
+                n++;
+        }
+        return n;
+    }
+
+    /// <summary>Where on the screen our unit's picture is, for the card to
+    /// keep clear of: our chosen tank, and where its move would end - the
+    /// ghost while it stands, else the tank again. False when there is no
+    /// chosen tank or the card is its own.</summary>
+    private bool OursOnScreen(TankModel shown, out Vector2 own, out Vector2 end)
+    {
+        own = end = default;
+        if (!_chosen || ReferenceEquals(shown, _model))
+            return false;
+        own = _camera.UnprojectPosition(_rig.GlobalPosition);
+        end = _ghostRig is { } ghost && ghost.IsVisibleInTree()
+            ? _camera.UnprojectPosition(ghost.GlobalPosition) : own;
+        return true;
     }
 
     /// <summary>The class's short name and the model's, off the lineup -
