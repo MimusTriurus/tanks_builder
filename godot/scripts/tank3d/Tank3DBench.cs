@@ -549,14 +549,30 @@ public sealed partial class Tank3DBench : Node3D
         _zoom = Mathf.Clamp(_zoom * k, least, ZoomMost);
         _zoomFit = false;
         _glideTo = null;
-        // about the cursor only at the game's angle: the plane's sums are its (Orbit)
-        if (cursor is not Vector2 c || Orbited)
+        if (cursor is not Vector2 c)
             return;
         Vector2 window = GetViewport().GetVisibleRect().Size;
         Vector2 off = c - 0.5f * window;
         Vector2 at = _viewAt ?? _viewNow;
         // the plane point under the cursor, kept: at + off·(H/was)/H = at' + off·(H/zoom)/H
-        _viewAt = at + off * (1.0f / was - 1.0f / _zoom);
+        _viewAt = at + PlaneOf(off) * (1.0f / was - 1.0f / _zoom);
+    }
+
+    /// <summary>
+    /// Screen pixels as the view's plane units (<see cref="_viewAt"/>: x the
+    /// ground's X, y its Z drawn at the game's angle) at one plane unit a
+    /// pixel: the screen itself at the game's angle; turned (<see cref="Orbit"/>),
+    /// the screen's right and down laid on the ground first.
+    /// </summary>
+    private Vector2 PlaneOf(Vector2 screen)
+    {
+        if (!Orbited)
+            return screen;
+        float pitch = Mathf.Asin(Squash) + _orbitPitch;
+        var right = new Vector3(Mathf.Cos(_orbitYaw), 0.0f, -Mathf.Sin(_orbitYaw));
+        var down = new Vector3(Mathf.Sin(_orbitYaw), 0.0f, Mathf.Cos(_orbitYaw)) / Mathf.Sin(pitch);
+        Vector3 m = right * screen.X + down * screen.Y;
+        return new Vector2(m.X, m.Z * Squash);
     }
 
     /// <summary>
@@ -585,6 +601,20 @@ public sealed partial class Tank3DBench : Node3D
     private bool Orbited => _orbitYaw != 0.0f || _orbitPitch != 0.0f;
 
     /// <summary>
+    /// The view the bench opens at and Home returns to (the author's choice,
+    /// 2026-10-30): isometric - turned 45° off the board's axis, 35.26° above
+    /// the ground, the angle at which the three axes of a cube are drawn
+    /// alike. <c>--game-angle</c> opens at the old one instead, the sprites'
+    /// (yaw 0, the pitch the hex's art is drawn at): a capture to set beside
+    /// one from before.
+    /// </summary>
+    private const float IsoYawDeg = -45.0f, IsoPitchDeg = 35.264f;
+    private bool _gameAngle;
+    /// <summary>The default to be put on at the next frame: its pitch is an
+    /// offset from the game's, which needs the board (<see cref="Squash"/>).</summary>
+    private bool _angleDefault = true;
+
+    /// <summary>
     /// The middle button held and dragged (the author's choice, 2026-10-30):
     /// across - the view turns about the up axis; along - it tilts. The
     /// board is real 3D under the game's view (only the angle makes it look
@@ -609,6 +639,12 @@ public sealed partial class Tank3DBench : Node3D
     private void Orbit(Vector3 pivot, Vector3 axis, float dist)
     {
         float game = Mathf.Asin(Squash);
+        if (_angleDefault)
+        {
+            _angleDefault = false;
+            _orbitYaw = _gameAngle ? 0.0f : Mathf.DegToRad(IsoYawDeg);
+            _orbitPitch = _gameAngle ? 0.0f : Mathf.DegToRad(IsoPitchDeg) - game;
+        }
         if (!Orbited)
         {
             _camera.Rotation = new Vector3(-game, 0.0f, 0.0f);
@@ -657,28 +693,15 @@ public sealed partial class Tank3DBench : Node3D
     {
         float h = Mathf.Max(GetViewport().GetVisibleRect().Size.Y, 1.0f);
         _glideTo = null;
-        float k = _camera.Size / h;
-        if (Orbited)
-        {
-            // turned: the screen's right and down laid on the ground, then into
-            // the plane's units (x the ground's X, y its Z drawn at the game's angle)
-            float pitch = Mathf.Asin(Squash) + _orbitPitch;
-            var right = new Vector3(Mathf.Cos(_orbitYaw), 0.0f, -Mathf.Sin(_orbitYaw));
-            var down = new Vector3(Mathf.Sin(_orbitYaw), 0.0f, Mathf.Cos(_orbitYaw)) / Mathf.Sin(pitch);
-            Vector3 move = -(right * screen.X + down * screen.Y) * k;
-            _viewAt = (_viewAt ?? _viewNow) + new Vector2(move.X, move.Z * Squash);
-            return;
-        }
-        _viewAt = (_viewAt ?? _viewNow) - screen * k;
+        _viewAt = (_viewAt ?? _viewNow) - PlaneOf(screen) * (_camera.Size / h);
     }
 
-    /// <summary>Back to following the tank.</summary>
+    /// <summary>Back to following the tank, at the default angle.</summary>
     private void FollowTank()
     {
         _glideTo = null;
         _viewAt = null;
-        // and the game's angle again (Orbit)
-        _orbitYaw = _orbitPitch = 0.0f;
+        _angleDefault = true;
         Log.Print("tank3d: camera follows the tank");
     }
 
@@ -765,7 +788,29 @@ public sealed partial class Tank3DBench : Node3D
         if (BoardBox() is not { } box || box.Size.X <= 0.0f || box.Size.Y <= 0.0f)
             return 2.5f;
         Vector2 view = GetViewport().GetVisibleRect().Size;
-        return Mathf.Min(view.X / box.Size.X, view.Y / box.Size.Y) / FitMargin;
+        Vector2 size = box.Size;
+        if (Orbited)
+        {
+            // turned (Orbit): the box's corners on the ground, as the turned
+            // camera draws them - across along its right, up the screen by how
+            // far toward the eye, foreshortened by its pitch
+            float pitch = Mathf.Asin(Squash) + _orbitPitch;
+            var right = new Vector2(Mathf.Cos(_orbitYaw), -Mathf.Sin(_orbitYaw));
+            var toward = new Vector2(Mathf.Sin(_orbitYaw), Mathf.Cos(_orbitYaw));
+            float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+            for (int i = 0; i < 4; i++)
+            {
+                var corner = new Vector2((i & 1) != 0 ? box.End.X : box.Position.X,
+                                         ((i & 2) != 0 ? box.End.Y : box.Position.Y) / Squash);
+                float x = corner.Dot(right), y = corner.Dot(toward) * Mathf.Sin(pitch);
+                x0 = Mathf.Min(x0, x);
+                x1 = Mathf.Max(x1, x);
+                y0 = Mathf.Min(y0, y);
+                y1 = Mathf.Max(y1, y);
+            }
+            size = new Vector2(x1 - x0, y1 - y0);
+        }
+        return Mathf.Min(view.X / size.X, view.Y / size.Y) / FitMargin;
     }
 
     /// <summary>Size the camera to the zoom and keep the tank a little below
@@ -1330,6 +1375,8 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--map" && more) { _mapName = args[++i]; _mapNamed = true; }
             // the bench as a game, two sides of five (Tank3DBench.Match; Match3D.tscn sets it)
             else if (a == "--match") Match = true;
+            // the old view, the sprites' angle, rather than the isometric one (Orbit)
+            else if (a == "--game-angle") _gameAngle = true;
             // the pointer held on a cell, for a capture of the way to it (Tank3DBench.Course)
             else if (a == "--hover" && more)
             {
