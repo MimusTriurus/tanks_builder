@@ -7,23 +7,28 @@ namespace TankSpriteTest;
 /// The mouse pointer says what a click will do (docs/hud3d-plan.md,
 /// «Курсоры», 2026-10-30):
 /// <list type="bullet">
-/// <item><b>The ram's burst</b> the whole time the ram is on (Tab, <b>1</b>,
-/// the «Таран» button) - wherever the pointer is, since the mode is what
-/// the left button now means.</item>
+/// <item><b>The ram's burst</b> the whole time the ram is on (Tab, the
+/// «Таран» button) - wherever the pointer is, since the mode is what the
+/// left button now means.</item>
 /// <item><b>The reticle</b> on a target under the pointer (<c>_overTarget</c>,
-/// <c>UnderTick</c>) - the right button there is the shot.</item>
+/// <c>UnderTick</c>) - the right button there is the shot. In a match its
+/// colour says whether there is one (the author's note, 2026-10-30): red on
+/// an enemy the chosen tank can shoot, from here or after its move, orange
+/// on one of ours it can - friendly fire - and grey on any it cannot: out of
+/// reach (<c>_inReach</c>, the same reading as the red or grey outline), the
+/// attack spent, or no tank chosen. Outside a match, red.</item>
 /// <item>The system's arrow everywhere else.</item>
 /// </list>
-/// The pictures are <c>assets/Images/Cursors/{attack,ram}_{32,64}.png</c>,
+/// The pictures are <c>assets/Images/Cursors/{attack,attack_ally,attack_off,ram}_{32,64}.png</c>,
 /// read off disk like the rest of the art (<see cref="AssetRoot.Cursors"/>);
-/// the 64 px ones on a screen past 120 dpi. Hotspot in the centre of both.
+/// the 64 px ones on a screen past 120 dpi. Hotspot in the centre of all.
 /// A missing file leaves the arrow, and says so once.
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum Pointer { Arrow, Attack, Ram }
+    private enum Pointer { Arrow, Attack, AttackAlly, AttackOff, Ram }
 
-    private Texture2D? _cursorAttack, _cursorRam;
+    private Texture2D? _cursorAttack, _cursorAttackAlly, _cursorAttackOff, _cursorRam;
     private Vector2 _cursorSpot;
     private Pointer _pointer = Pointer.Arrow;
 
@@ -32,6 +37,8 @@ public sealed partial class Tank3DBench
         int px = DisplayServer.ScreenGetDpi() > 120 ? 64 : 32;
         _cursorSpot = new Vector2(px / 2, px / 2);
         _cursorAttack = CursorArt("attack", px);
+        _cursorAttackAlly = CursorArt("attack_ally", px);
+        _cursorAttackOff = CursorArt("attack_off", px);
         _cursorRam = CursorArt("ram", px);
         Log.Print($"tank3d: cursors {px} px");
     }
@@ -51,7 +58,7 @@ public sealed partial class Tank3DBench
     private void CursorTick()
     {
         Pointer want = _ramMode ? Pointer.Ram
-            : _overTarget && _fate == Fate.Alive && !RamRunning ? Pointer.Attack
+            : _overTarget && _fate == Fate.Alive && !RamRunning ? Reticle()
             : Pointer.Arrow;
         if (want == _pointer)
             return;
@@ -59,10 +66,23 @@ public sealed partial class Tank3DBench
         Texture2D? art = want switch
         {
             Pointer.Attack => _cursorAttack,
+            Pointer.AttackAlly => _cursorAttackAlly,
+            Pointer.AttackOff => _cursorAttackOff,
             Pointer.Ram => _cursorRam,
             _ => null,
         };
         Input.SetCustomMouseCursor(art, Input.CursorShape.Arrow, art is null ? Vector2.Zero : _cursorSpot);
+    }
+
+    /// <summary>The reticle's colour on the target under the pointer: red, an
+    /// enemy to be shot; orange, one of ours to be shot; grey, no shot.</summary>
+    private Pointer Reticle()
+    {
+        if (!Match || _other is not { } o)
+            return Pointer.Attack;
+        if (!_chosen || MatchShotSpent || !_inReach.Contains(o.Model))
+            return Pointer.AttackOff;
+        return o.Side == _side ? Pointer.AttackAlly : Pointer.Attack;
     }
 
     /// <summary>The arrow back, on the way out: a custom pointer outlives the
