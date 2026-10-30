@@ -265,6 +265,7 @@ public sealed partial class Tank3DBench
     private int ReachStamp()
     {
         int h = HashCode.Combine(ReachFrom, MayMoveFirst, _reachVersion, _turn, _side, _fired, _passIn is null, MatchOver);
+        h = HashCode.Combine(h, _bonus);
         h = HashCode.Combine(h, _parked.Count);
         for (int i = 0; i < _parked.Count; i++)
             h = HashCode.Combine(h, _parked[i].Cell, _parked[i].Fate);

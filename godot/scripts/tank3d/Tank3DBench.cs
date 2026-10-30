@@ -1434,7 +1434,8 @@ public sealed partial class Tank3DBench : Node3D
                     string[] xy = what[4..].Split(',');
                     if (xy.Length == 2 && float.TryParse(xy[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
                         && float.TryParse(xy[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float y))
-                        OrderClick(new Vector2(x, y), false);
+                        if (!ActClick(new Vector2(x, y)))
+                            OrderClick(new Vector2(x, y), false);
                 }
                 else if (what.StartsWith("click=", StringComparison.Ordinal))
                 {
@@ -1476,6 +1477,12 @@ public sealed partial class Tank3DBench : Node3D
                     _spinHeld = (int)F(what[11..], 90);
                 else if (what.StartsWith("spin-to=", StringComparison.Ordinal))
                     SpinTo((int)F(what[8..], 90));
+                // act=ram|off: the action panel's ram (Tank3DBench.Acts)
+                else if (what.StartsWith("act=", StringComparison.Ordinal))
+                {
+                    if ((what[4..] == "ram") != _ramMode)
+                        RamToggle();
+                }
                 else if (what.StartsWith("go=", StringComparison.Ordinal))
                 {
                     // go=Q,R: the left button on that hex, under the rules.
@@ -1927,6 +1934,7 @@ public sealed partial class Tank3DBench : Node3D
             AimTick();
         CardTick();
         PeekTick();
+        ActsTick();
         using (Prof.Measure("ram"))
             RamFrame(dt, _camera.GlobalBasis);
         using (Prof.Measure("shells"))
@@ -2142,7 +2150,10 @@ public sealed partial class Tank3DBench : Node3D
         // double click on the target is the ram.
         if (_rules && @event is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } left)
         {
-            OrderClick(left.Position, left.DoubleClick);
+            // with the ram on a tank under it is the right button's
+            // (Tank3DBench.Acts)
+            if (!ActClick(left.Position))
+                OrderClick(left.Position, left.DoubleClick);
             return;
         }
         if (_rules && @event is InputEventKey { Pressed: true, Echo: false } order)
@@ -2207,6 +2218,9 @@ public sealed partial class Tank3DBench : Node3D
             // J, the bench's fire, puts the unit's fire out (Tank3DBench.Blast)
             else if (key.Keycode == Key.J)
                 Douse();
+            // 1 and 2, the bench's hits, are the action panel's (Tank3DBench.Acts)
+            else
+                ActKey(key.Keycode);
             return;
         }
         switch (key.Keycode)

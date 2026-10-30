@@ -19,8 +19,8 @@ namespace TankSpriteTest;
 /// of the fixed cell, its ribbon and its ghost - and the right button drives
 /// there, then rams.
 ///
-/// <b>The rules</b> (GDD units.md «Таран», C-06): an action instead of the
-/// shot; only forward, hull square on to the target; the target thrown one hex
+/// <b>The rules</b> (GDD units.md «Таран», C-06, U-22): the turn's bonus act,
+/// the shot stays; only forward, hull square on to the target; the target thrown one hex
 /// along the ram, keeping its heading; refused by the mass table, a unit, the
 /// edge, higher ground or masonry behind it (<see cref="Ramming.Of"/>). Which
 /// side to ram from: one the shove is allowed along first, then a way with no
@@ -58,7 +58,9 @@ public sealed partial class Tank3DBench
     private string _ramKey = "";
     /// <summary>A ram ordered: done once the hull is on its approach and turned.</summary>
     private RamPlan? _ramWaiting;
-    private bool _ramFiredBefore;
+    /// <summary>The bonus act and the move as they were before the ram was
+    /// ordered: called off, it gives them back.</summary>
+    private (bool Bonus, bool Drove) _ramBefore;
 
     private sealed class RamGhost
     {
@@ -118,7 +120,7 @@ public sealed partial class Tank3DBench
     /// <summary>The ram the pointer offers now, or null.</summary>
     private RamPlan? AskRam()
     {
-        if (!Match || !_rules || !_chosen || _fate != Fate.Alive || RamRunning || MatchShotSpent || MatchBusy
+        if (!Match || !_rules || !_chosen || _fate != Fate.Alive || RamRunning || MatchBonusSpent || MatchBusy
             || !_overTarget || _other is not { Unit: true } o || o.Fate == Fate.Destroyed || _field is null)
             return null;
         Vector2I target = OtherCell(o);
@@ -248,14 +250,17 @@ public sealed partial class Tank3DBench
             MatchMoved();
             _turnGoal = HeadingFor(CellHere, plan.Side);
         }
-        _ramFiredBefore = _fired;
+        _ramBefore = (_bonus, _drove);
         _ramWaiting = plan;
         _ramPlan = null;
         _ramLock = false;
         _ramMode = false;
-        // the action of the turn, instead of the shot; the rammer takes the
-        // target's hex, so the move is spent with it
-        _fired = _drove = true;
+        // the bonus act of the turn, the shot stays (U-22). The rammer takes
+        // the target's hex, so the move goes with it - but for LT's ram from
+        // where it stands: it may ram first and move after (classes.md, LT)
+        _bonus = true;
+        if (!(_profile.FreeOrder && plan.From == CellHere && plan.Steps == 0))
+            _drove = true;
         _orderNote = $"таран {MapAt(cell)}";
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {MapAt(cell)} from {MapAt(plan.From)} along {plan.Side}");
         return true;
@@ -283,7 +288,7 @@ public sealed partial class Tank3DBench
     {
         // called off before the hull went in: the action was not taken
         if (_ramWaiting is not null)
-            _fired = _ramFiredBefore;
+            (_bonus, _drove) = _ramBefore;
         _ramWaiting = null;
         _ramPlan = null;
         HideRamGhosts();
@@ -292,9 +297,9 @@ public sealed partial class Tank3DBench
     /// <summary>Tab in a match: the ram on or off.</summary>
     private void RamToggle()
     {
-        if (!_ramMode && MatchShotSpent)
+        if (!_ramMode && MatchBonusSpent)
         {
-            _orderNote = "действие этого хода уже сделано";
+            _orderNote = "доп. действие этого хода уже сделано";
             return;
         }
         _ramMode = !_ramMode;

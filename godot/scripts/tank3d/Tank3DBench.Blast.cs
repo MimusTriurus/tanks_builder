@@ -22,7 +22,7 @@ namespace TankSpriteTest;
 /// A unit set alight in its own side's turn has the next one to put it out.
 /// </item>
 /// <item><b>Putting it out</b> (<c>J</c> in a match, <see cref="Douse"/>) is
-/// the turn's action, instead of the shot - after the move, LT whenever.</item>
+/// the turn's bonus act, the shot stays (U-22) - after the move, LT whenever.</item>
 /// </list>
 ///
 /// Not yet: the blast setting a wood alight and taking the walls on the
@@ -238,14 +238,14 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>J in a match: the fire on the unit on the rig put out - the
-    /// turn's action.</summary>
+    /// turn's bonus act, the shot stays (U-22).</summary>
     private void Douse()
     {
         if (!Match)
             return;
         string why = !Burning(_side, _modelTag) ? $"{_modelTag} не горит"
             : _side != _turn ? $"ходят {SideName(_turn)}"
-            : _fired ? "действие этого хода уже сделано"
+            : _bonus ? "доп. действие этого хода уже сделано"
             : _passIn is not null ? "ход передаётся"
             : MatchBusy ? "дождись конца приказа"
             : "";
@@ -255,7 +255,7 @@ public sealed partial class Tank3DBench
             return;
         }
         Quench(_side, _modelTag, steam: true);
-        _fired = true;
+        _bonus = true;
         _ramMode = false;
         Unlock();
         _orderNote = $"{_modelTag} потушен";

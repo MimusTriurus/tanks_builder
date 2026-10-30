@@ -76,8 +76,10 @@ public sealed partial class Tank3DBench
     private Side _side = Side.Green;
     private Side _turn = Side.Green;
     private int _round = 1;
-    /// <summary>What the unit on the rig has done this turn.</summary>
-    private bool _drove, _fired;
+    /// <summary>What the unit on the rig has done this turn: the move, the
+    /// attack (the shot) and the bonus act (the ram, putting a fire out) -
+    /// match.md «Структура хода», п. 5а and 5б, one of each (U-22).</summary>
+    private bool _drove, _fired, _bonus;
     /// <summary>Seconds to the turn passing by itself; null while it waits.</summary>
     private float? _passIn;
     private Side? _won;
@@ -213,8 +215,8 @@ public sealed partial class Tank3DBench
             return "ход передаётся";
         if (_drove)
             return $"{_modelTag} уже ходил в этом ходу";
-        if (_fired && !_profile.FreeOrder)
-            return "после выстрела не ездят — стреляет до хода только LT";
+        if ((_fired || _bonus) && !_profile.FreeOrder)
+            return "после действия не ездят — действует до хода только LT";
         return "";
     }
 
@@ -223,6 +225,28 @@ public sealed partial class Tank3DBench
     /// <summary>The shot of this turn is spent - fired, or the turn going over:
     /// no line of fire nor firing post is drawn for a shot there is not.</summary>
     private bool MatchShotSpent => Match && (_fired || _passIn is not null || MatchOver);
+
+    /// <summary>The bonus act of this turn is spent - the ram or the fire put
+    /// out, or the turn going over.</summary>
+    private const string BonusWaits = "атака сделана — осталось доп. действие или «Конец хода»";
+
+    private bool MatchBonusSpent => Match && (_bonus || _passIn is not null || MatchOver);
+
+    /// <summary>Whether a bonus act is still to be had once the move is over:
+    /// a fire to put out, or a unit beside to ram - the move being spent, the
+    /// ram goes from where the hull stands. No allocation, it is read every
+    /// frame.</summary>
+    private bool BonusLeft()
+    {
+        if (_bonus)
+            return false;
+        if (Burning(_side, _modelTag))
+            return true;
+        for (int i = 0; i < _parked.Count; i++)
+            if (_parked[i].Fate != Fate.Destroyed && SideTo(CellHere, _parked[i].Cell) is not null)
+                return true;
+        return _other is { Unit: true } o && o.Fate != Fate.Destroyed && SideTo(CellHere, OtherCell(o)) is not null;
+    }
 
     /// <summary>Why the unit on the rig may not fire at <paramref name="cell"/>
     /// now, or empty - ahead of the rules' own gate (<see cref="ShotWhy"/>).</summary>
@@ -271,7 +295,7 @@ public sealed partial class Tank3DBench
             : p.Side != _turn ? $"{p.Tag} — {SideName(p.Side)}, ходят {SideName(_turn)}"
             : p.Fate != Fate.Alive ? $"{p.Tag} {(p.Fate == Fate.Knocked ? "подбит" : "уничтожен")}"
             : _passIn is not null ? "ход передаётся"
-            : _side == _turn && (_drove || _fired) ? $"в этом ходу уже действует {_modelTag}"
+            : _side == _turn && (_drove || _fired || _bonus) ? $"в этом ходу уже действует {_modelTag}"
             : MatchBusy ? "дождись конца приказа"
             : "";
         if (why.Length == 0)
@@ -292,7 +316,7 @@ public sealed partial class Tank3DBench
             return;
         }
         Log.Print($"tank3d: match: {SideName(_turn)} end the turn"
-                 + (_side == _turn && !_drove && !_fired ? " - a pass" : ""));
+                 + (_side == _turn && !_drove && !_fired && !_bonus ? " - a pass" : ""));
         PassTurn();
     }
 
@@ -317,7 +341,7 @@ public sealed partial class Tank3DBench
         _matchNote = "";
         CancelOrder();
         DropTarget();
-        _drove = _fired = false;
+        _drove = _fired = _bonus = false;
         for (int tries = 0; tries < 2; tries++)
         {
             _turn = Across(_turn);
@@ -423,11 +447,16 @@ public sealed partial class Tank3DBench
             DropTarget();
         if (MatchOver)
             return;
-        if (_passIn is null && !busy && _side == _turn && _fired && (_drove || !_profile.FreeOrder))
+        // the turn goes by itself once there is nothing left in it: the shot
+        // fired, the move done (or barred), and no bonus act to be had - one
+        // still open waits for it or for the end of the turn (U-22)
+        if (_passIn is null && !busy && _side == _turn && _fired && (_drove || !_profile.FreeOrder) && !BonusLeft())
         {
             _passIn = PassDelay;
             _matchNote = "ход сделан";
         }
+        else if (_passIn is null && !busy && _side == _turn && _fired && (_drove || !_profile.FreeOrder))
+            _matchNote = BonusWaits;
         // Knocked out on its own move - a mine under it (Tank3DBench.Mines):
         // it can do no more, so the turn goes on, once the hull has rolled to
         // a stop. It waited for a shot that could not come (2026-10-29).
@@ -764,19 +793,21 @@ public sealed partial class Tank3DBench
         _banner.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
         layer.AddChild(_banner);
 
-        // Top right, by the panel's tab, over the short second line of the
-        // HUD: on the board's side it stood on the cells a ghost goes to.
+        // Bottom right (2026-10-30, the author's choice): the turn's buttons
+        // along the bottom, the acts by the card (Tank3DBench.Acts) and the
+        // end of the turn in the far corner.
         var pass = new Button
         {
             Text = "Конец хода   Ctrl+Enter",
-            AnchorLeft = 1.0f, AnchorRight = 1.0f,
-            OffsetLeft = -290.0f, OffsetRight = -56.0f, OffsetTop = 40.0f, OffsetBottom = 72.0f,
+            AnchorLeft = 1.0f, AnchorRight = 1.0f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
+            OffsetLeft = -246.0f, OffsetRight = -12.0f, OffsetTop = -56.0f, OffsetBottom = -12.0f,
             FocusMode = Control.FocusModeEnum.None,
         };
         pass.AddThemeFontSizeOverride("font_size", 16);
         pass.Pressed += EndTurn;
         layer.AddChild(pass);
         _passButton = pass;
+        BuildActs(layer);
     }
 
     private Button? _passButton;
@@ -845,6 +876,7 @@ public sealed partial class Tank3DBench
         h.Add(_turn);
         h.Add(_drove);
         h.Add(_fired);
+        h.Add(_bonus);
         h.Add(_side);
         // the countdown as it is printed, to a tenth
         h.Add(_passIn is float t ? Mathf.RoundToInt(Mathf.Max(t, 0.0f) * 10.0f) : -1);
@@ -874,11 +906,11 @@ public sealed partial class Tank3DBench
         + (MatchOver
             ? (_drawn ? "Ничья" : $"Победа: {SideName(_won!.Value)}") + $" · раунд {_round}"
             : $"Раунд {_round} · ходят {SideName(_turn)} · {_modelTag}: ход {(_drove ? "сделан" : "есть")}, "
-              + $"выстрел {(_fired ? "сделан" : "есть")}"
+              + $"атака {(_fired ? "сделана" : "есть")}, доп. действие {(_bonus ? "сделано" : "есть")}"
               + (Burning(_side, _modelTag) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
         + Roll() + "\n"
-        + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран\n"
-        + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
+        + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   1, Tab — таран\n"
+        + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   2, J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
 }
