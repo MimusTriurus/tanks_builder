@@ -26,6 +26,13 @@ public sealed partial class Tank3DBench
     /// knee, px.</summary>
     private const float PeekLeg = 46.0f, PeekReach = 22.0f;
     private const float PeekFadeTime = 0.12f;
+    /// <summary>How long the pointer rests on a unit before its card starts
+    /// to fade in, s (the author's note, 2026-10-30): a pointer passing over
+    /// the board on its way somewhere does not flash cards. The roster's
+    /// icons wait as long (<c>RosterDwell</c>).</summary>
+    private const float PeekDelay = 0.4f;
+    /// <summary>How long the pointer has rested on the unit shown.</summary>
+    private float _peekWait;
 
     /// <summary>How many slots each row has: the most any class has of it
     /// (might V of the mortar, steps 5 of the light, mass and front III of
@@ -98,13 +105,24 @@ public sealed partial class Tank3DBench
         if (_peekModel is null || !IsInstanceValid(_peekModel) || _peekRig is null)
         {
             _peekUp = 0.0f;
+            _peekWait = 0.0f;
             _peek.Visible = false;
             return;
         }
-        // a new unit fades in afresh
+        // a new unit waits and fades in afresh
         if (!ReferenceEquals(was, _peekModel))
+        {
             _peekUp = 0.0f;
-        _peekUp = Mathf.Min(1.0f, _peekUp + (float)GetProcessDeltaTime() / PeekFadeTime);
+            _peekWait = 0.0f;
+        }
+        float dt = (float)GetProcessDeltaTime();
+        _peekWait += dt;
+        if (_peekWait < PeekDelay)
+        {
+            _peek.Visible = false;
+            return;
+        }
+        _peekUp = Mathf.Min(1.0f, _peekUp + dt / PeekFadeTime);
         _peek.Modulate = new Color(1.0f, 1.0f, 1.0f, _peekUp);
         _peek.Visible = true;
         _peek.QueueRedraw();
