@@ -10,6 +10,9 @@ namespace TankSpriteTest;
 /// own - the same glTF, cel shading and ink as on the board, in its side's
 /// paint, turned three-quarters to the camera at the board's pitch.
 /// <list type="bullet">
+/// <item><b>Kept on disk</b> (<c>user://roster_art</c>, <see cref="RosterCachePath"/>):
+/// rendered again only when the model's files, the camera's pitch or the
+/// render's own settings change.</item>
 /// <item><b>Once per model and side</b>, a frame each, then the viewport
 /// goes: what the icon draws is a plain texture. A tank on fire or knocked
 /// out is not re-rendered - its state is the token in the icon's corner.</item>
@@ -39,18 +42,72 @@ public sealed partial class Tank3DBench
             if (!wanted.Contains(key))
                 wanted.Add(key);
         }
+        int cached = 0, rendered = 0;
         foreach (var (tag, side) in wanted)
         {
             if (!IsInsideTree())
                 return;
-            Texture2D? art = await RosterRender(tag, side);
+            string path = RosterCachePath(tag, side);
+            Texture2D? art = null;
+            if (path.Length > 0 && FileAccess.FileExists(path) && Image.LoadFromFile(path) is { } kept && !kept.IsEmpty())
+            {
+                art = ImageTexture.CreateFromImage(kept);
+                cached++;
+            }
+            else if (await RosterRender(tag, side) is { } made)
+            {
+                art = ImageTexture.CreateFromImage(made);
+                rendered++;
+                if (path.Length > 0)
+                    RosterCacheWrite(path, tag, side, made);
+            }
             if (art is not null)
                 _rosterArt[(tag, side)] = art;
         }
-        Log.Print($"tank3d: roster: {_rosterArt.Count} of {wanted.Count} units rendered");
+        Log.Print($"tank3d: roster: {_rosterArt.Count} of {wanted.Count} units - {cached} from the cache, {rendered} rendered");
     }
 
-    private async System.Threading.Tasks.Task<Texture2D?> RosterRender(string tag, Side side)
+    /// <summary>Bumped by hand when the picture changes for a reason the
+    /// model's files do not show - the framing, the light, the cel look.</summary>
+    private const int RosterArtVersion = 1;
+    private const string RosterCacheDir = "user://roster_art";
+
+    /// <summary>
+    /// Where a render is kept on disk: one file per model and side, its name
+    /// stamped with what made it - the model's <c>tank.glb</c> and
+    /// <c>tank.json</c> as last written, the camera's pitch, the turn, the
+    /// size, cel or PBR and <see cref="RosterArtVersion"/>. A model the
+    /// pipeline exports again gets a new name and is rendered afresh. Empty
+    /// when the model's files are not there.
+    /// </summary>
+    private string RosterCachePath(string tag, Side side)
+    {
+        string dir = TankModel.ModelDir(tag);
+        ulong glb = FileAccess.GetModifiedTime(dir + "/tank.glb"), json = FileAccess.GetModifiedTime(dir + "/tank.json");
+        if (glb == 0)
+            return "";
+        // GD.Hash, not System.HashCode: that one is seeded afresh in every
+        // process, and a cache keyed by it was never found again
+        string stamp = $"{glb}|{json}|{Mathf.RoundToInt(Mathf.RadToDeg(Mathf.Asin(Squash)) * 100.0f)}"
+                       + $"|{RosterArtYaw}|{RosterArtPx}|{_pbr}|{RosterArtVersion}";
+        return $"{RosterCacheDir}/{tag}_{side}_{GD.Hash(stamp):x8}.png";
+    }
+
+    /// <summary>The render on disk, and the same model and side's older ones gone.</summary>
+    private static void RosterCacheWrite(string path, string tag, Side side, Image image)
+    {
+        DirAccess.MakeDirRecursiveAbsolute(RosterCacheDir);
+        string prefix = $"{tag}_{side}_";
+        string name = path[(RosterCacheDir.Length + 1)..];
+        foreach (string old in DirAccess.GetFilesAt(RosterCacheDir))
+            if (old.StartsWith(prefix, StringComparison.Ordinal) && old != name)
+                DirAccess.RemoveAbsolute($"{RosterCacheDir}/{old}");
+        Error err = image.SavePng(path);
+        if (err != Error.Ok)
+            Log.Print($"tank3d: roster: {path}: {err}");
+    }
+
+    private async System.Threading.Tasks.Task<Image?> RosterRender(string tag, Side side)
     {
         TankModel model;
         try
@@ -130,7 +187,7 @@ public sealed partial class Tank3DBench
         Rect2I used = image.GetUsedRect();
         if (used.Size.X > 0 && used.Size.Y > 0)
             image = image.GetRegion(used.Grow(1).Intersection(new Rect2I(Vector2I.Zero, image.GetSize())));
-        return ImageTexture.CreateFromImage(image);
+        return image;
     }
 
     /// <summary>The model's box in the viewport's world: every mesh's, as placed.</summary>
