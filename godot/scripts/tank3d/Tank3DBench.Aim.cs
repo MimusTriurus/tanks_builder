@@ -492,18 +492,28 @@ public sealed partial class Tank3DBench
             ? Mathf.Atan2(now.Z * want.X - now.X * want.Z, now.X * want.X + now.Z * want.Z) : 0.0f;
     }
 
-    /// <summary>The turret onto the target under the pointer, the rules' way
-    /// (at the class's traverse, <c>SlewDeg</c>): the HUD's line of fire then
-    /// leaves along the barrel. Only standing, with no shot being laid - the
-    /// right button's laying has the turret then - and only when the shot is
-    /// judged from here; from a fixed cell it is the ghost's turret that
-    /// turns. A casemate's hull does not turn for a look: that is a step.</summary>
+    /// <summary>
+    /// The chosen tank's turret onto the unit under the pointer, the rules'
+    /// way (at the class's traverse, <c>SlewDeg</c>): the target - the HUD's
+    /// line of fire then leaves along the barrel - and, since the author's
+    /// note of 2026-10-30, any other unit too, a standing one of either side,
+    /// whether a shot would be had at it or not, or from where. Only standing,
+    /// with no shot being laid - the right button's laying has the turret
+    /// then. Off the units, the turret stays where it was looking. A
+    /// casemate's hull does not turn for a look: that is a step.
+    /// </summary>
     private float TrackIn(float dt)
     {
-        if (_judged is not { } shot || _other is not { } o || _aim is not null || RouteMoving
-            || !_model.Turreted || _fate != Fate.Alive || dt <= 0.0f || shot.From != CellHere)
+        if (!_chosen || _aim is not null || RouteMoving || !_model.Turreted || _fate != Fate.Alive || dt <= 0.0f)
             return 0.0f;
-        float yaw = BoreOff(_model, _rig, Centre(o));
+        Vector3 at;
+        if (_overTarget && _other is { } o)
+            at = Centre(o);
+        else if (_overParked is { } p)
+            at = p.Rig.GlobalPosition + Vector3.Up * (0.45f * p.Model.Size.Y * p.Model.PixelsPerUnit);
+        else
+            return 0.0f;
+        float yaw = BoreOff(_model, _rig, at);
         return Mathf.Clamp(yaw / (Mathf.DegToRad(SlewDeg) * dt), -1.0f, 1.0f);
     }
 
