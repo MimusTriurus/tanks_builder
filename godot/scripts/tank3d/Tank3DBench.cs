@@ -561,7 +561,7 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary>
     /// Where the view's middle stands in the camera's plane (x across, y down
     /// the screen, <see cref="BoardBox"/>'s units) once the player has moved
-    /// it - the middle button's drag (<see cref="PanBy"/>) or the wheel about
+    /// it - the keys (<see cref="PanKeys"/>) or the wheel about
     /// the cursor - or null while it follows the tank. <c>Home</c> lets go.
     /// </summary>
     private Vector2? _viewAt;
@@ -570,9 +570,31 @@ public sealed partial class Tank3DBench : Node3D
     /// what a drag or the wheel starts from while the view still follows.</summary>
     private Vector2 _viewNow;
 
-    /// <summary>The middle button held: the board dragged with the mouse by
-    /// <paramref name="screen"/> pixels - the ground under the cursor stays
-    /// under it.</summary>
+    /// <summary>How fast the keys move the view, screen px a second; Shift doubles it.</summary>
+    private const float PanSpeed = 900.0f;
+
+    /// <summary>
+    /// The view moved by the keys held (the author's choice, 2026-10-30, for
+    /// the middle button's drag): the arrows always, W/A/S/D in a match -
+    /// outside one they drive the tank or step its order. Every frame, before
+    /// the flight (<see cref="GlideTick"/>), which a key cuts as a drag did.
+    /// </summary>
+    private void PanKeys(float dt)
+    {
+        bool wasd = Match;
+        float x = (Input.IsKeyPressed(Key.Right) || (wasd && Input.IsKeyPressed(Key.D)) ? 1.0f : 0.0f)
+                  - (Input.IsKeyPressed(Key.Left) || (wasd && Input.IsKeyPressed(Key.A)) ? 1.0f : 0.0f);
+        float y = (Input.IsKeyPressed(Key.Down) || (wasd && Input.IsKeyPressed(Key.S)) ? 1.0f : 0.0f)
+                  - (Input.IsKeyPressed(Key.Up) || (wasd && Input.IsKeyPressed(Key.W)) ? 1.0f : 0.0f);
+        if (x == 0.0f && y == 0.0f)
+            return;
+        float speed = PanSpeed * (Input.IsKeyPressed(Key.Shift) ? 2.0f : 1.0f);
+        // the view goes the key's way: the board under it the other
+        PanBy(-new Vector2(x, y).Normalized() * speed * dt);
+    }
+
+    /// <summary>The board moved by <paramref name="screen"/> pixels under the
+    /// view - the keys (<see cref="PanKeys"/>) and <c>--do pan=X,Y</c>.</summary>
     private void PanBy(Vector2 screen)
     {
         float h = Mathf.Max(GetViewport().GetVisibleRect().Size.Y, 1.0f);
@@ -592,7 +614,7 @@ public sealed partial class Tank3DBench : Node3D
     private const float GlideTime = 0.45f;
 
     /// <summary>A flight of the view's middle under way: from where it stood
-    /// to the unit, eased in and out; the drag, the wheel or Home end it.</summary>
+    /// to the unit, eased in and out; the keys, the wheel or Home end it.</summary>
     private Vector2? _glideTo;
     private Vector2 _glideFrom;
     private float _glideT;
@@ -716,7 +738,7 @@ public sealed partial class Tank3DBench : Node3D
             // player, only its middle is - as strategy games hold the camera's
             // focus over the map. Held by its edges, a view at the fit, where
             // the board is smaller than the view both ways, had nowhere to go
-            // and the middle button's drag did nothing.
+            // and a pan did nothing.
             float Hold(float c, float lo, float size, float h) =>
                 loose ? Mathf.Clamp(c, lo, lo + size)
                 : size <= 2.0f * h ? lo + 0.5f * size : Mathf.Clamp(c, lo + h, lo + size - h);
@@ -1996,6 +2018,7 @@ public sealed partial class Tank3DBench : Node3D
             MatchTick(dt);
         using (Prof.Measure("camera"))
         {
+            PanKeys(dt);
             GlideTick(dt);
             FrameCamera();
         }
@@ -2212,7 +2235,8 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (_rules && @event is InputEventKey { Pressed: true, Echo: false } order)
         {
-            switch (order.Keycode)
+            // in a match W/A/S/D are the camera's (PanKeys), not orders
+            switch (Match && order.Keycode is Key.W or Key.A or Key.S or Key.D ? Key.None : order.Keycode)
             {
                 case Key.W: if (_chosen) OrderStep(back: false); return;
                 case Key.S: if (_chosen) OrderStep(back: true); return;
@@ -2239,12 +2263,6 @@ public sealed partial class Tank3DBench : Node3D
                     else Choose(false);
                     return;
             }
-        }
-        // The middle button held: the board dragged under the mouse.
-        if (@event is InputEventMouseMotion drag && (drag.ButtonMask & MouseButtonMask.Middle) != 0)
-        {
-            PanBy(drag.Relative);
-            return;
         }
         // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
         // in fractions (Factor).
