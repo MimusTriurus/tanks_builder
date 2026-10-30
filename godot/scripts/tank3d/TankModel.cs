@@ -193,11 +193,34 @@ public sealed partial class TankModel : Node3D
         model.AddChild(scene);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tank.json"));
         model.Bind(scene, json.RootElement);
+        model.CentreOnHull(scene);
         if (toon && model.Turret is not null)
             Toon.MarkTurret(model.Turret, model.Cel);
         model.MergeDebris();
         model.Snapshot();
         return model;
+    }
+
+    /// <summary>
+    /// The model's origin put on the middle of its hull, across the ground
+    /// (the author's note, 2026-10-30: the hull stands square in the middle
+    /// of its hex). The glTF's origin is the middle of the whole model's box,
+    /// gun and all, so a long gun drew the hull and the belts back off the
+    /// hex's middle - HT by 17 of the hex's 248, TD by 25, LT and HM by none.
+    /// The glTF's root is moved, not this node: everything read off the model
+    /// goes through its nodes (<c>Tank.ToGlobal</c>, the exhausts, the belts),
+    /// and the rig - the hex's middle, the turn on the spot's axis - is now the
+    /// hull's.
+    /// </summary>
+    private void CentreOnHull(Node scene)
+    {
+        if (scene is not Node3D root || Hull is not MeshInstance3D { Mesh: { } mesh } hull)
+            return;
+        Transform3D x = Transform3D.Identity;
+        for (Node3D? at = hull; at is not null && at != this; at = at.GetParent() as Node3D)
+            x = at.Transform * x;
+        Vector3 mid = x * mesh.GetAabb().GetCenter();
+        root.Position -= new Vector3(mid.X, 0.0f, mid.Z);
     }
 
     /// <summary>The <see cref="Debris"/> as one mesh while the tank is whole
