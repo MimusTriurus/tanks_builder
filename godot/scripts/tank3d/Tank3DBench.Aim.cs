@@ -292,6 +292,9 @@ public sealed partial class Tank3DBench
     {
         _overOwn = _overTarget = false;
         _overParked = null;
+        // on the roster's column the board under it is not pointed at (Tank3DBench.Roster)
+        if (_rosterUnder && _hoverFixed is null)
+            return;
         if (_hoverFixed is Vector2I held)
         {
             // an enemy standing there is the target now (Tank3DBench.Match)

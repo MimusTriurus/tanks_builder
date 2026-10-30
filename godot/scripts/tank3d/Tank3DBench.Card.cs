@@ -4,7 +4,8 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// The chosen unit's card, bottom left (docs/hud3d-plan.md, «Карточка юнита»,
+/// The chosen unit's card, bottom left outside a match - in one it stands by
+/// the unit's icon (Tank3DBench.Roster) (docs/hud3d-plan.md, «Карточка юнита»,
 /// 2026-10-29; the panel since 2026-10-30): what the unit is and how much
 /// turn it has left, read without a hover. It is the panel the pointer opens
 /// beside any other unit (<see cref="UnitPanel"/>, <c>Tank3DBench.Peek</c>) -
@@ -59,7 +60,8 @@ public sealed partial class Tank3DBench
     {
         if (_card is null)
             return;
-        bool shown = _chosen && _field is not null && _tile is not null && _fate != Fate.Destroyed;
+        // in a match the card stands by the unit's icon (Tank3DBench.Roster)
+        bool shown = !Match && _chosen && _field is not null && _tile is not null && _fate != Fate.Destroyed;
         _card.Visible = shown;
         if (shown)
             _card.QueueRedraw();

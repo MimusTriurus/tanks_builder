@@ -1446,6 +1446,15 @@ public sealed partial class Tank3DBench : Node3D
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                         OrderClick(_camera.UnprojectPosition(CellWorld(MapCell(q, r))), false);
                 }
+                // roster-hover=N: the pointer held on the roster's N-th icon, from 1;
+                // roster-click=N: a click on it (Tank3DBench.Roster)
+                else if (what.StartsWith("roster-hover=", StringComparison.Ordinal))
+                    _rosterHeld = int.TryParse(what[13..], out int n) ? n - 1 : -1;
+                else if (what.StartsWith("roster-click=", StringComparison.Ordinal))
+                {
+                    if (int.TryParse(what[13..], out int n) && n >= 1 && n <= _rosterCount)
+                        RosterTake(n - 1);
+                }
                 else if (what.StartsWith("take=", StringComparison.Ordinal))
                 {
                     // take=Q,R: the click on the tank standing on that hex,
@@ -1931,6 +1940,7 @@ public sealed partial class Tank3DBench : Node3D
         }
         using (Prof.Measure("course"))
             CourseTick();
+        RosterTick(dt);
         using (Prof.Measure("aim"))
             AimTick();
         CardTick();
@@ -2220,7 +2230,7 @@ public sealed partial class Tank3DBench : Node3D
             // J, the bench's fire, puts the unit's fire out (Tank3DBench.Blast)
             else if (key.Keycode == Key.J)
                 Douse();
-            // 1 and 2, the bench's hits, are the action panel's (Tank3DBench.Acts)
+            // 1 to 5, the bench's hits, take the roster's units (Tank3DBench.Acts)
             else
                 ActKey(key.Keycode);
             return;
@@ -2242,6 +2252,8 @@ public sealed partial class Tank3DBench : Node3D
             // in a match: the ram on or off (Tank3DBench.RamPlan)
             case Key.Tab: if (Match) RamToggle(); else if (!NextWay()) _panel?.Flip(); break;
             case Key.Home: FollowTank(); break;
+            // in a match: both sides' line and the controls (Tank3DBench.Match)
+            case Key.F1: _hints = !_hints; break;
             // the relief's hex grid on and off (Stage3D.Relief); no free single key left
             case Key.G when key.ShiftPressed && _stage?.Relief is not null:
                 _stage.ShowEdges = !_stage.ShowEdges;

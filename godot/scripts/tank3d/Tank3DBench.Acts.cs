@@ -3,8 +3,8 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// The action panel, bottom left by the unit's card (docs/hud3d-plan.md,
-/// «Панель действий», 2026-10-30): what is left of the chosen unit's turn, in
+/// The action panel, bottom centre (docs/hud3d-plan.md, «Панель действий»;
+/// by the unit's card until the roster, 2026-10-30): what is left of the chosen unit's turn, in
 /// a match. GDD match.md «Структура хода» (U-22): the move, then two slots,
 /// one of each - the <b>attack</b> (the shot) and the <b>bonus act</b> (the
 /// ram, putting a fire out).
@@ -19,8 +19,8 @@ namespace TankSpriteTest;
 /// <item><b>What may not be done is not there</b> (the author's choice, as
 /// with the roses): no bonus buttons once the bonus act is spent, no
 /// <b>Тушить</b> on a hull that is not burning.</item>
-/// <item>Keys <b>1</b> (the ram) and <b>2</b> (put it out), free in a match -
-/// they are the bench's hits off it; Esc leaves the ram.</item>
+/// <item>Keys: <b>Tab</b> the ram, <b>J</b> put it out, Esc leaves the ram.
+/// 1 and 2 were these two until the roster took 1 to 5 (2026-10-30).</item>
 /// </list>
 /// </summary>
 public sealed partial class Tank3DBench
@@ -38,19 +38,23 @@ public sealed partial class Tank3DBench
 
     private void BuildActs(CanvasLayer layer)
     {
+        // bottom centre (the author's layout, 2026-10-30): the attack's group,
+        // a gap, the bonus act's - the slot and its buttons
         _acts = new HBoxContainer
         {
             Name = "Acts",
-            AnchorTop = 1.0f, AnchorBottom = 1.0f,
-            OffsetLeft = 12.0f + PeekW + 8.0f, OffsetTop = -12.0f - 44.0f, OffsetBottom = -12.0f,
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
+            OffsetTop = -12.0f - 44.0f, OffsetBottom = -12.0f,
+            GrowHorizontal = Control.GrowDirection.Both,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Visible = false,
         };
         _acts.AddThemeConstantOverride("separation", 6);
         (_slotAttack, _slotAttackText) = Slot(SlotAttack);
+        _acts.AddChild(new Control { CustomMinimumSize = new Vector2(18.0f, 0.0f), MouseFilter = Control.MouseFilterEnum.Ignore });
         (_slotBonus, _slotBonusText) = Slot(SlotBonus);
-        _actRam = ActButton("Таран   1", toggle: true, RamToggle);
-        _actDouse = ActButton("Тушить   2", toggle: false, Douse);
+        _actRam = ActButton("Таран   Tab", toggle: true, RamToggle);
+        _actDouse = ActButton("Тушить   J", toggle: false, Douse);
         layer.AddChild(_acts);
     }
 
@@ -114,14 +118,14 @@ public sealed partial class Tank3DBench
         label.AddThemeColorOverride("font_color", open ? CardPale : SlotDim);
     }
 
-    /// <summary>Keys 1 and 2 in a match.</summary>
+    /// <summary>Keys 1 to 5 in a match: the roster's icons, top down - the
+    /// unit taken and the view on it, as a click on its icon
+    /// (Tank3DBench.Roster). The ram and the fire have Tab and J.</summary>
     private void ActKey(Key key)
     {
-        switch (key)
-        {
-            case Key.Key1: RamToggle(); break;
-            case Key.Key2: Douse(); break;
-        }
+        int n = (int)(key - Key.Key1);
+        if (n >= 0 && n < _rosterCount)
+            RosterTake(n);
     }
 
     /// <summary>The left button with the ram on: on a tank it is the right

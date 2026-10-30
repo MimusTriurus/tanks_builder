@@ -289,20 +289,29 @@ public sealed partial class Tank3DBench
     /// nothing yet.</summary>
     private bool MatchTakes(Parked p)
     {
-        if (!Match)
-            return true;
-        string why = MatchOver ? "партия окончена"
-            : p.Side != _turn ? $"{p.Tag} — {SideName(p.Side)}, ходят {SideName(_turn)}"
-            : p.Fate != Fate.Alive ? $"{p.Tag} {(p.Fate == Fate.Knocked ? "подбит" : "уничтожен")}"
-            : _passIn is not null ? "ход передаётся"
-            : _side == _turn && (_drove || _fired || _bonus) ? $"в этом ходу уже действует {_modelTag}"
-            : MatchBusy ? "дождись конца приказа"
-            : "";
+        string why = TakeWhy(p);
         if (why.Length == 0)
             return true;
         _orderNote = why;
         return false;
     }
+
+    /// <summary>Why a click would not take the standing unit, or empty.</summary>
+    private string TakeWhy(Parked p) =>
+        Takeable(p) ? ""
+            : MatchOver ? "партия окончена"
+            : p.Side != _turn ? $"{p.Tag} — {SideName(p.Side)}, ходят {SideName(_turn)}"
+            : p.Fate != Fate.Alive ? $"{p.Tag} {(p.Fate == Fate.Knocked ? "подбит" : "уничтожен")}"
+            : _passIn is not null ? "ход передаётся"
+            : _side == _turn && (_drove || _fired || _bonus) ? $"в этом ходу уже действует {_modelTag}"
+            : "дождись конца приказа";
+
+    /// <summary>The same without the words - the roster asks it every frame
+    /// for its dimmed icons, and the words allocate.</summary>
+    private bool Takeable(Parked p) =>
+        !Match
+        || (!MatchOver && p.Side == _turn && p.Fate == Fate.Alive && _passIn is null
+            && !(_side == _turn && (_drove || _fired || _bonus)) && !MatchBusy);
 
     /// <summary>Ctrl+Enter and the button: the turn handed over now - with
     /// nothing done, a pass (match.md, «Пас разрешён»).</summary>
@@ -809,6 +818,7 @@ public sealed partial class Tank3DBench
         _passButton = pass;
         BuildActs(layer);
         BuildCursors();
+        BuildRoster(layer);
     }
 
     private Button? _passButton;
@@ -882,6 +892,7 @@ public sealed partial class Tank3DBench
         // the countdown as it is printed, to a tenth
         h.Add(_passIn is float t ? Mathf.RoundToInt(Mathf.Max(t, 0.0f) * 10.0f) : -1);
         h.Add(_matchNote);
+        h.Add(_hints);
         h.Add(_fate);
         h.Add(Burning(_side, _modelTag));
         foreach (Parked p in _parked)
@@ -900,8 +911,13 @@ public sealed partial class Tank3DBench
         }
     }
 
-    /// <summary>The HUD's lines in a match: where the turn stands and how to
-    /// play it.</summary>
+    /// <summary>F1 in a match: both sides' line and the controls under the
+    /// turn's line. Off by default - the roster down the left edge stands
+    /// where they were (Tank3DBench.Roster).</summary>
+    private bool _hints;
+
+    /// <summary>The HUD's lines in a match: where the turn stands, and with F1
+    /// how to play it.</summary>
     private string MatchHud(string status) =>
         status + "\n"
         + (MatchOver
@@ -910,8 +926,9 @@ public sealed partial class Tank3DBench
               + $"атака {(_fired ? "сделана" : "есть")}, доп. действие {(_bonus ? "сделано" : "есть")}"
               + (Burning(_side, _modelTag) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
-        + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
-        + Roll() + "\n"
-        + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   1, Tab — таран\n"
-        + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   2, J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
+        + (_matchNote.Length > 0 ? $" · {_matchNote}" : "")
+        + (!_hints ? "   F1 — подсказки"
+            : "\n" + Roll() + "\n"
+              + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран   1–5 — танк ростера\n"
+              + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера   F1 — скрыть");
 }
