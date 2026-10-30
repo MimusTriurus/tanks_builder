@@ -271,6 +271,8 @@ public sealed partial class Tank3DBench
         if (!Match || _drove)
             return;
         _drove = true;
+        // the unit as it set out, for the move taken back (Tank3DBench.Undo)
+        UndoSnap();
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} moves");
     }
 
@@ -351,6 +353,7 @@ public sealed partial class Tank3DBench
         CancelOrder();
         DropTarget();
         _drove = _fired = _bonus = false;
+        _moveSnap = null;
         for (int tries = 0; tries < 2; tries++)
         {
             _turn = Across(_turn);
@@ -816,6 +819,7 @@ public sealed partial class Tank3DBench
         pass.Pressed += EndTurn;
         layer.AddChild(pass);
         _passButton = pass;
+        BuildUndo(layer);
         BuildActs(layer);
         BuildCursors();
         BuildRoster(layer);
@@ -930,5 +934,5 @@ public sealed partial class Tank3DBench
         + (!_hints ? "   F1 — подсказки"
             : "\n" + Roll() + "\n"
               + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран   1–5 — танк ростера\n"
-              + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F1 — скрыть");
+              + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Ctrl+Z — отменить ход   Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F1 — скрыть");
 }

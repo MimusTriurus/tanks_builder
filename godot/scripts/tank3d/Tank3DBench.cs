@@ -1532,6 +1532,8 @@ public sealed partial class Tank3DBench : Node3D
             case "cancel": CancelOrder(); break;
             // the end of turn's button (Tank3DBench.Match)
             case "pass": EndTurn(); break;
+            // the move taken back (Tank3DBench.Undo)
+            case "undo": UndoMove(); break;
             case "ram-mode": RamToggle(); break;
             // the pointer on the end-turn button, for a capture (Tank3DBench.Badges)
             case "pass-hover": _passHeld = !_passHeld; break;
@@ -2134,6 +2136,7 @@ public sealed partial class Tank3DBench : Node3D
         CardTick();
         PeekTick();
         ActsTick();
+        UndoTick();
         CursorTick();
         using (Prof.Measure("ram"))
             RamFrame(dt, _camera.GlobalBasis);
@@ -2411,6 +2414,12 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
             return;
+        // Ctrl+Z in a match: the move taken back (Tank3DBench.Undo)
+        if (Match && key.Keycode == Key.Z && key.CtrlPressed)
+        {
+            UndoMove();
+            return;
+        }
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
         // A match plays by the rules: the bench's keys that fire, strike, burn,
         // knock out or reset the tank on the rig past them are off - Backspace
