@@ -808,6 +808,7 @@ public sealed partial class Tank3DBench
         layer.AddChild(pass);
         _passButton = pass;
         BuildActs(layer);
+        BuildCursors();
     }
 
     private Button? _passButton;

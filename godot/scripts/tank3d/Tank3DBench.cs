@@ -375,6 +375,7 @@ public sealed partial class Tank3DBench : Node3D
 
     public override void _ExitTree()
     {
+        CursorReset();
         _bareNode?.Free();
         _bareNode = null;
         // a quit from the bench: the editor parked behind it goes too
@@ -1935,6 +1936,7 @@ public sealed partial class Tank3DBench : Node3D
         CardTick();
         PeekTick();
         ActsTick();
+        CursorTick();
         using (Prof.Measure("ram"))
             RamFrame(dt, _camera.GlobalBasis);
         using (Prof.Measure("shells"))

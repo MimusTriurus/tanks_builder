@@ -95,6 +95,11 @@ internal static class AssetRoot
     /// it the relief paints its grass as before.</summary>
     internal static readonly string Ground = Repo + "/assets/Images/Ground";
 
+    /// <summary>The mouse pointer's pictures in a match: <c>attack</c> on a
+    /// target, <c>ram</c> while the ram is on - each a <c>.svg</c> source and
+    /// its <c>_32</c>/<c>_64</c> PNGs (<c>Tank3DBench.Cursor</c>).</summary>
+    internal static readonly string Cursors = Repo + "/assets/Images/Cursors";
+
     /// <summary>The bench's own settings files - <c>panel.json</c>,
     /// <c>terrain.json</c>, <c>classes.json</c> and the rest: <c>godot/data</c>,
     /// read off disk so an edit lands on the next run.</summary>
