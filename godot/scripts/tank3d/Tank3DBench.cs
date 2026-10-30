@@ -549,7 +549,8 @@ public sealed partial class Tank3DBench : Node3D
         _zoom = Mathf.Clamp(_zoom * k, least, ZoomMost);
         _zoomFit = false;
         _glideTo = null;
-        if (cursor is not Vector2 c)
+        // about the cursor only at the game's angle: the plane's sums are its (Orbit)
+        if (cursor is not Vector2 c || Orbited)
             return;
         Vector2 window = GetViewport().GetVisibleRect().Size;
         Vector2 off = c - 0.5f * window;
@@ -569,6 +570,63 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary>The view's middle as last framed, held inside the board -
     /// what a drag or the wheel starts from while the view still follows.</summary>
     private Vector2 _viewNow;
+
+    /// <summary>The view turned off the game's angle by the middle button
+    /// (<see cref="OrbitBy"/>): about the up axis, and its pitch added to the
+    /// game's, radians. Both nought is the game's view; Home brings it back.</summary>
+    private float _orbitYaw, _orbitPitch;
+
+    /// <summary>How far the drag turns the view, radians a screen px.</summary>
+    private const float OrbitRate = 0.006f;
+    /// <summary>The pitch's bounds, degrees off the ground: not flat, where
+    /// the far plane and the sun's map run out, nor straight down.</summary>
+    private const float OrbitPitchLow = 20.0f, OrbitPitchHigh = 85.0f;
+
+    private bool Orbited => _orbitYaw != 0.0f || _orbitPitch != 0.0f;
+
+    /// <summary>
+    /// The middle button held and dragged (the author's choice, 2026-10-30):
+    /// across - the view turns about the up axis; along - it tilts. The
+    /// board is real 3D under the game's view (only the angle makes it look
+    /// as the sprites did), so it turns whole; what is drawn for the game's
+    /// angle - the sprite effects, the marks lifted toward the eye - is
+    /// right only there, and Home brings it back.
+    /// </summary>
+    private void OrbitBy(Vector2 screen)
+    {
+        _glideTo = null;
+        _orbitYaw = Mathf.Wrap(_orbitYaw - screen.X * OrbitRate, -Mathf.Pi, Mathf.Pi);
+        float game = Mathf.Asin(Squash);
+        _orbitPitch = Mathf.Clamp(_orbitPitch + screen.Y * OrbitRate,
+                                  Mathf.DegToRad(OrbitPitchLow) - game, Mathf.DegToRad(OrbitPitchHigh) - game);
+    }
+
+    /// <summary>
+    /// The end of <c>FrameCamera</c>: the camera framed at the game's angle,
+    /// turned about the point it looks at on the ground. Nothing at the
+    /// game's angle, so every picture taken there is what it was.
+    /// </summary>
+    private void Orbit(Vector3 pivot, Vector3 axis, float dist)
+    {
+        float game = Mathf.Asin(Squash);
+        if (!Orbited)
+        {
+            _camera.Rotation = new Vector3(-game, 0.0f, 0.0f);
+            return;
+        }
+        // the point on the ground at the middle of the view: down the axis
+        // from the pivot to the board's zero
+        Vector3 u = axis.Normalized();
+        Vector3 focus = pivot - u * (pivot.Y / Mathf.Max(u.Y, 0.05f));
+        float pitch = game + _orbitPitch;
+        float reach = dist * axis.Length();
+        var dir = new Vector3(Mathf.Sin(_orbitYaw) * Mathf.Cos(pitch), Mathf.Sin(pitch),
+                              Mathf.Cos(_orbitYaw) * Mathf.Cos(pitch));
+        _camera.Position = focus + dir * reach;
+        _camera.Rotation = new Vector3(-pitch, _orbitYaw, 0.0f);
+        // turned, the board's far corner can lie further than the game's view had it
+        _camera.Far = 2.0f * reach + DepthSpare * 2.0f;
+    }
 
     /// <summary>How fast the keys move the view, screen px a second; Shift doubles it.</summary>
     private const float PanSpeed = 900.0f;
@@ -599,7 +657,19 @@ public sealed partial class Tank3DBench : Node3D
     {
         float h = Mathf.Max(GetViewport().GetVisibleRect().Size.Y, 1.0f);
         _glideTo = null;
-        _viewAt = (_viewAt ?? _viewNow) - screen * (_camera.Size / h);
+        float k = _camera.Size / h;
+        if (Orbited)
+        {
+            // turned: the screen's right and down laid on the ground, then into
+            // the plane's units (x the ground's X, y its Z drawn at the game's angle)
+            float pitch = Mathf.Asin(Squash) + _orbitPitch;
+            var right = new Vector3(Mathf.Cos(_orbitYaw), 0.0f, -Mathf.Sin(_orbitYaw));
+            var down = new Vector3(Mathf.Sin(_orbitYaw), 0.0f, Mathf.Cos(_orbitYaw)) / Mathf.Sin(pitch);
+            Vector3 move = -(right * screen.X + down * screen.Y) * k;
+            _viewAt = (_viewAt ?? _viewNow) + new Vector2(move.X, move.Z * Squash);
+            return;
+        }
+        _viewAt = (_viewAt ?? _viewNow) - screen * k;
     }
 
     /// <summary>Back to following the tank.</summary>
@@ -607,6 +677,8 @@ public sealed partial class Tank3DBench : Node3D
     {
         _glideTo = null;
         _viewAt = null;
+        // and the game's angle again (Orbit)
+        _orbitYaw = _orbitPitch = 0.0f;
         Log.Print("tank3d: camera follows the tank");
     }
 
@@ -771,6 +843,7 @@ public sealed partial class Tank3DBench : Node3D
         }
         _camera.Far = 2.0f * dist * axis.Length();
         _camera.Position = pivot + axis * dist;
+        Orbit(pivot, axis, dist);
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
         _camera.Position += _camera.Basis.X * shake.X - _camera.Basis.Y * shake.Y;
@@ -1474,9 +1547,16 @@ public sealed partial class Tank3DBench : Node3D
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                         _hoverFixed = MapCell(q, r);
                 }
+                // orbit=DX,DY: the middle button dragged that many pixels (Orbit)
+                else if (what.StartsWith("orbit=", StringComparison.Ordinal))
+                {
+                    string[] xy = what[6..].Split(',');
+                    if (xy.Length == 2)
+                        OrbitBy(new Vector2(F(xy[0], 0), F(xy[1], 0)));
+                }
                 else if (what.StartsWith("pan=", StringComparison.Ordinal))
                 {
-                    // pan=DX,DY: the middle button dragged that many pixels.
+                    // pan=DX,DY: the board moved that many pixels under the view, as the keys move it.
                     string[] xy = what[4..].Split(',');
                     if (xy.Length == 2)
                         PanBy(new Vector2(F(xy[0], 0), F(xy[1], 0)));
@@ -2263,6 +2343,12 @@ public sealed partial class Tank3DBench : Node3D
                     else Choose(false);
                     return;
             }
+        }
+        // The middle button held: the view turned and tilted (Orbit).
+        if (@event is InputEventMouseMotion drag && (drag.ButtonMask & MouseButtonMask.Middle) != 0)
+        {
+            OrbitBy(drag.Relative);
+            return;
         }
         // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
         // in fractions (Factor).
