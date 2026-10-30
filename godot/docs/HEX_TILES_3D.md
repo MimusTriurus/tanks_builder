@@ -611,8 +611,8 @@ px колеи**, один прогон вместо четырёх, 147 отпе
 Воспроизведение, обе половины:
 
 ```
-res://EventsField.tscn -- --cell 7,6 --zoom 1.2 --target LTP --drive 7,4 --drive 7,6 --capture out/over/f200.png --capture-at 200
-res://TankTest.tscn   -- --map bench --drive 11,2 --capture out/over/ramp.png --capture-at 300
+res://scenes/legacy/EventsField.tscn -- --cell 7,6 --zoom 1.2 --target LTP --drive 7,4 --drive 7,6 --capture out/over/f200.png --capture-at 200
+res://scenes/legacy/TankTest.tscn   -- --map bench --drive 11,2 --capture out/over/ramp.png --capture-at 300
 ```
 
 Танк, **стоящий** на пандусе, чья высокая кромка смотрит в камеру (стенд: `(11,2)@270

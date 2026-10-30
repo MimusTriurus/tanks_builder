@@ -31,19 +31,19 @@
 
 ## Как сейчас
 
-- **Скала одна на все карты.** `Relief.Fill` ([Relief.cs:309](../scripts/Relief.cs))
+- **Скала одна на все карты.** `Relief.Fill` ([Relief.cs:309](../scripts/board/Relief.cs))
   строит её одним рецептом: тугая маска `Cliff` (`CliffSigma` 0,16R), кромка,
   рваная шумом внутрь, гребни ridged-шумом (`Crag` 0,6 уровня), стена на `Cliff`
   0,5–0,72. Сид один на доску: `Relief.Build(field, seed = 11)`.
 - **Цвет один на доску.** Шейдер красит скалу `rock_ink` (серый), умноженным на
-  зерно арта земли, по `COLOR.g` = `Cliff` ([Stage3D.Relief.cs:799](../scripts/Stage3D.Relief.cs)).
+  зерно арта земли, по `COLOR.g` = `Cliff` ([Stage3D.Relief.cs:799](../scripts/stage3d/Stage3D.Relief.cs)).
   Стена (горизонталь нормали > 0,8) — на ступень темнее.
 - **В карте у скалы нет ничего, кроме буквы.** `#` — это пол `Foundation.Rock`,
   +2 уровня и `Cliffs[at]` разом ([editor.md](editor.md), «Скала — на
   Foundation»). Опций нет: в редакторе они есть только у стены.
 - **Каналы вершины меша рельефа:** `COLOR` занят целиком (песок, скала, лес,
   глубина под водой), `UV2` — биты уровней и тень низины. `UV` и `CUSTOM0` свободны
-  ([Stage3D.Relief.cs:129](../scripts/Stage3D.Relief.cs), `BuildRelief`).
+  ([Stage3D.Relief.cs:129](../scripts/stage3d/Stage3D.Relief.cs), `BuildRelief`).
 
 ## Что решено (2026-10-27)
 

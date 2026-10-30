@@ -1865,11 +1865,11 @@ local, ...)` рядом с `varying vec3 local` уронил и кирпич, и
 
 ```
 # стоит, щелью к камере
-... res://Wall.tscn -- --capon --capture out/capon.png --capture-at 10
+... res://scenes/legacy/Wall.tscn -- --capon --capture out/capon.png --capture-at 10
 # бетонобой, обвал целиком
-... res://Wall.tscn -- --capon --strike cp --fell --capture out/capon_broken.png --capture-at 200
+... res://scenes/legacy/Wall.tscn -- --capon --strike cp --fell --capture out/capon_broken.png --capture-at 200
 # танк внутри, на доске стены
-... res://WallTankTest.tscn -- --capon --tank HMP --strike cp
+... res://scenes/legacy/WallTankTest.tscn -- --capon --tank HMP --strike cp
 ```
 
 ### Бетон: без швов, пока цел, и с текстурой вместо зерна

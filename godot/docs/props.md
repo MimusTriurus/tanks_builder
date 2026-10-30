@@ -1183,7 +1183,7 @@ CatchWithin`, то есть с кривой, которую придержанн
 **Где судить.** Стенд событий, кнопка `field.forest.fell`, флагами без мыши:
 
 ```
-… res://EventsField.tscn -- --zoom 2.2 --cell 5,1 --actor 2 --play field.forest.fell --capture-at 470 --capture out/f5.png
+… res://scenes/legacy/EventsField.tscn -- --zoom 2.2 --cell 5,1 --actor 2 --play field.forest.fell --capture-at 470 --capture out/f5.png
 ```
 
 Кадры прогона: `out/f3-0-brush.png` (как было — дрожание), `f5-400.png` (корпус ещё
@@ -1198,7 +1198,7 @@ CatchWithin`, то есть с кривой, которую придержанн
 
 ## Tree3D: модели деревьев генератора на объёмной доске
 
-`res://Tree3D.tscn`, корень `Tree3DBench`. Модели `tree.glb` и `tree.json` из
+`res://scenes/Tree3D.tscn`, корень `Tree3DBench`. Модели `tree.glb` и `tree.json` из
 `assets/Models/Trees/<имя>/` (`AssetRoot.Trees`; туда их кладёт `tree_gen.make`, генератор —
 [pipeline/docs/trees.md](../../pipeline/docs/trees.md))
 на доске `Stage3D` под настоящим `Toon`, и больше ничего: ни рощи, ни кустов, ни камней —
@@ -1207,7 +1207,7 @@ CatchWithin`, то есть с кривой, которую придержанн
 дымом 3D-танка (ниже, «Лесной пожар») — и **валится от тарана** (ниже, «Падение от тарана»).
 
 ```
-"<Godot>_console.exe" --path "<repo>/godot" res://Tree3D.tscn --fixed-fps 60 -- --capture "<repo>/godot/out/tree3d.png" --capture-at 30
+"<Godot>_console.exe" --path "<repo>/godot" res://scenes/Tree3D.tscn --fixed-fps 60 -- --capture "<repo>/godot/out/tree3d.png" --capture-at 30
 ```
 
 Флаги: `--trees Oak_001,..,Oak_006` (по местам `Spots`: по одному слева, посередине и в
@@ -1289,7 +1289,7 @@ CatchWithin`, то есть с кривой, которую придержанн
 `NNNN.png` `--record-for` секунд (18) и выходит; с `--fixed-fps 60` это плёнка для GIF.
 
 ```
-"<Godot>_console.exe" --path "<repo>/godot" res://Tree3D.tscn --fixed-fps 60 -- --burn 2,1 --record "<папка>" --record-every 5 --record-for 20
+"<Godot>_console.exe" --path "<repo>/godot" res://scenes/Tree3D.tscn --fixed-fps 60 -- --burn 2,1 --record "<папка>" --record-every 5 --record-for 20
 ```
 
 - **Кто решает, что горит, — `Wildfire` доски, как есть.** Клетки, переход огня к
@@ -1388,7 +1388,7 @@ CatchWithin`, то есть с кривой, которую придержанн
 травой он проходил через дерево соседней клетки и валил его вместо того, в которое кликнули.
 
 ```
-"<Godot>_console.exe" --path "<repo>/godot" res://Tree3D.tscn --fixed-fps 60 -- --row --trees Oak_006 --zoom 2.6 --ram 0:3 --record "<папка>" --record-every 4 --record-for 5.5
+"<Godot>_console.exe" --path "<repo>/godot" res://scenes/Tree3D.tscn --fixed-fps 60 -- --row --trees Oak_006 --zoom 2.6 --ram 0:3 --record "<папка>" --record-every 4 --record-for 5.5
 ```
 
 - **Таран — заглушка.** Моделей танков на машине, где это делалось, нет, поэтому тут
@@ -1613,7 +1613,7 @@ CatchWithin`, то есть с кривой, которую придержанн
 Запускается сценой в позиционном аргументе:
 
 ```bash
-Godot_v4.7.2-stable_mono_win64.exe --path godot res://Wood.tscn
+Godot_v4.7.2-stable_mono_win64.exe --path godot res://scenes/legacy/Wood.tscn
 ```
 
 **Отдельно от `Main` по доводу `Relief.tscn`, то есть по доводу

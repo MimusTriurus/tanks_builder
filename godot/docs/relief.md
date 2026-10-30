@@ -9,7 +9,7 @@
 `HexField`. Карточка — BOT-11.
 
 ```
-"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://Tank3D.tscn -- --map abbey --relief
+"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/Tank3D.tscn -- --map abbey --relief
 ```
 
 Без флага ничего не меняется: доска, редактор и `Tree3D` — прежние призмы.
@@ -134,7 +134,7 @@
 Стенд читает их из карты (`RockStyles.Of`, клетки сдвинуты морем `Moated`):
 
 ```
-... res://Tank3D.tscn -- --map rocktest --relief
+... res://scenes/Tank3D.tscn -- --map rocktest --relief
 ```
 
 **`--rock` одевает поверх карты**, как `--sprites` одевает классы: список

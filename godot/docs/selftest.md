@@ -5,7 +5,7 @@
 ## Самопроверка
 
 ```
-"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://Main.tscn -- --selftest
+"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/legacy/Main.tscn -- --selftest
 ```
 
 **Оба пути — абсолютные, и это обязательно, а не аккуратность.** `--path godot`
@@ -186,7 +186,7 @@ under the bank»); осталась та половина, которой у с�
 ### `--headless`, и почему проверкам он равнозначен
 
 ```
-"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --headless --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://Main.tscn -- --selftest
+"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --headless --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/legacy/Main.tscn -- --selftest
 ```
 
 **Прогон под `--headless` — тот же прогон, и это сверено, а не предположено:**

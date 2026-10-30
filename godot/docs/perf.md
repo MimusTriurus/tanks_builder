@@ -75,7 +75,7 @@ GDScript, а стенд написан на C#, поэтому без секци
 ## Прогон — `--perf`
 
 ```
-"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://Match3D.tscn --fixed-fps 60 -- --perf out/perf --perf-scenario blast
+"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/Match3D.tscn --fixed-fps 60 -- --perf out/perf --perf-scenario blast
 ```
 
 | флаг | что делает |
@@ -169,8 +169,8 @@ HT и J. Внутри есть три передачи хода и смена ю
 сменилась машина:
 
 ```
-for i in 1 2 3 4 5; do  <Godot_console.exe> --path godot res://Match3D.tscn --fixed-fps 60 -- --perf out/b5-$i --perf-scenario blast; done
-<Godot_console.exe> --path godot res://Match3D.tscn --headless -- --perf-merge perf/blast.json out/b5-1 out/b5-2 out/b5-3 out/b5-4 out/b5-5
+for i in 1 2 3 4 5; do  <Godot_console.exe> --path godot res://scenes/Match3D.tscn --fixed-fps 60 -- --perf out/b5-$i --perf-scenario blast; done
+<Godot_console.exe> --path godot res://scenes/Match3D.tscn --headless -- --perf-merge perf/blast.json out/b5-1 out/b5-2 out/b5-3 out/b5-4 out/b5-5
 ```
 
 Прогоны — подряд, на той же машине, окно не трогать. Затем пять прогонов против
@@ -385,7 +385,7 @@ A/B на одном коде, кроме `Grass3D.cs`, с `--hover 5,5`:
 - секция стоила до 54 мс;
 - разброс кадра шёл за ней: кадр 289 стоил 92 мс при `print` 53,5 и 40 мс при `print` 2.
 
-**Что сделано.** `Log.Print` (`scripts/Log.cs`) кладёт строку в очередь и сразу
+**Что сделано.** `Log.Print` (`scripts/core/Log.cs`) кладёт строку в очередь и сразу
 возвращается. Очередь печатает свой фоновый поток по порядку, сброс ждёт там.
 - Все 110 вызовов `GD.Print` в `Tank3DBench*`, `Stage3D`, `Grass3D` и
   `BunkerProp` заменены.

@@ -46,7 +46,7 @@ Two details, two looks
 the light is painted by the materials themselves (a diffuse ramp cut into three
 tones, emitted) so the render is the look, outline included (inverted hull).
 
-*Game* is what gets exported, for `godot/scripts/Toon.cs` to dress: it ignores
+*Game* is what gets exported, for `godot/scripts/tank3d/Toon.cs` to dress: it ignores
 vertex colour and has no alpha, so every tone a leaf has lives in a 8x64
 palette texture - V is the leaf's tone (top of the puff lighter, random jitter,
 puff depth), U crosses into the rim columns at the leaf's edge. No light is in
@@ -2802,7 +2802,7 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
 
 def publish(name, out_dir=None):
     """Copy `<out>/<name>/tree.glb` and `tree.json` to `assets/Models/Trees/<name>/`,
-    where `godot/scripts/Tree3DBench.cs` reads them (`AssetRoot.Trees`). `make`
+    where `godot/scripts/benches/Tree3DBench.cs` reads them (`AssetRoot.Trees`). `make`
     does it for every tree it writes to OUT. Returns the folder."""
     src = os.path.join(out_dir or OUT, name)
     dst = os.path.join(MODELS, name)

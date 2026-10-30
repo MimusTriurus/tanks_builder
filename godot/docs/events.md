@@ -23,8 +23,8 @@
 ## Запуск
 
 ```
-Godot…console.exe --path "D:\…\godot" res://EventsTank.tscn
-Godot…console.exe --path "D:\…\godot" res://EventsField.tscn -- --ui --zoom 2 --cell 5,1 --play field.forest --capture-at 150 --capture out/x.png
+Godot…console.exe --path "D:\…\godot" res://scenes/legacy/EventsTank.tscn
+Godot…console.exe --path "D:\…\godot" res://scenes/legacy/EventsField.tscn -- --ui --zoom 2 --cell 5,1 --play field.forest --capture-at 150 --capture out/x.png
 ```
 
 Флаги сверх пяти общих (`--capture`, `--capture-at`, `--zoom`, `--ui`,
@@ -52,7 +52,7 @@ A/B тремя снимками: с обоими, без пыли, без обо
 
 ## Проигрыватель `Playback`
 
-`scripts/Playback.cs` — разделяемый модуль, не знающий сцены: держит
+`scripts/core/Playback.cs` — разделяемый модуль, не знающий сцены: держит
 `TankTick`, `Stage3D`, `HexField`, `Wildfire`, стены, очередь шагов. Метод на
 событие: `Shot(shooter, victim, side, level)` — `TankTick.Shoot` с **решённым
 исходом** (новый параметр `level`), `Ricochet`, `Through`, `Destroy`, `Burn`,
@@ -259,9 +259,9 @@ A/B тремя снимками: с обоими, без пыли, без обо
 оказывается его же `(5,5)`.
 
 ```
-Godot…console.exe --path "D:\…\godot" res://EventsTank.tscn -- --play tank.hit.tier --capture-at 12 --capture out/tier_down.png --zoom 1.1
-Godot…console.exe --path "D:\…\godot" res://EventsTank.tscn -- --play tank.hit.tier.right --capture-at 12 --capture out/tier_up.png --zoom 1.1
-Godot…console.exe --path "D:\…\godot" res://EventsTank.tscn -- --play tank.hit.tier.blind --capture-at 40 --capture out/tier_blind.png --zoom 1.1
+Godot…console.exe --path "D:\…\godot" res://scenes/legacy/EventsTank.tscn -- --play tank.hit.tier --capture-at 12 --capture out/tier_down.png --zoom 1.1
+Godot…console.exe --path "D:\…\godot" res://scenes/legacy/EventsTank.tscn -- --play tank.hit.tier.right --capture-at 12 --capture out/tier_up.png --zoom 1.1
+Godot…console.exe --path "D:\…\godot" res://scenes/legacy/EventsTank.tscn -- --play tank.hit.tier.blind --capture-at 40 --capture out/tier_blind.png --zoom 1.1
 ```
 
 ## Что уже показывается и чего ещё нет

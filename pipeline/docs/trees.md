@@ -63,7 +63,7 @@ tree_gen.grid([1, 2, 3, 4, 5, 6])   # живые спрайтовые дерев
 2. **Посмотреть листы**, не цифры: `out/trees/Oak_00N/_check.png` (спрайты с основаниями),
    `_check_game.png` (модель против спрайта), `_check_burn.png` (горение), `_check_fall.png` и
    `_check_fall_burnt.png` (падение, живое и горелое).
-3. **Посмотреть на доске**: `res://Tree3D.tscn` без флагов — шесть деревьев на траве; ЛКМ
+3. **Посмотреть на доске**: `res://scenes/Tree3D.tscn` без флагов — шесть деревьев на траве; ЛКМ
    поджигает, ПКМ валит ([godot/docs/props.md](../../godot/docs/props.md), «Tree3D»). Снимок
    для сравнения — `-- --capture <png> --capture-at 60`, пожар целиком — `-- --burn 2,1
    --record <dir>`. После прогона — `run/main_scene` в `project.godot` на месте

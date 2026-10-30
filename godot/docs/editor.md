@@ -954,10 +954,10 @@ ABBEY открывается по `--map probe` и аудируется до ц�
 ## `MapEditor.cs` / `Editor.tscn` — восьмой корень
 
 ```
-Godot_v4.7.2-stable_mono_win64.exe --path godot res://Editor.tscn
-... res://Editor.tscn -- --map abbey
-... res://Editor.tscn -- --new 20x17
-... res://Editor.tscn -- --map test --layers levels,ramps,sites --capture <путь>
+Godot_v4.7.2-stable_mono_win64.exe --path godot res://scenes/Editor.tscn
+... res://scenes/Editor.tscn -- --map abbey
+... res://scenes/Editor.tscn -- --new 20x17
+... res://scenes/Editor.tscn -- --map test --layers levels,ramps,sites --capture <путь>
 ```
 
 ### Открывается на стенде, и это не предпочтение

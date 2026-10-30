@@ -129,7 +129,7 @@ actor, O1), `overlay.route` (трасса до `bench.cell`), `overlay.axes` (о
 
 ## 5. Проигрыватель: словарь стенда как методы
 
-`scripts/Playback.cs` — разделяемый модуль, ничего не знающий о сцене (как
+`scripts/core/Playback.cs` — разделяемый модуль, ничего не знающий о сцене (как
 `TankTick`): держит `TankTick`, `Stage3D`, `HexField`, `Wildfire`, список
 `Vehicle` и очередь. Метод на событие: `KnockOut(v, face)`, `Destroy(v)`,
 `Ricochet(victim, axis, outcome)`, `Push(victim, dir)`, `PlaceSmoke(cell)`,
@@ -164,7 +164,7 @@ actor, O1), `overlay.route` (трасса до `bench.cell`), `overlay.axes` (о
 Пример: снимок подбитого среднего танка через секунду после события:
 
 ```
-Godot…console.exe --path "D:\…\godot" res://EventsTank.tscn -- --actor 0 --face 90 --play tank.hit.pierce,tank.state.knockout --capture-at 90 --capture out/knockout.png
+Godot…console.exe --path "D:\…\godot" res://scenes/legacy/EventsTank.tscn -- --actor 0 --face 90 --play tank.hit.pierce,tank.state.knockout --capture-at 90 --capture out/knockout.png
 ```
 
 `--capture-at` — кадр, значит возраст события известен точно (как в

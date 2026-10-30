@@ -1,6 +1,6 @@
 {
   "when": "2026-10-25 09:24",
-  "scene": "res://Match3D.tscn",
+  "scene": "res://scenes/Match3D.tscn",
   "scenario": "stress",
   "map": "stress10",
   "script": "ignite=1,7@20 ignite=3,4@22 ignite=7,2@24 ignite=8,7@26 ignite=6,7@28 ignite=3,2@30 ignite=6,2@32 ignite=5,3@34 take=6,7@40 aim-cell=6,3@100 pass@560 take=1,7@620 go=3,7@660 pass@1100",

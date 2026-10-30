@@ -6,7 +6,7 @@
 [pipeline/CLAUDE.md](../pipeline/CLAUDE.md); контракт между ними (`Models/`,
 `Sprites/`, `assets/`) — в [корневом CLAUDE.md](../CLAUDE.md).
 
-**Основная работа — 3D-танк: `res://Tank3D.tscn`, [docs/tank3d.md](docs/tank3d.md).**
+**Основная работа — 3D-танк: `res://scenes/Tank3D.tscn`, [docs/tank3d.md](docs/tank3d.md).**
 Сцены, где танк — спрайт из атласа (`Main`, `TankTest`, `WaterTankTest`,
 `WallTankTest`, `CaponTest`, `Events*` и прочие спрайтовые), — **устаревшая
 2D-линия** (решение 2026-09-27, корневой CLAUDE.md, «Основная линия — 3D»):
@@ -54,11 +54,27 @@
 **Новый раздел пишется в тот док, чей предмет он трогает.** Сюда попадает
 только то, что верно до того, как узнал, что трогаешь.
 
+## Раскладка каталога
+
+| каталог | что там |
+|---|---|
+| `scenes/` | сцены 3D-линии и инструменты: `Tank3D`, `Match3D`, `Tree3D`, `Relief3D`, `Editor` |
+| `scenes/legacy/` | спрайтовые сцены устаревшей 2D-линии: `Main`, `Abbey`, `TankTest*`, `CaponTest`, `Events*`, `Effects`, `Wood`, `Wall`, `Relief` |
+| `scripts/` | C# по предмету, не по линии (2D и 3D делят почти всё): `core` — инфраструктура и панель; `rules` — правила GDD; `board` — поле, карты, рельеф; `stage3d` — объёмная доска; `water`, `props`, `walls`; `tank` — танк и его часы, общие для обеих линий; `sprite` — атлас и спрайт танка (2D); `tank3d` — 3D-модель и `Tank3DBench.*`; `cel` — cel-эффекты 3D; `effects` — `Proc*` и взрывы листом; `editor`; `benches` — корни остальных сцен; `test` — `SelfTest` |
+| `data/` | настройки стенда, читаемые с диска (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets` |
+| `maps/`, `perf/` | карты `maps/*.json` ([docs/editor.md](docs/editor.md)) и эталоны `--perf` ([docs/perf.md](docs/perf.md)) |
+| `tools/` | `stage_sounds.sh` и `render/` — вспомогательные скрипты вне движка |
+
+Пути сцен, на которые код переходит сам (редактор ↔ стенд ↔ партия), — константы
+в `Session`; остальные называются только в командной строке. Новый `.cs` кладётся
+в папку своего предмета; пространство имён одно, `TankSpriteTest`, от папки не
+зависит.
+
 ## Запуск
 
 ```
 dotnet build
-"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://Main.tscn
+"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/legacy/Main.tscn
 ```
 
 **Оба пути абсолютные, сцена — позиционным аргументом, всегда.** Относительный
@@ -69,19 +85,19 @@ dotnet build
 `--headless`, снимки (`--capture`) — только с окном:
 [docs/selftest.md](docs/selftest.md).
 
-Сцены: `res://Main.tscn` — харнесс (ABBEY — он же с `-- --map abbey` либо
-`res://Abbey.tscn`, [docs/board.md](docs/board.md)); `res://TankTest.tscn`,
-`res://WaterTankTest.tscn`, `res://WallTankTest.tscn`, `res://CaponTest.tscn` — танковый
+Сцены: `res://scenes/legacy/Main.tscn` — харнесс (ABBEY — он же с `-- --map abbey` либо
+`res://scenes/legacy/Abbey.tscn`, [docs/board.md](docs/board.md)); `res://scenes/legacy/TankTest.tscn`,
+`res://scenes/legacy/WaterTankTest.tscn`, `res://scenes/legacy/WallTankTest.tscn`, `res://scenes/legacy/CaponTest.tscn` — танковый
 стенд, на воде, против стены и миномёт против капонира ([docs/bench.md](docs/bench.md),
 [docs/wall-bench.md](docs/wall-bench.md));
-`res://Effects.tscn` — взрыв ([docs/blast.md](docs/blast.md));
-`res://EventsTank.tscn`, `res://EventsField.tscn`, `res://EventsOverlay.tscn` —
+`res://scenes/legacy/Effects.tscn` — взрыв ([docs/blast.md](docs/blast.md));
+`res://scenes/legacy/EventsTank.tscn`, `res://scenes/legacy/EventsField.tscn`, `res://scenes/legacy/EventsOverlay.tscn` —
 стенд событий: пять танков и все виды клеток, кнопка панели = событие правил
-([docs/events.md](docs/events.md)); `res://Wood.tscn`,
-`res://Wall.tscn`, `res://Relief.tscn`, `res://Relief3D.tscn`, `res://Editor.tscn`;
-`res://Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md));
-`res://Match3D.tscn` — партия на нём: две стороны (зелёные и коричневые), по танку на спавн, на доске 10 × 10, по умолчанию учебная расстановка `drill10` (рикошет, взрыв в кучке), ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»);
-`res://Tree3D.tscn` — модели деревьев генератора на объёмной доске: лесной пожар, падение от тарана и четыре способа травы ([docs/props.md](docs/props.md), «Tree3D»).
+([docs/events.md](docs/events.md)); `res://scenes/legacy/Wood.tscn`,
+`res://scenes/legacy/Wall.tscn`, `res://scenes/legacy/Relief.tscn`, `res://scenes/Relief3D.tscn`, `res://scenes/Editor.tscn`;
+`res://scenes/Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md));
+`res://scenes/Match3D.tscn` — партия на нём: две стороны (зелёные и коричневые), по танку на спавн, на доске 10 × 10, по умолчанию учебная расстановка `drill10` (рикошет, взрыв в кучке), ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»);
+`res://scenes/Tree3D.tscn` — модели деревьев генератора на объёмной доске: лесной пожар, падение от тарана и четыре способа травы ([docs/props.md](docs/props.md), «Tree3D»).
 `--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели, а
 не класс ([docs/architecture.md](docs/architecture.md)).
 

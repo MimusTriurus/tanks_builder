@@ -1,6 +1,6 @@
 {
   "when": "2026-10-25 09:21",
-  "scene": "res://Match3D.tscn",
+  "scene": "res://scenes/Match3D.tscn",
   "scenario": "blast",
   "map": "drill10",
   "script": "take=6,7@40 aim-cell=6,3@100 pass@560 take=6,7@620 aim-cell=6,3@660 pass@1100 take=7,2@1160 douse@1200",

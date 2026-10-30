@@ -8,14 +8,14 @@
 со всеми его настройками. Запускается сценой в позиционном аргументе:
 
 ```bash
-Godot_v4.7.2-stable_mono_win64.exe --path godot res://TankTest.tscn
+Godot_v4.7.2-stable_mono_win64.exe --path godot res://scenes/legacy/TankTest.tscn
 ```
 
-Доска у него теперь **вторая** — `res://WaterTankTest.tscn`, тот же узел с
+Доска у него теперь **вторая** — `res://scenes/legacy/WaterTankTest.tscn`, тот же узел с
 `Map = "water"`: 12 × 12 воды и розетка из семи наземных гексов в середине, где
 каждый выезд из середины брод. См. ниже.
 
-Третья — `res://WallTankTest.tscn`, он же против кирпичной стены, и она живёт
+Третья — `res://scenes/legacy/WallTankTest.tscn`, он же против кирпичной стены, и она живёт
 отдельным доком: [wall-bench.md](wall-bench.md).
 
 **Отдельно от харнесса по доводу `Wood.tscn`, то есть по доводу

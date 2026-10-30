@@ -2043,7 +2043,7 @@ AP; `Live`, отвечающий «да» всегда, ровно одну; а 
 идёт с флага:
 
 ```
-... res://CaponTest.tscn -- --shell 3,3 --ammo cp
+... res://scenes/legacy/CaponTest.tscn -- --shell 3,3 --ammo cp
 ```
 
 **Капонир здесь — блок карты, а не флаг стенда.** `CaponMap` несёт

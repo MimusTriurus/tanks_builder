@@ -869,13 +869,13 @@ HTP по MTP 32.4 → 23.4 px. Утверждается **сравнение, а
 
 ```
 # руками на однотанковом стенде: ряд «чьей пушкой» в TAB → LTP, дальше U
-Godot_v4.7.2-stable_mono_win64.exe --path godot res://TankTest.tscn -- --hit-by lt
+Godot_v4.7.2-stable_mono_win64.exe --path godot res://scenes/legacy/TankTest.tscn -- --hit-by lt
 
 # снимком, без руки на клавиатуре
-... res://TankTest.tscn -- --hit-by lt --hit 60 --zoom 3 --capture-at 6 --capture out/ric.png
+... res://scenes/legacy/TankTest.tscn -- --hit-by lt --hit 60 --zoom 3 --capture-at 6 --capture out/ric.png
 
 # в бою, без всяких циферблатов: лёгкий стреляет в тяжёлого
-... res://Main.tscn -- --tank LTP --attack 2
+... res://scenes/legacy/Main.tscn -- --tank LTP --attack 2
 ```
 
 Против чего судить: `--hit-by ht` на том же кадре даёт пробитие, то есть
@@ -1042,7 +1042,7 @@ Gunnery.Deflect(face, from, outward) = EdgeHeadings[SideFor(2 * outward - from)]
 первое, что чинилось после первого прогона: с `He` по умолчанию шаг занимал
 0.17 с вместо 0.62 — то есть второй ноги не было вовсе.
 
-**Судить:** `res://EventsTank.tscn`, кнопка `tank.hit.on.left` либо
+**Судить:** `res://scenes/legacy/EventsTank.tscn`, кнопка `tank.hit.on.left` либо
 `--play tank.hit.on.left`. Четыре кадра одной серии в `godot/out/`
 (`--face 30 --zoom 1.6 --play-at 30`): `ric_on_36.png` — первая нога в воздухе,
 `ric_on_43.png` — веер на плите LTP, `ric_on_48.png` — трассер второй ноги ушёл
@@ -1458,13 +1458,13 @@ AP в одну плиту.
 
 ```
 # разрыв HE о плиту, снимком
-... res://TankTest.tscn -- --ammo he --hit 240 --zoom 3 --capture-at 6 --capture out/he.png
+... res://scenes/legacy/TankTest.tscn -- --ammo he --hit 240 --zoom 3 --capture-at 6 --capture out/he.png
 
 # он же против рикошета в ту же плиту, той же пушкой
-... res://TankTest.tscn -- --ammo ap --hit-by lt --hit 240 --zoom 3 --capture-at 6 --capture out/ap.png
+... res://scenes/legacy/TankTest.tscn -- --ammo ap --hit-by lt --hit 240 --zoom 3 --capture-at 6 --capture out/ap.png
 
 # и старая картинка, для A/B
-... res://TankTest.tscn -- --ammo he --slam off --hit 240 ...
+... res://scenes/legacy/TankTest.tscn -- --ammo he --slam off --hit 240 ...
 ```
 
 ### И по кладке: тот же текст, третья поверхность
@@ -3055,7 +3055,7 @@ stop` печатается один раз на танк, потому что а
 кнопка бульдозера отказывает всем, кроме тяжёлого. Снимок:
 
 ```
-… res://EventsTank.tscn -- --actor 4 --target 1 --play tank.hit.top ^
+… res://scenes/legacy/EventsTank.tscn -- --actor 4 --target 1 --play tank.hit.top ^
   --capture-at 24 --capture out/lob.png
 ```
 

@@ -469,7 +469,7 @@ guard и запрещает. Пол пандуса есть его собств�
 [docs/swim-plan.md](../../docs/swim-plan.md), шаг 10). До того въезд поднимал
 `Stage3D.Splash` — `SheetBlast Wet`, разрыв снаряда в воде с белой рампой: столб
 из палубы за башней на два корпуса, две секунды висел и читался как дым
-(`out/swim/10-plunge-montage.png`). Теперь узел `Plunge` (`scripts/Plunge.cs`):
+(`out/swim/10-plunge-montage.png`). Теперь узел `Plunge` (`scripts/water/Plunge.cs`):
 капли в `MultiMesh`, замкнутая форма по времени, как у `SheetBlast`. Капля
 рождается на носу (носовая волна, вперёд и в стороны, низко) или на борту
 (веера, в стороны и вверх), летит с начальной скоростью по `√Might` и падает под
@@ -744,7 +744,7 @@ guard и запрещает. Пол пандуса есть его собств�
 Судить: `EventsTank.tscn`, ряд `tank.state.water` слева, клетка глубокой воды.
 
 ```
-… res://EventsTank.tscn -- --zoom 3 --target 1 --cell 10,5 --play tank.state.water --capture-at 300 --capture out/swim-settled.png
+… res://scenes/legacy/EventsTank.tscn -- --zoom 3 --target 1 --cell 10,5 --play tank.state.water --capture-at 300 --capture out/swim-settled.png
 ```
 
 Справа — то же с `tank.state.water.right` в `out/sunk.png`: корпус под водой

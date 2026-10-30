@@ -1125,7 +1125,7 @@ px/с, и никакая правка ленты не сделает меньш�
 кадра под `--no-dust`:
 
 ```
-… res://EventsTank.tscn -- --drive 6,2 --zoom 2.0 --capture-at 72 --capture out/dust/on.png
+… res://scenes/legacy/EventsTank.tscn -- --drive 6,2 --zoom 2.0 --capture-at 72 --capture out/dust/on.png
 ```
 
 Кадры прогона: `out/dust/w6_a.png` против `out/dust/w6_b.png` —
@@ -1412,8 +1412,8 @@ px/с, и никакая правка ленты не сделает меньш�
 кадр, и танк, который загорелся и потушен на одном кадре, гореть не успевает:
 
 ```
-res://EventsTank.tscn -- --play tank.state.fire.left --play-at 30 --zoom 1.6 --capture out/burn_lit.png --capture-at 100
-res://EventsTank.tscn -- --play tank.state.fire.left,tank.state.fire.right --play-at 30 --zoom 1.6 --capture out/douse_34.png --capture-at 34
+res://scenes/legacy/EventsTank.tscn -- --play tank.state.fire.left --play-at 30 --zoom 1.6 --capture out/burn_lit.png --capture-at 100
+res://scenes/legacy/EventsTank.tscn -- --play tank.state.fire.left,tank.state.fire.right --play-at 30 --zoom 1.6 --capture out/douse_34.png --capture-at 34
 ```
 
 `godot/out/burn_lit.png` — горящий танк (тёмный столб, пламя на палубе);
@@ -2167,7 +2167,7 @@ GDD ([units.md](../../docs/gdd/units.md), «Башня») отводит баш�
 показывает заодно и «доводится после остановки».
 
 ```
-"D:\Soft\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe" --path "D:\Projects\Godot\tanks_builder\godot" res://EventsTank.tscn -- --actor 2 --face 90 --play tank.turret.left --capture out/ring-lane-46.png --capture-at 46
+"D:\Soft\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe" --path "D:\Projects\Godot\tanks_builder\godot" res://scenes/legacy/EventsTank.tscn -- --actor 2 --face 90 --play tank.turret.left --capture out/ring-lane-46.png --capture-at 46
 ```
 
 Стоу той же командой, без единой кнопки: `-- --turret 90 --drive 6,5` — лёгкий

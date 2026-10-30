@@ -34,7 +34,7 @@
 прогона одних флагов дают один и тот же файл (проверено: sha совпадает).
 
 ```
-Godot_v4.7.2-stable_mono_win64_console.exe --path godot res://Effects.tscn -- \
+Godot_v4.7.2-stable_mono_win64_console.exe --path godot res://scenes/legacy/Effects.tscn -- \
     --fire --zoom 1 --capture-at 18 --capture D:/.../out/blast_18.png
 ```
 
@@ -809,7 +809,7 @@ XZ, поворачивать нечего, а проекция доски сам
 ### Запуск
 
 ```
-Godot_v4.7.2-stable_mono_win64.exe --path godot res://Effects.tscn
+Godot_v4.7.2-stable_mono_win64.exe --path godot res://scenes/legacy/Effects.tscn
 ```
 
 Одна сцена, одна доска, одна наводка, `SPACE` подрывает. Флаги: `--fire`,
@@ -1793,7 +1793,7 @@ MTP и HTP дают в борт 188, 183 и 182 px, то есть все три 
 `EventsField.tscn`, кнопка `field.forest.he`, клетка с лесом:
 
 ```
-… res://EventsField.tscn -- --zoom 4 --cell 5,0 --play field.forest.he --capture-at 6 --capture out/tree-he-flash.png
+… res://scenes/legacy/EventsField.tscn -- --zoom 4 --cell 5,0 --play field.forest.he --capture-at 6 --capture out/tree-he-flash.png
 ```
 
 Снимки: `tree-he-flash.png` (кадр 6 — белое ядро, оранжевая бахрома, шипы наружу,
