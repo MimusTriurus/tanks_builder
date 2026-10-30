@@ -255,6 +255,8 @@ public sealed partial class Tank3DBench
             StandKnocked(_parked[^1], wasFate);
         using (Prof.Measure("takeover.choose"))
             Choose(true);
+        // the view flies to it rather than jumping with the rig
+        GlideTo(_rig.Position);
         // No log line: a print in a frame costs up to 100 ms (docs/perf.md, BOT-7).
         _orderNote = $"ведёшь {next.Tag}";
     }

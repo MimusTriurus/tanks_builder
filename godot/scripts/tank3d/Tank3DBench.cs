@@ -548,6 +548,7 @@ public sealed partial class Tank3DBench : Node3D
         float was = _zoom;
         _zoom = Mathf.Clamp(_zoom * k, least, ZoomMost);
         _zoomFit = false;
+        _glideTo = null;
         if (cursor is not Vector2 c)
             return;
         Vector2 window = GetViewport().GetVisibleRect().Size;
@@ -575,14 +576,52 @@ public sealed partial class Tank3DBench : Node3D
     private void PanBy(Vector2 screen)
     {
         float h = Mathf.Max(GetViewport().GetVisibleRect().Size.Y, 1.0f);
+        _glideTo = null;
         _viewAt = (_viewAt ?? _viewNow) - screen * (_camera.Size / h);
     }
 
     /// <summary>Back to following the tank.</summary>
     private void FollowTank()
     {
+        _glideTo = null;
         _viewAt = null;
         Log.Print("tank3d: camera follows the tank");
+    }
+
+    /// <summary>How long the view takes to fly to a unit taken, s.</summary>
+    private const float GlideTime = 0.45f;
+
+    /// <summary>A flight of the view's middle under way: from where it stood
+    /// to the unit, eased in and out; the drag, the wheel or Home end it.</summary>
+    private Vector2? _glideTo;
+    private Vector2 _glideFrom;
+    private float _glideT;
+
+    /// <summary>
+    /// The view's middle flown to <paramref name="world"/>, the unit taken
+    /// (<see cref="TakeOver"/>, the roster): from the middle as last framed,
+    /// not a jump. Following the tank (<see cref="FollowTank"/>) holds the view
+    /// inside the board and at the fit did not move; the flight ends as a view
+    /// the player moved, whose middle only is kept over the board
+    /// (<c>FrameCamera</c>), so the unit stands in the middle of the screen.
+    /// </summary>
+    private void GlideTo(Vector3 world)
+    {
+        _glideFrom = _viewNow;
+        _glideTo = new Vector2(world.X, world.Z * Squash - world.Y * RiseFactor);
+        _glideT = 0.0f;
+        _viewAt = _glideFrom;
+    }
+
+    /// <summary>Every frame, before <c>FrameCamera</c>.</summary>
+    private void GlideTick(float dt)
+    {
+        if (_glideTo is not Vector2 to)
+            return;
+        _glideT = Mathf.Min(1.0f, _glideT + dt / GlideTime);
+        _viewAt = _glideFrom.Lerp(to, Mathf.SmoothStep(0.0f, 1.0f, _glideT));
+        if (_glideT >= 1.0f)
+            _glideTo = null;
     }
 
     /// <summary>
@@ -1956,7 +1995,10 @@ public sealed partial class Tank3DBench : Node3D
         using (Prof.Measure("match"))
             MatchTick(dt);
         using (Prof.Measure("camera"))
+        {
+            GlideTick(dt);
             FrameCamera();
+        }
         Prof.Scope hud = Prof.Measure("hud");
         // Rebuilt only when what it says changed: built every frame it was
         // 6 KB a frame of strings for a text that stood still (BOT-3).

@@ -19,8 +19,8 @@ namespace TankSpriteTest;
 /// pointer rests on the icon (<see cref="RosterDwell"/>), gone as it leaves
 /// (the author's note, 2026-10-30). The one in play's has the turn in it.</item>
 /// <item><b>A click</b> takes the unit, as the left button on its hull does
-/// (<see cref="MatchTakes"/>), and the view centres on it
-/// (<see cref="RosterCentre"/>); on the one in play it only centres.</item>
+/// (<see cref="MatchTakes"/>), and the view flies to it
+/// (<see cref="GlideTo"/>); on the one in play, only the flight.</item>
 /// </list>
 /// Outside a match there is no roster and the card stays bottom left
 /// (<c>Tank3DBench.Card</c>). <c>--do roster-hover=N</c> holds the pointer on
@@ -172,45 +172,26 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>The icon's unit taken, as the left button on its hull takes it
-    /// (<c>OrderClick</c>), and the camera after it.</summary>
+    /// (<c>OrderClick</c>); the view flies to it (<see cref="GlideTo"/>, in
+    /// <see cref="TakeOver"/>). On the one in play, only the flight.</summary>
     private void RosterTake(int i)
     {
         RosterSlot s = _rosterSlots[i];
         if (s.Riding)
         {
-            RosterCentre();
+            GlideTo(_rig.Position);
             return;
         }
         if (s.Parked is { } standing)
         {
             if (MatchTakes(standing))
-            {
                 TakeOver(standing);
-                RosterCentre();
-            }
             return;
         }
         // the own one taken for a target: back to standing, then over
         DropTarget();
         if (_parked.Count > 0 && _parked[^1].Tag == s.Tag && MatchTakes(_parked[^1]))
-        {
             TakeOver(_parked[^1]);
-            RosterCentre();
-        }
-    }
-
-    /// <summary>
-    /// The view's middle put on the unit on the rig. Following
-    /// (<see cref="FollowTank"/>) holds the view inside the board, so at the
-    /// fit, where the board is smaller than the view, the camera did not move;
-    /// a view the player moved only keeps its middle over the board
-    /// (<c>FrameCamera</c>), so the unit stands in the middle of the screen.
-    /// The drag and the wheel go on from there; Home follows the tank again.
-    /// </summary>
-    private void RosterCentre()
-    {
-        Vector3 at = _rig.Position;
-        _viewAt = new Vector2(at.X, at.Z * Squash - at.Y * RiseFactor);
     }
 
     private void DrawRoster()
