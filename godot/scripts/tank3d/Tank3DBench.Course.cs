@@ -172,6 +172,8 @@ public sealed partial class Tank3DBench
             _ways.Clear();
             Unlock();
             GhostTick(null);
+            // «Засада» on: the hexes its axes watch instead, in red (Tank3DBench.Ambush)
+            AmbushZone(mesh);
             _courseInk?.QueueRedraw();
             return;
         }
@@ -417,10 +419,6 @@ public sealed partial class Tank3DBench
     /// </summary>
     private void ZoneBand(Steps.Reach reach, Vector2[] corner, int pieces)
     {
-        _edges.Clear();
-        _edgeFrom.Clear();
-        _edgeTo.Clear();
-        _band.Clear();
         // the cells a move ends on and the one the tank stands on - filled
         // with them (ZoneTone), it is ringed with them: before, the edges
         // facing it were skipped and its own never walked, and the outline
@@ -429,13 +427,31 @@ public sealed partial class Tank3DBench
         foreach ((Vector2I c, int _) in reach.Cells)
             _zoneFill.Add(c);
         _zoneFill.Add(reach.Start.Cell);
+        ZoneBand(corner, pieces);
+    }
+
+    /// <summary>The cells of <see cref="_zoneFill"/> as a set, for the outline's
+    /// «is the cell beside in the zone» - kept, not made each frame.</summary>
+    private readonly HashSet<Vector2I> _zoneSet = new();
+
+    /// <summary>The outline round the cells in <see cref="_zoneFill"/> - the
+    /// move's zone, or the ambush's axes (Tank3DBench.Ambush).</summary>
+    private void ZoneBand(Vector2[] corner, int pieces)
+    {
+        _edges.Clear();
+        _edgeFrom.Clear();
+        _edgeTo.Clear();
+        _band.Clear();
+        _zoneSet.Clear();
+        foreach (Vector2I cell in _zoneFill)
+            _zoneSet.Add(cell);
         foreach (Vector2I cell in _zoneFill)
         {
             Vector2 mid = CellFlat(cell);
             foreach (int side in HexField.EdgeHeadings)
             {
                 Vector2I next = HexField.Step(cell, side);
-                if (reach.Reaches(next) || next == reach.Start.Cell)
+                if (_zoneSet.Contains(next))
                     continue;
                 int k = EdgeOf(cell, side, corner);
                 Vector2 a = mid + corner[k], b = mid + corner[(k + 1) % 6];

@@ -473,6 +473,63 @@ public sealed partial class Tank3DBench
         return (from, end, true);
     }
 
+    /// <summary>
+    /// With «Засада» on, the hexes the ambush may watch, as the move's zone is
+    /// drawn (<c>Zone</c>) but red: every axis it may be set on now - all six
+    /// for a turret, the hull's for a casemate, the first pick and the two
+    /// beside it once the medium has one - each from the first hex the gun
+    /// may fire at (<see cref="Gunnery.MayTarget"/>: not the one beside) to
+    /// the first thing that cuts it, as the core sees it
+    /// (<see cref="Battle.Sees"/>): a wall on an edge or the board's edge
+    /// before it, a hull, a rise or a wood or smoke on its level the last hex
+    /// watched. False with the mode off.
+    /// </summary>
+    private bool AmbushZone(ImmediateMesh mesh)
+    {
+        if (!_ambushMode || !Match || _field is null || _tile is null || !_chosen || _fate != Fate.Alive)
+            return false;
+        _zoneFill.Clear();
+        bool thermal = (KitOf(_unitId) & Kit.Thermal) != 0;
+        int level = _field.LevelAt(CellHere);
+        foreach (int axis in HexField.EdgeHeadings)
+        {
+            string why = _ambushPick is int first ? (axis == first ? "" : AmbushWhy(first, axis)) : AmbushWhy(axis, -1);
+            if (why.Length > 0)
+                continue;
+            Vector2I at = CellHere;
+            for (int k = 1; k <= 16; k++)
+            {
+                if (_field.Walled(at, axis))
+                    break;
+                Vector2I next = HexField.Step(at, axis);
+                if (next == at || !_field.InBounds(next))
+                    break;
+                if (Gunnery.MayTarget(_profile.Lobs, k, true) == Gunnery.Distance.Fits)
+                    _zoneFill.Add(next);
+                if (UnitOn(next) is not null || _field.LevelAt(next) > level
+                    || (_field.LevelAt(next) >= level && BoardRules.Screened(_field, next, thermal)))
+                    break;
+                at = next;
+            }
+        }
+        if (_zoneFill.Count == 0)
+            return true;
+        Vector2[] corner = Corners();
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        var tint = new Color(AimPierce, ZoneTone);
+        foreach (Vector2I cell in _zoneFill)
+            ZoneCell(mesh, tint, cell, corner);
+        ZoneBand(corner, 1);
+        var line = new Color(AimPierce, 0.95f);
+        for (int i = 0; i < _band.Count; i++)
+        {
+            mesh.SurfaceSetColor(line);
+            mesh.SurfaceAddVertex(_band[i]);
+        }
+        mesh.SurfaceEnd();
+        return true;
+    }
+
     /// <summary>The beads of the axis or axes being picked: the medium's first
     /// pick and the one under the pointer, red where the ambush may be set,
     /// grey where not. True when the mode had the beads.</summary>
