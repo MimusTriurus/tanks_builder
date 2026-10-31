@@ -231,15 +231,18 @@ public sealed partial class Tank3DBench
             else
                 RosterTank(c, box.Position + new Vector2(RosterIcon * 0.5f, 22.0f), cls,
                            gone ? RosterGrey : ink, a);
-            // the key that takes it (Tank3DBench.Acts), top left - the state's
-            // token has the other corner
+            // the key that takes it (Tank3DBench.Acts): a disc sat on the top
+            // left corner, half off the icon, as a game's hotkey badge - the
+            // state's token has the other corner
             if (i < RosterKeys.Length)
             {
-                var plate = new Rect2(box.Position + new Vector2(4.0f, 4.0f), 22.0f, 15.0f);
-                c.DrawRect(plate, new Color(0.0f, 0.0f, 0.0f, 0.55f * a));
-                c.DrawRect(plate, new Color(gone ? RosterGrey : CardPale, 0.5f * a), false, 1.0f);
-                c.DrawString(font, plate.Position + new Vector2(0.0f, 11.5f), RosterKeys[i],
-                             HorizontalAlignment.Center, plate.Size.X, 11, new Color(gone ? RosterGrey : CardPale, a));
+                const float r = 11.0f;
+                Vector2 at = box.Position + new Vector2(3.0f, 3.0f);
+                Color key = gone ? RosterGrey : CardPale;
+                c.DrawCircle(at, r + 1.5f, new Color(key, 0.85f * a));
+                c.DrawCircle(at, r, new Color(0.06f, 0.065f, 0.06f, a));
+                c.DrawString(font, at + new Vector2(-r, 4.0f), RosterKeys[i],
+                             HorizontalAlignment.Center, 2.0f * r, 11, new Color(key, a));
             }
             int ci = Array.IndexOf(MovementProfile.All, cls);
             c.DrawString(font, box.Position + new Vector2(0.0f, RosterIcon - 9.0f), ci >= 0 ? ClassShort[ci] : cls.Tag,
