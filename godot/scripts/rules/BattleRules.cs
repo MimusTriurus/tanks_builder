@@ -26,9 +26,10 @@ namespace TankSpriteTest;
 /// the field's tick, the win on points (Д9).
 ///
 /// <b>Not yet</b>: an ambush that holds an incendiary round back - it fires a
-/// plain one; placement, which is before the first turn and the bench's.
+/// plain one; placement, which is before the first turn - the bench's and
+/// <see cref="BattleRun"/>'s. Orders and the turn going over by itself: BattleOrder.cs (Д10).
 /// </summary>
-public static class Battle
+public static partial class Battle
 {
     private const int FireRounds = 2;
 

@@ -820,6 +820,29 @@ public static partial class SelfTest
                   $"read {map.Parked[0]}, {map.Parked[1]}, {map.Parked[2]}; again {again.Parked[0]}, {again.Parked[1]}; refused: {refused}");
         }
 
+        // Д10: the match without the scene - drill10 by Д5's commands on the
+        // core alone ends as the bench ended it (the ricochet's knock-out, HM
+        // on the mine, the ram into the pond, TD and HT gone up, two fires put
+        // out), every order taken and the turn going by itself where it went.
+        {
+            BoardMap map = BoardMap.ByName("drill10");
+            BattleState s = BattleRun.Start(map, Camp.Green);
+            var wrong = new List<string>();
+            List<Order> orders = Order.ParseAll("take:1;fire:5,3;take:9;go:7,4;take:4;fire:6,3;take:6;pass;take:1;ram:3,2;pass;"
+                                                + "take:6;pass;take:4;fire:6,3;take:6;douse;pass;take:2;douse;pass", wrong);
+            int refused = BattleRun.Play(map, s, orders);
+            string[] said = s.Say().Split('\n');
+            check("Д5's match on drill10 by the core alone ends as on the bench - round 5, brown to move, LT drowned, "
+                  + "TD and HT destroyed, HM knocked out on the mine, MT on LT's hex",
+                  wrong.Count == 0 && orders.Count == 21 && refused == 0
+                  && said[0] == "round 5, turn 9, Brown to move, player 1 Green"
+                  && said.Contains("Brown LTR#5 (3,1) h270 Drowned") && said.Contains("Brown HTR#7 (5,3) h270 Destroyed")
+                  && said.Contains("Brown TDR#8 (6,3) h270 Destroyed") && said.Contains("Brown HMR#9 (7,4) h270 Knocked")
+                  && said.Contains("Green MTR#1 (3,2) h90 Alive") && said.Contains("Brown MTR#6 (6,2) h270 Alive")
+                  && said.Contains("Green HTR#2 (7,2) h90 Alive"),
+                  $"wrong {string.Join(", ", wrong)}, {refused} refused: {s.Say().Replace('\n', ';')}");
+        }
+
         // A copy is a copy.
         {
             BattleState s = Probe(9, 10);

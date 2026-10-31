@@ -132,6 +132,34 @@ public sealed class BattleState
         return null;
     }
 
+    /// <summary>
+    /// The match as text, a line a fact, in a fixed order (Д10): whose turn,
+    /// the outcome, the point, each unit, the burning woods and the smoke,
+    /// each wood, wall and mine not as laid. Two states that say the same
+    /// are the same match - the core's run and the bench's are compared by
+    /// it. A wood's rounds left are not in it: the bench does not keep them.
+    /// </summary>
+    public string Say()
+    {
+        var t = new System.Text.StringBuilder();
+        t.Append($"round {Round}, turn {TurnNo}, {Turn} to move, player 1 {First}\n");
+        t.Append($"outcome {(Drawn ? "drawn" : Won is Camp w ? $"{w} won" : "on")}, last shot at a tank in round {LastStrike}\n");
+        if (Point is not null)
+            t.Append($"point {Holder?.ToString() ?? "nobody"} holds, green {Score[0]}, brown {Score[1]}, since round {LastShift}\n");
+        foreach (BattleUnit u in Units)
+            t.Append(u).Append('\n');
+        for (int r = 0; r < Board.Rows; r++)
+            for (int q = 0; q < Board.Columns; q++)
+            {
+                var c = new Vector2I(q, r);
+                if (Board.CoverAt(c) != Cover.None && Board.CoverStateAt(c) != CoverState.Intact)
+                    t.Append($"{Board.CoverAt(c)} ({q},{r}) {Board.CoverStateAt(c)}\n");
+                if (Board.Smoked(c))
+                    t.Append($"smoke ({q},{r})\n");
+            }
+        return t.ToString();
+    }
+
     public BattleState Clone()
     {
         var s = (BattleState)MemberwiseClone();

@@ -249,6 +249,13 @@ public sealed partial class Tank3DBench : Node3D
     /// (<see cref="Loading"/>).</summary>
     private async Task Build()
     {
+        // --battle-run: a match on the rules core alone, nothing of the scene
+        // built (BattleRun, docs/battle-core-plan.md Д10); the frame stays waiting
+        if (BattleRun.Asked(OS.GetCmdlineUserArgs()))
+        {
+            GetTree().Quit(BattleRun.Main(OS.GetCmdlineUserArgs()));
+            return;
+        }
         try
         {
             await Building();
@@ -1490,6 +1497,10 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--commands" && more)
                 foreach (string one in args[++i].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                     _commands.Enqueue(one);
+            // --state-out PATH: the match as the core reads it off the bench, once
+            // the commands are given and it has settled - BattleRun's result to diff
+            else if (a == "--state-out" && more)
+                _stateOut = args[++i];
         }
         TakeSession();
         MatchSetup();

@@ -341,13 +341,18 @@ public sealed partial class Tank3DBench
     /// waits for the next turn's first quiet frame the same way.</summary>
     private void CommandsTick(bool busy)
     {
-        if (_commands.Count == 0)
+        if (_commands.Count == 0 && _stateOut is null)
             return;
-        bool quiet = !busy && _passIn is null && _turnGoal is null && !RouteMoving && _built;
+        bool quiet = !busy && _passIn is null && _turnGoal is null && !RouteMoving && _built && _pointDue is null;
         _commandsQuiet = quiet ? _commandsQuiet + 1 : 0;
         if (_commandsQuiet < 10)
             return;
         _commandsQuiet = 0;
+        if (_commands.Count == 0)
+        {
+            StateOut();
+            return;
+        }
         string next = _commands.Dequeue();
         if (ParseCommand(next) is { } c)
             Execute(c);
@@ -355,6 +360,27 @@ public sealed partial class Tank3DBench
             Log.Print($"tank3d: --commands {next}: not a command");
         if (_commands.Count == 0)
             Log.Print("tank3d: --commands: all given");
+    }
+
+    /// <summary><c>--state-out PATH</c>: where the match goes once the commands
+    /// are given and the bench has settled - written once.</summary>
+    private string? _stateOut;
+
+    /// <summary>The match as the core reads it off the bench
+    /// (<see cref="ShadowOfBench"/>), in <see cref="BattleState.Say"/>'s words -
+    /// what <c>--battle-run</c> writes after the same commands (Д10). The run
+    /// ends with it unless a picture is still to be taken.</summary>
+    private void StateOut()
+    {
+        if (_stateOut is not { } path || _field is null)
+            return;
+        _stateOut = null;
+        string full = path.StartsWith("res://") || path.StartsWith("user://") ? ProjectSettings.GlobalizePath(path) : System.IO.Path.GetFullPath(path);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
+        System.IO.File.WriteAllText(full, ShadowOfBench().Say());
+        Log.Print($"tank3d: --state-out: the match as it stands - {full}");
+        if (_capturePath is null && _sequenceDir is null && _perfDir is null)
+            GetTree().Quit();
     }
 
     /// <summary>The wall's ram is to be had: the bonus act open and a wall
