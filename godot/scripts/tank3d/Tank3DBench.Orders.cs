@@ -165,6 +165,13 @@ public sealed partial class Tank3DBench
         _orderNote = note;
         if (!ram)
             MatchMoved();
+        // the rules core plays it too (Tank3DBench.Shadow)
+        var cells = new List<Vector2I>(path);
+        int face = _routeGoal?.Side ?? -1;
+        if (ram)
+            ShadowAct($"ram {MapAt(cells[^1])}", s => Battle.Ram(s, cells[^1]));
+        else
+            ShadowAct($"move to {MapAt(cells[^1])} facing {face}", s => Battle.Move(s, cells, face));
     }
 
     /// <summary>The flat side the hull points at - the nearest of the six to
@@ -228,6 +235,8 @@ public sealed partial class Tank3DBench
         _routeGoal = null;
         float from = _turnGoal ?? Mathf.Round(_heading / 60.0f) * 60.0f;
         _turnGoal = from + (left ? 60.0f : -60.0f);
+        int side = HexSideOf(CellHere, _turnGoal.Value);
+        ShadowAct($"turn to {side}", s => Battle.Turn(s, side));
     }
 
     /// <summary>The fastest the tank may go on the leg from

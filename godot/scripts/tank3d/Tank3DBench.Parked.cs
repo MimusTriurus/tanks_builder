@@ -263,6 +263,13 @@ public sealed partial class Tank3DBench
             Choose(true);
         // the view flies to it rather than jumping with the rig
         GlideTo(_rig.Position);
+        // another unit taken in a turn already under way (Tank3DBench.Shadow);
+        // the hand-over's own is the next turn's, read off the bench
+        if (_shadow is not null)
+        {
+            int id = next.Id;
+            ShadowAct($"take #{id}", s => Battle.Take(s, id));
+        }
         // No log line: a print in a frame costs up to 100 ms (docs/perf.md, BOT-7).
         _orderNote = $"ведёшь {next.Tag}";
     }

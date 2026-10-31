@@ -91,6 +91,8 @@ public sealed partial class Tank3DBench
         }
         MoveSnap s = _moveSnap!;
         CancelOrder();
+        // the core's turn goes too, taken again at the next action (Tank3DBench.Shadow)
+        ShadowDrop();
         _coastTo = null;
         _speed = 0;
         _home = s.Cell;

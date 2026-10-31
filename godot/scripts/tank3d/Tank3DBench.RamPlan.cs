@@ -249,6 +249,8 @@ public sealed partial class Tank3DBench
         {
             MatchMoved();
             _turnGoal = HeadingFor(CellHere, plan.Side);
+            int side = plan.Side;
+            ShadowAct($"turn to {side}", s => Battle.Turn(s, side));
         }
         _ramBefore = (_mt.Bonus, _mt.Drove);
         _ramWaiting = plan;

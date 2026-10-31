@@ -376,6 +376,8 @@ public sealed partial class Tank3DBench
     /// that burns out stands, as every other, rather than rides.</summary>
     private void PassTurn()
     {
+        // the rules core read against the bench (Tank3DBench.Shadow)
+        ShadowTurnOver();
         Side ending = _mt.Turn;
         int turn = _mt.TurnNo++;
         HandOver();
@@ -495,6 +497,8 @@ public sealed partial class Tank3DBench
         }
         RollTick();
         bool busy = MatchBusy;
+        // the rules core takes the turn off the bench (Tank3DBench.Shadow)
+        ShadowTick(busy);
         if (_other is { Unit: true, Fate: Fate.Destroyed } && !busy)
             DropTarget();
         if (MatchOver)

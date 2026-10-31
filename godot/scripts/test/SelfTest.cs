@@ -22560,6 +22560,7 @@ public static partial class SelfTest
         // three months from now will be judged by this instead.
         // The same boards as plain arrays, against the bench's (SelfTest.Battle).
         BattleBoardTwins(Check);
+        BattleCore(Check);
 
         Theme("the authored boards");
         foreach (string name in BoardMap.Names)

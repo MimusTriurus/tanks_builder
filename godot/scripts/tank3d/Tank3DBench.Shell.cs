@@ -106,6 +106,9 @@ public sealed partial class Tank3DBench
     private void Launch()
     {
         MatchFired();
+        if (_shadowAim is Vector2I aim)
+            ShadowAct($"fire at {MapAt(aim)}", s => Battle.Fire(s, aim));
+        _shadowAim = null;
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
         Vector3 bore = _model.Muzzle.GlobalBasis.Z.Normalized();
@@ -641,10 +644,15 @@ public sealed partial class Tank3DBench
     /// round goes along the axis - or, with a tank on it, at the tank: the
     /// bomb on its roof, the round at its middle.
     /// </summary>
+    /// <summary>The hex the round about to fly was laid on, for the rules core
+    /// (Tank3DBench.Shadow).</summary>
+    private Vector2I? _shadowAim;
+
     private void AimCell(Vector2I cell)
     {
         if (_field is null || _fate != Fate.Alive || !_field.InBounds(cell))
             return;
+        _shadowAim = cell;
         // an enemy standing there is the target now (Tank3DBench.Match)
         TargetOn(cell);
         Vector2I own = CellHere;

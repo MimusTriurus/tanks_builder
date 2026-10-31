@@ -260,6 +260,7 @@ public sealed partial class Tank3DBench
             return;
         }
         Quench(_unitId, steam: true);
+        ShadowAct("douse", s => Battle.Douse(s));
         _mt.Bonus = true;
         _ramMode = false;
         Unlock();
