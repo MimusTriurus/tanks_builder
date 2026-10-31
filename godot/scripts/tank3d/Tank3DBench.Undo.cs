@@ -135,6 +135,9 @@ public sealed partial class Tank3DBench
     /// set only when the reason changes.</summary>
     private void UndoTick()
     {
+        // the end of the turn beside it, greyed with the match over (Д6)
+        if (_passButton is not null && _passButton.Disabled != MatchOver)
+            _passButton.Disabled = MatchOver;
         if (_undoButton is null)
             return;
         string why = UndoWhy();

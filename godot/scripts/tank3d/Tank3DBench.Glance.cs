@@ -285,6 +285,7 @@ public sealed partial class Tank3DBench
         Log.Print($"tank3d: {(leg.Through ? "pass" : "ricochet")} on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
                  + (leg.Pierces ? "pierced" : "held, spent"));
         // a match's unit has a fate (Tank3DBench.Match)
+        TankShot();
         UnitStruck(p, leg.Pierces);
     }
 

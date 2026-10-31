@@ -298,6 +298,7 @@ public static class Battle
     private static void Strike(BattleState s, BattleUnit hit, int heading, int might, int fromLevel,
                                bool glance, bool through)
     {
+        s.LastStrike = s.Round;
         if (hit.Out)
         {
             s.Events.Add(new BattleEvent(BattleEventKind.Hit, hit.Id, hit.Cell, might, "out"));
@@ -337,6 +338,7 @@ public static class Battle
     {
         if (s.At(aim) is { } hit)
         {
+            s.LastStrike = s.Round;
             s.Events.Add(new BattleEvent(BattleEventKind.Hit, hit.Id, aim, 5, "Roof"));
             if (hit.Out)
                 Explode(s, hit);
@@ -487,6 +489,19 @@ public static class Battle
             s.Round++;
         }
         Over(s);
+        Stalemate(s);
+    }
+
+    /// <summary>Пат (match.md, «Пат — ничья»): <see cref="MatchRules.QuietRoundsDraw"/>
+    /// whole rounds without a shot at a tank - a round into the ground, a wall
+    /// or a wood is no shot at one, nor a mine or a fire. Read after the win:
+    /// the last tank burnt out on the same tick is a win, not a draw.</summary>
+    private static void Stalemate(BattleState s)
+    {
+        if (s.Over || s.QuietRounds < MatchRules.QuietRoundsDraw)
+            return;
+        s.Drawn = true;
+        s.Events.Add(new BattleEvent(BattleEventKind.Drawn, -1, default, s.QuietRounds, "stalemate"));
     }
 
     /// <summary>The round's end (match.md): each burning wood a round shorter,

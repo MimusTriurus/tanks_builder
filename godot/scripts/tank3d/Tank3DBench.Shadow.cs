@@ -78,7 +78,7 @@ public sealed partial class Tank3DBench
         {
             Board = BattleBoard.Of(_field!),
             Turn = CampOf(_mt.Turn), Round = _mt.Round, TurnNo = _mt.TurnNo,
-            Drove = _mt.Drove, Fired = _mt.Fired, Bonus = _mt.Bonus,
+            Drove = _mt.Drove, Fired = _mt.Fired, Bonus = _mt.Bonus, LastStrike = _mt.LastStrike,
             Won = _mt.Won is Side w ? CampOf(w) : null, Drawn = _mt.Drawn,
             Active = _side == _mt.Turn && _unitId >= 0 ? _unitId : null,
         };
@@ -143,6 +143,13 @@ public sealed partial class Tank3DBench
         if (_shadow is null && !busy && _field is not null && _lineup.Count > 0 && !MatchOver
             && _passIn is null && !_mt.Drove && !_mt.Fired && !_mt.Bonus)
             ShadowBegin();
+        // the match over at the hand-over: the last turn's end - the outcome
+        // with it - read all the same, once the bench has settled
+        else if (MatchOver && _shadowEnded is { } ended && !busy)
+        {
+            ShadowRead("the end of the last turn", ended, ShadowOfBench());
+            _shadowEnded = null;
+        }
     }
 
     /// <summary>The turn handed over: the core against the bench, then the
@@ -170,6 +177,11 @@ public sealed partial class Tank3DBench
     {
         _shadowSaid.Clear();
         int woods = 0;
+        if (core.LastStrike != bench.LastStrike)
+            _shadowSaid.Add($"last shot at a tank core round {core.LastStrike} bench {bench.LastStrike}");
+        if (core.Drawn != bench.Drawn || core.Won != bench.Won)
+            _shadowSaid.Add($"outcome core {(core.Drawn ? "drawn" : core.Won?.ToString() ?? "on")}"
+                            + $" bench {(bench.Drawn ? "drawn" : bench.Won?.ToString() ?? "on")}");
         foreach (BattleUnit c in core.Units)
         {
             if (bench.Unit(c.Id) is not { } b)

@@ -200,6 +200,41 @@ public static partial class SelfTest
                   $"LT {light ?? "ok"}; MT {medium}; MT turned {late}");
         }
 
+        // Д6, match.md «Пат — ничья»: so many whole rounds without a shot at a
+        // tank and the match is drawn; a round into a wall is no such shot, a
+        // round on a tank - glanced off the front or not - puts the clock back.
+        {
+            int quiet = MatchRules.QuietRoundsDraw;
+            BattleState Facing(bool wall)
+            {
+                BattleState s = Probe(9, 10, walls: wall ? new[] { (new Vector2I(4, 6), 90) } : null);
+                Put(s, 0, wall ? "MTR" : "LTR", Camp.Green, 4, 8, 90);
+                Put(s, 1, "HTR", Camp.Brown, 4, wall ? 3 : 5, 270);
+                return s;
+            }
+            BattleState passes = Facing(false);
+            Turns(passes, 2 * quiet - 1);
+            bool early = passes.Drawn;
+            Turns(passes, 1);
+            BattleState walled = Facing(true);
+            Turns(walled, 2);
+            Act(walled, 0, st => Battle.Fire(st, new Vector2I(4, 3)));
+            bool wallHit = walled.Unit(1)!.Fate == UnitFate.Alive && walled.LastStrike == 0;
+            Turns(walled, 2 * quiet - 2);
+            BattleState struck = Facing(false);
+            Turns(struck, 4);
+            Act(struck, 0, st => Battle.Fire(st, new Vector2I(4, 5)));
+            int strikeRound = struck.LastStrike;
+            Turns(struck, 2 * quiet + 1);
+            bool held = !struck.Drawn;
+            Turns(struck, 1);
+            check($"{quiet} rounds without a shot at a tank draw the match; a wall's shot does not hold it off, a tank's does",
+                  !early && passes.Drawn && passes.Events.Any(e => e.Kind == BattleEventKind.Drawn)
+                  && wallHit && walled.Drawn && strikeRound == 3 && held && struck.Drawn,
+                  $"passes: early {early}, at {passes.Round} {passes.Drawn}; wall: {wallHit} drawn {walled.Drawn}; "
+                  + $"struck in round {strikeRound}, held {held}, then {struck.Drawn}: {Said(struck)}");
+        }
+
         // A copy is a copy.
         {
             BattleState s = Probe(9, 10);
@@ -268,4 +303,11 @@ public static partial class SelfTest
     }
 
     private static string Said(BattleState s) => string.Join(", ", s.Events.Select(e => e.ToString()));
+
+    /// <summary>So many turns passed with nothing done.</summary>
+    private static void Turns(BattleState s, int n)
+    {
+        for (int i = 0; i < n; i++)
+            Battle.EndTurn(s);
+    }
 }

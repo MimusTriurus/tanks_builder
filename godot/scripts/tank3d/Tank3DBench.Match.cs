@@ -92,8 +92,14 @@ public sealed partial class Tank3DBench
         /// attack (the shot) and the bonus act (the ram, putting a fire out) -
         /// match.md «Структура хода», п. 5а and 5б, one of each (U-22).</summary>
         public bool Drove, Fired, Bonus;
+        /// <summary>The round of the last shot at a tank, nought for none -
+        /// the stalemate's clock (Tank3DBench.Rules, Д6).</summary>
+        public int LastStrike;
         public Side? Won;
         public bool Drawn;
+
+        /// <summary>Whole rounds since the last shot at a tank (<see cref="BattleState.QuietRounds"/>).</summary>
+        public int QuietRounds => Mathf.Max(0, Round - 1 - LastStrike);
     }
 
     private readonly MatchTurn _mt = new();
@@ -124,7 +130,7 @@ public sealed partial class Tank3DBench
         _modelTag = Roster[0];
         _modelNamed = true;
         _side = Side.Green;
-        Log.Print($"tank3d: match on {_mapName}, {Roster.Length} a side");
+        Log.Print($"tank3d: match on {_mapName}, {Roster.Length} a side; stalemate - {MatchRules.Said}");
     }
 
     // --- the sides -------------------------------------------------------------
@@ -505,6 +511,8 @@ public sealed partial class Tank3DBench
         }
         RollTick();
         bool busy = MatchBusy;
+        // the stalemate, once the hand-over's burning out is done (Tank3DBench.Rules)
+        StalemateTick(busy);
         // the rules core takes the turn off the bench (Tank3DBench.Shadow)
         ShadowTick(busy);
         // what a hex does to a hull coming on to it (Tank3DBench.Rules)
@@ -953,6 +961,7 @@ public sealed partial class Tank3DBench
         h.Add(_mt.Drawn);
         h.Add(_mt.Won);
         h.Add(_mt.Round);
+        h.Add(_mt.LastStrike);
         h.Add(_mt.Turn);
         h.Add(_mt.Drove);
         h.Add(_mt.Fired);
@@ -994,7 +1003,10 @@ public sealed partial class Tank3DBench
         status + "\n"
         + (MatchOver
             ? (_mt.Drawn ? "Ничья" : $"Победа: {SideName(_mt.Won!.Value)}") + $" · раунд {_mt.Round}"
-            : $"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
+            : $"Раунд {_mt.Round}"
+              // the stalemate's count, once there is one (Tank3DBench.Rules)
+              + (_mt.QuietRounds > 0 ? $" (без выстрела по танку {_mt.QuietRounds} из {MatchRules.QuietRoundsDraw})" : "")
+              + $" · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
               + $"атака {(_mt.Fired ? "сделана" : "есть")}, доп. действие {(_mt.Bonus ? "сделано" : "есть")}"
               + (Burning(_unitId) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))

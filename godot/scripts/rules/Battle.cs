@@ -70,6 +70,9 @@ public sealed class BattleState
     /// <summary>The unit this turn belongs to, once it has been taken.</summary>
     public int? Active;
     public bool Drove, Fired, Bonus;
+    /// <summary>The round of the last shot at a tank, nought for none yet
+    /// (match.md, «Пат — ничья»).</summary>
+    public int LastStrike;
     public Camp? Won;
     public bool Drawn;
     /// <summary>Burning woods and the rounds they have left (2 when lit, GDD match.md).</summary>
@@ -77,6 +80,10 @@ public sealed class BattleState
     public List<BattleEvent> Events = new();
 
     public bool Over => Won is not null || Drawn;
+
+    /// <summary>Whole rounds played since the last shot at a tank - the
+    /// stalemate's count, the one under way not yet in it.</summary>
+    public int QuietRounds => Math.Max(0, Round - 1 - LastStrike);
 
     public BattleUnit? Unit(int id)
     {

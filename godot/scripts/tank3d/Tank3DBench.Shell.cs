@@ -413,6 +413,7 @@ public sealed partial class Tank3DBench
         o.Roll.Kick(-k * left.Dot(way));
         RockedOther(o, k / 3.2f);
         Log.Print($"tank3d: round on {o.Tag} {face} ({plate}), might {might}, level {level}: {what}");
+        TankShot();
         UnitStruck(o, level > 0);
     }
 
@@ -446,6 +447,7 @@ public sealed partial class Tank3DBench
         _shake.Blast(_profile.ShotShake * 0.6);
         Log.Print($"tank3d: bomb on {o.Tag} at {o.Rig.ToLocal(at).Y:F0} up the hull");
         // the bomb's might is over every roof (units.md, «Броня»)
+        TankShot();
         UnitStruck(o, true);
     }
 

@@ -17,6 +17,9 @@ namespace TankSpriteTest;
 /// <item><b>The heavy's wood</b> (П-17): the wood under a heavy that ends its
 /// turn on it is ground on the board (<c>Cleared</c>), not only in the trees
 /// that fell.</item>
+/// <item><b>The stalemate</b> (П-21, Д6): rounds without a shot at a tank
+/// counted (<see cref="TankShot"/>), and the match drawn at
+/// <see cref="MatchRules.QuietRoundsDraw"/> (<see cref="StalemateTick"/>).</item>
 /// </list>
 /// </summary>
 public sealed partial class Tank3DBench
@@ -110,5 +113,29 @@ public sealed partial class Tank3DBench
             && _field.CoverStateAt(here) is CoverState.Intact or CoverState.Burnt
             && _field.SetCoverState(here, CoverState.Cleared))
             Log.Print($"tank3d: match: the heavy ends its turn on {MapAt(here)} - the wood is ground");
+    }
+
+    /// <summary>A round on a tank - the shot's, a ricochet's, a pass's, the
+    /// mortar's bomb - puts the stalemate's clock back (match.md, «Пат —
+    /// ничья»). A mine, a fire, a blast are not shots, and do not.</summary>
+    private void TankShot()
+    {
+        if (Match)
+            _mt.LastStrike = _mt.Round;
+    }
+
+    /// <summary>Every frame of a match: <see cref="MatchRules.QuietRoundsDraw"/>
+    /// whole rounds without a shot at a tank end it drawn (П-21). Read once the
+    /// hand-over has settled - the turn's burning out gone up - so the last tank
+    /// burnt out on the same tick is a win, as the core has it
+    /// (<c>Battle.Stalemate</c>).</summary>
+    private void StalemateTick(bool busy)
+    {
+        if (MatchOver || busy || _passIn is not null || _mt.QuietRounds < MatchRules.QuietRoundsDraw)
+            return;
+        _mt.Drawn = true;
+        _commands.Clear();
+        Banner($"Ничья по пату · раундов без выстрела по танку: {_mt.QuietRounds}", Colors.White, stay: true);
+        Log.Print($"tank3d: match: {_mt.QuietRounds} rounds without a shot at a tank - drawn in round {_mt.Round}");
     }
 }

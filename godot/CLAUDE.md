@@ -63,7 +63,7 @@
 | `scenes/` | сцены 3D-линии и инструменты: `Tank3D`, `Match3D`, `Tree3D`, `Relief3D`, `Editor` |
 | `scenes/legacy/` | спрайтовые сцены устаревшей 2D-линии: `Main`, `Abbey`, `TankTest*`, `CaponTest`, `Events*`, `Effects`, `Wood`, `Wall`, `Relief` |
 | `scripts/` | C# по предмету, не по линии (2D и 3D делят почти всё): `core` — инфраструктура и панель; `rules` — правила GDD; `board` — поле, карты, рельеф; `stage3d` — объёмная доска; `water`, `props`, `walls`; `tank` — танк и его часы, общие для обеих линий; `sprite` — атлас и спрайт танка (2D); `tank3d` — 3D-модель и `Tank3DBench.*`; `cel` — cel-эффекты 3D; `effects` — `Proc*` и взрывы листом; `editor`; `benches` — корни остальных сцен; `test` — `SelfTest` |
-| `data/` | настройки стенда, читаемые с диска (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets` |
+| `data/` | настройки стенда, читаемые с диска (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets`, `match` (числа партии: пат) |
 | `maps/`, `perf/` | карты `maps/*.json` ([docs/editor.md](docs/editor.md)) и эталоны `--perf` ([docs/perf.md](docs/perf.md)) |
 | `tools/` | `stage_sounds.sh` и `render/` — вспомогательные скрипты вне движка |
 
