@@ -237,6 +237,8 @@ public sealed partial class Tank3DBench
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
         Banner($"Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+        // the placement before the first turn, on a map with a zone (Tank3DBench.Deploy)
+        DeployStart();
     }
 
     /// <summary>The side's paint on a model: brown or the model's own.</summary>
@@ -279,6 +281,8 @@ public sealed partial class Tank3DBench
             return "";
         if (MatchOver)
             return "партия окончена";
+        if (Deploying)
+            return "идёт расстановка — сначала «В бой»";
         if (_side != _mt.Turn)
             return $"ходят {SideName(_mt.Turn)}";
         if (_passIn is not null)
@@ -294,13 +298,13 @@ public sealed partial class Tank3DBench
 
     /// <summary>The shot of this turn is spent - fired, or the turn going over:
     /// no line of fire nor firing post is drawn for a shot there is not.</summary>
-    private bool MatchShotSpent => Match && (_mt.Fired || _passIn is not null || MatchOver);
+    private bool MatchShotSpent => Match && (_mt.Fired || _passIn is not null || MatchOver || Deploying);
 
     /// <summary>The bonus act of this turn is spent - the ram or the fire put
     /// out, or the turn going over.</summary>
     private const string BonusWaits = "атака сделана — осталось доп. действие или «Конец хода»";
 
-    private bool MatchBonusSpent => Match && (_mt.Bonus || _passIn is not null || MatchOver);
+    private bool MatchBonusSpent => Match && (_mt.Bonus || _passIn is not null || MatchOver || Deploying);
 
     /// <summary>Whether a bonus act is still to be had once the move is over:
     /// a fire to put out, or a unit beside to ram - the move being spent, the
@@ -326,6 +330,8 @@ public sealed partial class Tank3DBench
             return "";
         if (MatchOver)
             return "партия окончена";
+        if (Deploying)
+            return "идёт расстановка — сначала «В бой»";
         if (_side != _mt.Turn)
             return $"ходят {SideName(_mt.Turn)}";
         if (_passIn is not null)
@@ -391,6 +397,12 @@ public sealed partial class Tank3DBench
     {
         if (!Match || MatchOver)
             return;
+        // in placement the button is «В бой» (Tank3DBench.Deploy)
+        if (Deploying)
+        {
+            Execute(new Command(CommandKind.Ready));
+            return;
+        }
         if (MatchBusy)
         {
             _matchNote = "дождись конца приказа";
@@ -540,6 +552,12 @@ public sealed partial class Tank3DBench
         }
         RollTick();
         bool busy = MatchBusy;
+        // the placement before the first turn (Tank3DBench.Deploy): nothing of a turn yet
+        if (Deploying)
+        {
+            DeployTick(busy);
+            return;
+        }
         // the control point's tick, owed from the hand-over (Tank3DBench.Point)
         PointDueTick(busy);
         // the stalemate, once the hand-over's burning out is done (Tank3DBench.Rules)
@@ -922,7 +940,7 @@ public sealed partial class Tank3DBench
         // end of the turn in the far corner.
         var pass = new Button
         {
-            Text = "Конец хода   Ctrl+Enter",
+            Text = Deploying ? "В бой   Ctrl+Enter" : "Конец хода   Ctrl+Enter",
             AnchorLeft = 1.0f, AnchorRight = 1.0f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
             OffsetLeft = -246.0f, OffsetRight = -12.0f, OffsetTop = -56.0f, OffsetBottom = -12.0f,
             FocusMode = Control.FocusModeEnum.None,
@@ -935,6 +953,8 @@ public sealed partial class Tank3DBench
         BuildActs(layer);
         BuildCursors();
         BuildRoster(layer);
+        // the curtain between the sides in placement (Tank3DBench.Deploy), over all
+        BuildCurtain(layer);
     }
 
     private Button? _passButton;
@@ -1009,6 +1029,9 @@ public sealed partial class Tank3DBench
         h.Add(_ambush.TryGetValue(_unitId, out var watching) ? watching.Shots : 0);
         h.Add(_mt.Turn);
         h.Add(_mt.Drove);
+        h.Add(_deploy);
+        h.Add(_curtainUp);
+        h.Add(_orderNote);
         h.Add(_mt.Fired);
         h.Add(_mt.Bonus);
         h.Add(_side);
@@ -1045,6 +1068,8 @@ public sealed partial class Tank3DBench
     /// <summary>The HUD's lines in a match: where the turn stands, and with F1
     /// how to play it.</summary>
     private string MatchHud(string status) =>
+        // the placement before the first turn (Tank3DBench.Deploy)
+        Deploying ? status + "\n" + DeployHud() + PointHud() :
         status + "\n"
         + (MatchOver
             ? (_mt.Drawn ? "Ничья" : $"Победа: {SideName(_mt.Won!.Value)}") + $" · раунд {_mt.Round}" + PointHud()

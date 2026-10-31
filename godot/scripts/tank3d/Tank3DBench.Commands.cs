@@ -31,7 +31,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -46,6 +46,7 @@ public sealed partial class Tank3DBench
             CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke
                 or CommandKind.Mine or CommandKind.Repair or CommandKind.Winch => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
             CommandKind.Ambush => $"ambush {Side}{(Side2 >= 0 ? $"+{Side2}" : "")}",
+            CommandKind.Place => $"place #{Unit} ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
             _ => Kind.ToString().ToLowerInvariant(),
         };
     }
@@ -58,7 +59,10 @@ public sealed partial class Tank3DBench
             return "не партия";
         if (MatchOver)
             return "партия окончена";
-        if (c.Kind is not (CommandKind.Pass or CommandKind.Undo or CommandKind.Take) && MatchBusy)
+        // the placement before the first turn (Tank3DBench.Deploy): only its own, a take and «В бой»
+        if (Deploying && c.Kind is not (CommandKind.Place or CommandKind.Ready or CommandKind.Pass or CommandKind.Take))
+            return "идёт расстановка — сначала «В бой»";
+        if (c.Kind is not (CommandKind.Pass or CommandKind.Undo or CommandKind.Take or CommandKind.Place or CommandKind.Ready) && MatchBusy)
             return "дождись конца приказа";
         switch (c.Kind)
         {
@@ -106,6 +110,10 @@ public sealed partial class Tank3DBench
                     : _mt.Bonus ? "доп. действие этого хода уже сделано" : "";
             case CommandKind.Undo:
                 return UndoWhy();
+            case CommandKind.Place:
+                return PlaceWhy(c.Unit, c.Cell, c.Side);
+            case CommandKind.Ready:
+                return Deploying ? "" : "расстановка окончена";
             default:
                 return "";
         }
@@ -184,6 +192,15 @@ public sealed partial class Tank3DBench
                 break;
             case CommandKind.Undo:
                 UndoMove();
+                break;
+            // the placement (Tank3DBench.Deploy): a command lowers the curtain
+            case CommandKind.Place:
+                CurtainDown();
+                Place(c.Unit, c.Cell, c.Side);
+                break;
+            case CommandKind.Ready:
+                CurtainDown();
+                DeployReady();
                 break;
         }
         Log.Print($"tank3d: command {c}");
@@ -272,7 +289,8 @@ public sealed partial class Tank3DBench
 
     /// <summary><c>--do cmd=KIND[:Q,R][:SIDE]</c>, map cells: <c>take:ID</c>,
     /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
-    /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>.</summary>
+    /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>;
+    /// in placement <c>place:ID:Q,R[:SIDE]</c> and <c>ready</c>.</summary>
     private Command? ParseCommand(string text)
     {
         string[] parts = text.Split(':');
@@ -301,6 +319,9 @@ public sealed partial class Tank3DBench
                 "douse" => new Command(CommandKind.Douse),
                 "pass" => new Command(CommandKind.Pass),
                 "undo" => new Command(CommandKind.Undo),
+                // the placement before the first turn (Tank3DBench.Deploy)
+                "place" => new Command(CommandKind.Place, Cell(parts[2]), parts.Length > 3 ? int.Parse(parts[3]) : -1, int.Parse(parts[1])),
+                "ready" => new Command(CommandKind.Ready),
                 _ => null,
             };
         }

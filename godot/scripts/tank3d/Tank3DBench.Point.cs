@@ -146,33 +146,47 @@ public sealed partial class Tank3DBench
     {
         if (_pointCells is null || _field is null || _tile is null || _noUi)
             return;
-        if (_pointMark is null)
+        _pointMark ??= CellMarker("Point");
+        Side? held = PointHolder();
+        CellMarks(_pointMark, _pointCells, new Color(held is Side s ? SideInk(s) : PointInk, 0.22f),
+                  new Color(PointInk, 0.95f));
+    }
+
+    /// <summary>A mesh of marks on the board's hexes, under the marks and over
+    /// the water - the point's, the deployment zone's.</summary>
+    private MeshInstance3D CellMarker(string name)
+    {
+        var marker = new MeshInstance3D
         {
-            _pointMark = new MeshInstance3D
+            Name = name,
+            Mesh = new ImmediateMesh(),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = new StandardMaterial3D
             {
-                Name = "Point",
-                Mesh = new ImmediateMesh(),
-                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                MaterialOverride = new StandardMaterial3D
-                {
-                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                    VertexColorUseAsAlbedo = true,
-                    Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                    RenderPriority = Stage3D.RingOrder - 1,
-                },
-            };
-            AddChild(_pointMark);
-        }
-        var mesh = (ImmediateMesh)_pointMark.Mesh;
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                VertexColorUseAsAlbedo = true,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                RenderPriority = Stage3D.RingOrder - 1,
+            },
+        };
+        AddChild(marker);
+        return marker;
+    }
+
+    /// <summary>Each of <paramref name="cells"/> filled and rimmed, drawn
+    /// afresh: the marks are nudged toward the eye, which turns.</summary>
+    private void CellMarks(MeshInstance3D marker, IReadOnlyList<Vector2I> cells, Color fill, Color rim)
+    {
+        var mesh = (ImmediateMesh)marker.Mesh;
         mesh.ClearSurfaces();
+        if (cells.Count == 0)
+            return;
         mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         Vector2[] corner = Corners();
-        Side? held = PointHolder();
-        var fill = new Color(held is Side s ? SideInk(s) : PointInk, 0.22f);
-        var rim = new Color(PointInk, 0.95f);
-        foreach (Vector2I cell in _pointCells)
+        for (int k = 0; k < cells.Count; k++)
         {
+            Vector2I cell = cells[k];
             Vector2 mid = CellFlat(cell);
             for (int i = 0; i < 6; i++)
             {

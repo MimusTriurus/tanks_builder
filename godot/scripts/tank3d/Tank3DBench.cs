@@ -2372,6 +2372,9 @@ public sealed partial class Tank3DBench : Node3D
     {
         if (!_built)
             return;
+        // the placement before the first turn takes the buttons (Tank3DBench.Deploy)
+        if (Match && DeployInput(@event))
+            return;
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } click)
         {
             AimAt(click.Position);
