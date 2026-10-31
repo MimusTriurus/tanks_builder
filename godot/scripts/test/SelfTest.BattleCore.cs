@@ -523,6 +523,77 @@ public static partial class SelfTest
                   $"plain {without}, double {with}; in mud with {free ?? "ok"}, without {paid}");
         }
 
+        // Д8, upgrades.md «Противоосколочный подбой»: the mortar's bomb sets off
+        // a knocked medium at (4,5); of the two lights beside it the lined one
+        // does not catch.
+        {
+            BattleState s = Probe(9, 10);
+            Put(s, 0, "HMR", Camp.Green, 4, 8, 90);
+            Put(s, 1, "MTR", Camp.Brown, 4, 5, 90, fate: UnitFate.Knocked);
+            Put(s, 2, "LTR", Camp.Brown, 4, 4, 90, kit: Kit.SpallLiner);
+            Put(s, 3, "LTR", Camp.Brown, 4, 6, 90);
+            Act(s, 0, st => Battle.Fire(st, new Vector2I(4, 5)));
+            check("a blast beside does not set a hull with the spall liner alight; one without catches",
+                  s.Unit(1)!.Fate == UnitFate.Destroyed && s.Unit(2)!.Fate == UnitFate.Alive && !s.Unit(2)!.Burning
+                  && s.Unit(3)!.Burning,
+                  Said(s));
+        }
+
+        // Д8, upgrades.md «Автоматическое тушение»: two greens burning from the
+        // last turn, both with it - the one left alone (and in ambush) goes out
+        // and keeps its watch, the one that moved burns out as ever.
+        {
+            BattleState s = Probe(9, 10);
+            Put(s, 0, "MTR", Camp.Green, 1, 8, 90, kit: Kit.Extinguisher);
+            Put(s, 1, "MTR", Camp.Green, 7, 8, 90, kit: Kit.Extinguisher);
+            Put(s, 2, "LTR", Camp.Brown, 4, 0, 270);
+            s.TurnNo = 1;
+            foreach (int id in new[] { 0, 1 })
+            {
+                s.Unit(id)!.Burning = true;
+                s.Unit(id)!.BurnSince = 0;
+            }
+            s.Unit(0)!.Watch = 90;
+            Act(s, 1, st => Battle.Move(st, new[] { new Vector2I(7, 7) }, -1));
+            Battle.EndTurn(s);
+            check("the auto-extinguisher puts out a unit not activated this turn, ambush kept; one that moved burns out",
+                  s.Unit(0)!.Fate == UnitFate.Alive && !s.Unit(0)!.Burning && s.Unit(0)!.Ambushing
+                  && s.Unit(1)!.Fate == UnitFate.Destroyed,
+                  Said(s));
+        }
+
+        // Д8, upgrades.md «Тепловизор»: smoke on (4,6) between the medium at
+        // (4,8) and a light at (4,4) - its round and its ambush's axis go
+        // through; the round at it does not.
+        {
+            var smoke = new Vector2I(4, 6);
+            BattleState shot = Probe(9, 10);
+            Put(shot, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Thermal);
+            Put(shot, 1, "LTR", Camp.Brown, 4, 4, 90);
+            shot.Board.SetSmoke(smoke, true);
+            shot.Smoke[smoke] = 2;
+            Act(shot, 0, st => Battle.Fire(st, new Vector2I(4, 4)));
+            BattleState back = Probe(9, 10);
+            Put(back, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Thermal);
+            Put(back, 1, "MTR", Camp.Brown, 4, 4, 270);
+            back.Board.SetSmoke(smoke, true);
+            back.Smoke[smoke] = 2;
+            Act(back, 1, st => Battle.Fire(st, new Vector2I(4, 8)));
+            BattleState watch = Probe(9, 10);
+            Put(watch, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Thermal);
+            watch.Unit(0)!.Watch = 90;
+            watch.Board.SetSmoke(smoke, true);
+            watch.Smoke[smoke] = 2;
+            var mid = new Vector2I(4, 5);
+            Put(watch, 1, "LTR", Camp.Brown, HexField.Step(mid, 30).X, HexField.Step(mid, 30).Y, 210);
+            Act(watch, 1, st => Battle.Move(st, new[] { HexField.Step(mid, 30), mid, HexField.Step(mid, 210) }, -1));
+            check("the thermal imager fires and watches through smoke; a round at it is stopped as ever",
+                  shot.Unit(1)!.Fate == UnitFate.Knocked && back.Unit(0)!.Fate == UnitFate.Alive
+                  && back.Events.Any(e => e.Kind == BattleEventKind.Spent && e.Cell == smoke)
+                  && watch.Events.Any(e => e.Kind == BattleEventKind.AmbushFired) && !watch.Unit(0)!.Ambushing,
+                  $"its shot: {Said(shot)}; at it: {Said(back)}; its ambush: {Said(watch)}");
+        }
+
         // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
         // list is nothing, a name no upgrade has is refused; written back as read.
         {

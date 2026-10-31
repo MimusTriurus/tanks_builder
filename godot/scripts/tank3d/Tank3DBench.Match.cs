@@ -402,9 +402,11 @@ public sealed partial class Tank3DBench
         HeavyClears();
         Side ending = _mt.Turn;
         int turn = _mt.TurnNo++;
+        // the unit the side moved or acted with, for the auto-extinguisher (Д8)
+        int activated = _side == ending && (_mt.Drove || _mt.Fired || _mt.Bonus) ? _unitId : -1;
         HandOver();
         if (!MatchOver)
-            BurnOut(ending, turn);
+            BurnOut(ending, turn, activated);
     }
 
     /// <summary>To the other side: its first unit able to act on the rig. A

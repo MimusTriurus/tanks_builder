@@ -20,11 +20,12 @@ namespace TankSpriteTest;
 /// of its side's turn, the blast of a destroyed unit and its chain, the wood's
 /// fire by rounds, the win by destruction, the stalemate (Д6), the ambush and
 /// the medium's sector (Д7), the smoke grenade and its smoke, the incendiary
-/// round (Д8).
+/// round, the drive's upgrades (in <see cref="Steps"/>), the spall liner, the
+/// auto-extinguisher, the thermal imager (Д8).
 ///
-/// <b>Not yet</b> (stages Д8-Д9): the upgrades past the wading gear, the trawl,
-/// the grenade and the incendiary round; an ambush that holds an incendiary
-/// round back - it fires a plain one; the control point, placement.
+/// <b>Not yet</b> (stages Д8-Д9): the winch, the mine layer, the repair kit,
+/// the ambush stabilizer; an ambush that holds an incendiary round back - it
+/// fires a plain one; the control point, placement.
 /// </summary>
 public static class Battle
 {
@@ -234,7 +235,7 @@ public static class Battle
             Lob(s, aim, incendiary);
         else
             Fly(s, u.Cell, heading, u.Class.Might, Level(s, u), passes: u.Class.Might >= 4 && !u.Class.Turreted ? 1 : 0,
-                glance: true, aim: aim, fiery: incendiary);
+                glance: true, aim: aim, fiery: incendiary, thermal: (u.Kit & Kit.Thermal) != 0);
         return null;
     }
 
@@ -255,7 +256,7 @@ public static class Battle
     /// pierce: a hull, a living wood - on every leg, the ricochet's too.
     /// </summary>
     private static void Fly(BattleState s, Vector2I from, int heading, int might, int fromLevel,
-                            int passes, bool glance, Vector2I? aim, bool fiery = false)
+                            int passes, bool glance, Vector2I? aim, bool fiery = false, bool thermal = false)
     {
         int ontoLevel = aim is Vector2I a && s.Board.InBounds(a)
             ? (s.At(a) is { } t ? Level(s, t) : s.Board.LevelAt(a)) : fromLevel;
@@ -302,7 +303,7 @@ public static class Battle
                 return;
             }
             // a wood screens its hex; masonry its edges (above, BoardRules.Screened)
-            if (s.Board.LevelAt(c) >= floor && s.Board.Screened(c))
+            if (s.Board.LevelAt(c) >= floor && BoardRules.Screened(s.Board, c, thermal))
             {
                 s.Events.Add(new BattleEvent(BattleEventKind.Spent, -1, c, heading, "wood"));
                 // the one way to set a wood alight with a shot (upgrades.md)
@@ -617,7 +618,8 @@ public static class Battle
                 Lob(s, entered.Cell);
             else
                 Fly(s, w.Cell, axis, w.Class.Might, Level(s, w),
-                    passes: w.Class.Might >= 4 && !w.Class.Turreted ? 1 : 0, glance: true, aim: entered.Cell);
+                    passes: w.Class.Might >= 4 && !w.Class.Turreted ? 1 : 0, glance: true, aim: entered.Cell,
+                    thermal: (w.Kit & Kit.Thermal) != 0);
             Over(s);
         }
     }
@@ -651,7 +653,8 @@ public static class Battle
                 return -1;
             if (Gunnery.Overtops(s.Board, c, fromLevel, ontoLevel))
                 return -1;
-            if (s.Board.LevelAt(c) >= floor && s.Board.Screened(c))
+            // the thermal imager's axis goes through smoke (upgrades.md)
+            if (s.Board.LevelAt(c) >= floor && BoardRules.Screened(s.Board, c, (w.Kit & Kit.Thermal) != 0))
                 return -1;
             at = c;
         }
@@ -675,6 +678,9 @@ public static class Battle
     /// (states.md, «Горит»), the wood under a heavy that ends its turn on it
     /// falls (classes.md, «Бульдозер HT»), and the turn goes over - the round,
     /// and the field's tick, after the second side's (match.md, «Ход и раунд»).
+    /// A burning unit with the auto-extinguisher (upgrades.md) its side did not
+    /// activate this turn - did not move it nor act with it - goes out instead,
+    /// and keeps its ambush.
     /// </summary>
     public static void EndTurn(BattleState s)
     {
@@ -688,9 +694,15 @@ public static class Battle
             s.Board.SetCoverState(u.Cell, CoverState.Cleared);
             s.Events.Add(new BattleEvent(BattleEventKind.WoodCleared, u.Id, u.Cell));
         }
+        int activated = s.Active is int a && (s.Drove || s.Fired || s.Bonus) ? a : -1;
         foreach (BattleUnit b in s.Units.ToArray())
             if (b.Side == ending && b.Fate == UnitFate.Alive && b.Burning && b.BurnSince < s.TurnNo)
-                Explode(s, b);
+            {
+                if ((b.Kit & Kit.Extinguisher) != 0 && b.Id != activated)
+                    Douse(s, b);
+                else
+                    Explode(s, b);
+            }
         s.Events.Add(new BattleEvent(BattleEventKind.TurnEnded, s.Active ?? -1, default, s.TurnNo));
         s.TurnNo++;
         s.Turn = ending == Camp.Green ? Camp.Brown : Camp.Green;
@@ -798,7 +810,9 @@ public static class Battle
             {
                 if (near.Out)
                     Explode(s, near);
-                else if (near.Fate == UnitFate.Alive)
+                // the spall liner keeps a living hull from the blast's fire
+                // (upgrades.md); a knocked one goes up in the chain as any
+                else if (near.Fate == UnitFate.Alive && (near.Kit & Kit.SpallLiner) == 0)
                     Ignite(s, near);
             }
             if (s.Board.CoverAt(n) == Cover.Forest)

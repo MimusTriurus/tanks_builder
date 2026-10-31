@@ -479,7 +479,9 @@ public sealed partial class Tank3DBench
         Shot shot = Gunnery.Solve(_field, own, cell, _profile.Lobs,
                                   c => (_other is { } o && o.Fate != Fate.Destroyed && OtherCell(o) == c)
                                        || (Match && ParkedCells.Contains(c)), masonry: false,
-                                  standing: c => StandingLevel(c, own));
+                                  standing: c => StandingLevel(c, own),
+                                  // the thermal imager sees through smoke (Д8)
+                                  thermal: (KitOf(_unitId) & Kit.Thermal) != 0);
         if (shot.Clear || shot.BlockedAt is not Vector2I at)
             return "";
         stop = at;

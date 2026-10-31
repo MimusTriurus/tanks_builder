@@ -136,6 +136,14 @@ public static class BoardRules
         b.Smoked(cell)
         || (b.CoverAt(cell) != Cover.Walls && TerrainRules.Screens(b.CoverAt(cell), b.CoverStateAt(cell)));
 
+    /// <summary>The same for one who sees through smoke - the thermal imager
+    /// (upgrades.md, «Тепловизор»): its own line of fire and its ambush's axis;
+    /// a wood still stops it.</summary>
+    public static bool Screened(IHexBoard b, Vector2I cell, bool thermal) =>
+        thermal
+            ? b.CoverAt(cell) != Cover.Walls && TerrainRules.Screens(b.CoverAt(cell), b.CoverStateAt(cell))
+            : Screened(b, cell);
+
     /// <summary><see cref="HexField.Lane"/>.</summary>
     public static List<Vector2I> Lane(IHexBoard b, Vector2I cell, int heading, int limit = int.MaxValue)
     {

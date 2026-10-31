@@ -347,19 +347,21 @@ public sealed partial class Tank3DBench
             if (model is null || rig is null || cell is not Vector2I c || SideOfUnit(id) is not Side side)
                 continue;
             Color tint = SideInk(side);
-            AxisLine(ink, c, w.Value.A, tint);
+            bool thermal = (KitOf(id) & Kit.Thermal) != 0;
+            AxisLine(ink, c, w.Value.A, tint, thermal);
             if (w.Value.B >= 0)
-                AxisLine(ink, c, w.Value.B, tint);
+                AxisLine(ink, c, w.Value.B, tint, thermal);
             Sight(ink, Over(model, rig) + new Vector2(r * 2.3f, 0.0f), r, tint);
         }
         if (_ambushMode && _ambushPick is int pick)
-            AxisLine(ink, CellHere, pick, CardPale);
+            AxisLine(ink, CellHere, pick, CardPale, (KitOf(_unitId) & Kit.Thermal) != 0);
     }
 
     /// <summary>One axis out of <paramref name="cell"/>: hex to hex until the
     /// first thing that cuts it - a wall across an edge, a hull, a wood, the
-    /// board's edge - dashed, with a tick on each hex it watches.</summary>
-    private void AxisLine(Control ink, Vector2I cell, int heading, Color tint)
+    /// board's edge - dashed, with a tick on each hex it watches. A thermal
+    /// imager's goes through smoke (Д8).</summary>
+    private void AxisLine(Control ink, Vector2I cell, int heading, Color tint, bool thermal = false)
     {
         Vector2 start = _camera.UnprojectPosition(Foot(CellWorld(cell)));
         Vector2 end = start;
@@ -376,7 +378,7 @@ public sealed partial class Tank3DBench
             end = p;
             ink.DrawCircle(p, 2.5f, new Color(tint, 0.85f));
             if (UnitOn(next) is not null || _field.LevelAt(next) > level
-                || (_field.LevelAt(next) >= level && _field.Screened(next)))
+                || (_field.LevelAt(next) >= level && BoardRules.Screened(_field, next, thermal)))
                 break;
             at = next;
         }

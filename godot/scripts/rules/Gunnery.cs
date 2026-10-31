@@ -213,7 +213,7 @@ public static class Gunnery
     /// </summary>
     public static Shot Solve(IHexBoard field, Vector2I from, Vector2I onto, bool lobs,
                              Func<Vector2I, bool> occupied, bool masonry = true,
-                             Func<Vector2I, int>? standing = null)
+                             Func<Vector2I, int>? standing = null, bool thermal = false)
     {
         if (onto == from)
             return None;
@@ -295,7 +295,8 @@ public static class Gunnery
             if ((standing?.Invoke(lane[i]) ?? field.LevelAt(lane[i])) < Math.Min(fromLevel, ontoLevel))
                 continue;
             bool tank = occupied(lane[i]);
-            if (!tank && !field.Screened(lane[i]))
+            // the thermal imager sees its line of fire through smoke (upgrades.md)
+            if (!tank && !BoardRules.Screened(field, lane[i], thermal))
                 continue;
             blocked = lane[i];
             stop = tank ? Barrier.Tank : Barrier.Cover;

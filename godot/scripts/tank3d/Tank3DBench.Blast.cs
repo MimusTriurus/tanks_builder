@@ -126,7 +126,10 @@ public sealed partial class Tank3DBench
 
     private void Struck(int id, Side side, string tag, Fate fate, Vector2I cell)
     {
-        if (fate == Fate.Alive)
+        // the spall liner keeps a living hull from the blast's fire (upgrades.md, Д8)
+        if (fate == Fate.Alive && (KitOf(id) & Kit.SpallLiner) != 0)
+            Log.Print($"tank3d: match: the blast reaches {SideName(side)} {tag}#{id} on {MapAt(cell)} - its spall liner holds the fire off");
+        else if (fate == Fate.Alive)
             Ignite(id, side, tag, cell);
         else if (fate == Fate.Knocked && !_chain.Exists(c => c.Cell == cell))
         {
@@ -208,12 +211,20 @@ public sealed partial class Tank3DBench
     // --- the turn's end -------------------------------------------------------------
 
     /// <summary>The owner's turn over (п. 6): every unit of <paramref name="side"/>
-    /// still burning from before the turn began is destroyed.</summary>
-    private void BurnOut(Side side, int turn)
+    /// still burning from before the turn began is destroyed - but one with the
+    /// auto-extinguisher (upgrades.md, Д8) that was not <paramref name="activated"/>
+    /// this turn goes out instead, its ambush kept.</summary>
+    private void BurnOut(Side side, int turn, int activated)
     {
         float beat = 0.0f;
         foreach (Blaze b in _blazes.Where(b => !b.Out && b.Side == side && b.Since < turn).ToList())
         {
+            if ((KitOf(b.Id) & Kit.Extinguisher) != 0 && b.Id != activated)
+            {
+                Quench(b.Id, steam: true);
+                Log.Print($"tank3d: match: {SideName(side)} {b.Tag}#{b.Id} was not activated - its auto-extinguisher puts the fire out");
+                continue;
+            }
             Vector2I? at = _other is { Unit: true } o && o.Id == b.Id ? OtherCell(o)
                 : _parked.Find(p => p.Id == b.Id)?.Cell;
             if (at is not Vector2I cell)
