@@ -1082,7 +1082,7 @@ public sealed partial class Tree3DBench : Node3D
     {
         if (_stage is null)
             return;
-        List<Vector3> tris = _stage.GroundTriangles();
+        List<Vector3> tris = _stage.GroundTriangles(skin: true);
         if (tris.Count == 0)
             return;
         Vector3 lie = Stage3D.Clear(Squash, RiseFactor);

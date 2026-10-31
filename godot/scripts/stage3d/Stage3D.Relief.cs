@@ -151,10 +151,14 @@ public sealed partial class Stage3D
                 int p = j * nx + i;
                 float x = f.X0 + i * f.Cell + Origin.X, z = f.Z0 + j * f.Cell + Origin.Y / Squash;
                 at[p] = new Vector3(x, f.Height[p] / rise, z);
-                float hx = (f.Height[j * nx + Mathf.Min(i + 1, nx - 1)] - f.Height[j * nx + Mathf.Max(i - 1, 0)])
-                           / (2.0f * f.Cell * rise);
-                float hz = (f.Height[Mathf.Min(j + 1, ny - 1) * nx + i] - f.Height[Mathf.Max(j - 1, 0) * nx + i])
-                           / (2.0f * f.Cell * rise);
+                // on a rock, over two points either side: a wall is one or
+                // two points across, and the next point's height alone
+                // turned each facet of it its own way to the sun
+                int reach = f.Cliff[p] > 0.05f ? 2 : 1;
+                int i0 = Mathf.Max(i - reach, 0), i1 = Mathf.Min(i + reach, nx - 1);
+                int j0 = Mathf.Max(j - reach, 0), j1 = Mathf.Min(j + reach, ny - 1);
+                float hx = (f.Height[j * nx + i1] - f.Height[j * nx + i0]) / (2.0f * reach * f.Cell * rise);
+                float hz = (f.Height[j1 * nx + i] - f.Height[j0 * nx + i]) / (2.0f * reach * f.Cell * rise);
                 normal[p] = new Vector3(-hx, 1.0f, -hz).Normalized();
                 // what the ground is, for the shader: sand, rock, wood, and how
                 // far under the water it lies (the bed darker than the bank)
@@ -171,8 +175,19 @@ public sealed partial class Stage3D
             for (int i = 0; i + 1 < nx; i++)
             {
                 int a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
-                index[t++] = a; index[t++] = b; index[t++] = d;
-                index[t++] = a; index[t++] = d; index[t++] = c;
+                // cut along the diagonal whose ends lie closer in height: one
+                // way for every quad sawed a wall running across it into teeth
+                // at the rim and facets that took the light in turns
+                if (Mathf.Abs(at[a].Y - at[d].Y) <= Mathf.Abs(at[b].Y - at[c].Y))
+                {
+                    index[t++] = a; index[t++] = b; index[t++] = d;
+                    index[t++] = a; index[t++] = d; index[t++] = c;
+                }
+                else
+                {
+                    index[t++] = a; index[t++] = b; index[t++] = c;
+                    index[t++] = b; index[t++] = d; index[t++] = c;
+                }
             }
         var arrays = new Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
@@ -483,8 +498,10 @@ void fragment() {
 
     /// <summary>The ground's triangles in world units for what stands on it -
     /// the raster's quads, at every other point: the shadow's skin and the
-    /// rubble need the ground's shape, not its grain.</summary>
-    private List<Vector3> ReliefTriangles(Relief f)
+    /// rubble need the ground's shape, not its grain. For the
+    /// <paramref name="skin"/> the rocks and the walls are left out (<see
+    /// cref="Skin"/>); the rubble keeps them to rest against.</summary>
+    private List<Vector3> ReliefTriangles(Relief f, bool skin = false)
     {
         var outp = new List<Vector3>();
         const int Skip = 2;
@@ -496,11 +513,53 @@ void fragment() {
             for (int i = 0; i + Skip < f.Nx; i += Skip)
             {
                 Vector3 a = Point(i, j), b = Point(i + Skip, j), c = Point(i, j + Skip), d = Point(i + Skip, j + Skip);
-                outp.Add(a); outp.Add(b); outp.Add(d);
-                outp.Add(a); outp.Add(d); outp.Add(c);
+                // near a rock only the flat keeps the skin: its blurred mask
+                // runs on past the foot of its wall, and the wall's lower half
+                // is no steeper there than a bank
+                float rock = Mathf.Max(Mathf.Max(f.Cliff[j * f.Nx + i], f.Cliff[j * f.Nx + i + Skip]),
+                                       Mathf.Max(f.Cliff[(j + Skip) * f.Nx + i], f.Cliff[(j + Skip) * f.Nx + i + Skip]));
+                float upright = !skin ? 0.0f : rock > RockSkin ? FlatSkin : WallSkin;
+                // the gentler diagonal, as the ground's own (BuildRelief)
+                if (Mathf.Abs(a.Y - d.Y) <= Mathf.Abs(b.Y - c.Y))
+                {
+                    Skin(outp, a, b, d, upright);
+                    Skin(outp, a, d, c, upright);
+                }
+                else
+                {
+                    Skin(outp, a, b, c, upright);
+                    Skin(outp, b, d, c, upright);
+                }
             }
         return outp;
     }
+
+    /// <summary>
+    /// A triangle of the skin, unless it stands less <paramref name="upright"/>
+    /// than that (its normal's height in its length) - a wall. At every other
+    /// point the skin cannot follow a steep face a point or two across: it
+    /// hung in front of the wall here and sank behind it there, and the
+    /// shadow it carried - the rock's own, cast on it - lay over the face in
+    /// a stepped dark wedge and see-through teeth. A wall has its own shade
+    /// (<see cref="ReliefPaint"/>, one tone a side); the ground at its foot
+    /// keeps the skin and the shadow on it.
+    /// </summary>
+    private static void Skin(List<Vector3> outp, Vector3 a, Vector3 b, Vector3 c, float upright)
+    {
+        Vector3 n = (b - a).Cross(c - a);
+        if (Mathf.Abs(n.Y) < upright * n.Length())
+            return;
+        outp.Add(a); outp.Add(b); outp.Add(c);
+    }
+
+    /// <summary>The skin's steepest away from a rock: a triangle whose normal
+    /// stands less upright than this (about 60 degrees of slope) is a wall.</summary>
+    private const float WallSkin = 0.5f;
+
+    /// <summary>Near a rock (a corner of the quad this far into <see
+    /// cref="Relief.Cliff"/>), only this upright - about 25 degrees of slope.</summary>
+    private const float FlatSkin = 0.9f;
+    private const float RockSkin = 0.02f;
 
     /// <summary>
     /// The water on the relief: a sheet at each body's surface over every
@@ -812,8 +871,13 @@ vec4 cell_ink(vec2 cr) {
 }
 " + RockPaint + SoilPaint + RoadPaint;
 
-    private const string ReliefPaint = @"    vec2 tuv = art_rect.xy + tri(ground.xz * art_tile) * art_rect.zw;
-    vec3 soil = texture(art, tuv).rgb;
+    private const string ReliefPaint = @"    // the art from above on the flats, from the side on a wall: laid from
+    // above only, a wall a level tall drew one row of it down its whole height
+    vec3 tw = pow(abs(normalize(ground_n)), vec3(4.0));
+    tw /= tw.x + tw.y + tw.z;
+    vec3 soil = texture(art, art_rect.xy + tri(ground.xz * art_tile) * art_rect.zw).rgb * tw.y;
+    soil += texture(art, art_rect.xy + tri(ground.zy * art_tile) * art_rect.zw).rgb * tw.x;
+    soil += texture(art, art_rect.xy + tri(ground.xy * art_tile) * art_rect.zw).rgb * tw.z;
     float grain = dot(soil, vec3(0.299, 0.587, 0.114));
     // the kinds, each its own colour carrying the art's grain
     soil = mix(soil, sand_ink * (0.6 + 0.6 * grain), smoothstep(0.25, 0.6, COLOR.r));
@@ -862,10 +926,20 @@ vec4 cell_ink(vec2 cr) {
     float step_ = d > flat_d - 0.08 ? 1.0 : d > flat_d - 0.3 ? 0.86 : 0.72;
     // a wall - a rock's face - one step darker still, so a cliff reads as
     // one and not as the far side of a hill
-    if (length(normalize(ground_n).xz) > 0.8)
-        step_ = min(step_, 0.56);
+    // On a rock the wall starts lower and takes one tone a side - lit or
+    // shaded by which way it faces, not by how steep each facet of it is:
+    // facets either side of the cut flipped between steps into patches.
+    vec3 wn_ = normalize(ground_n);
+    float steep = length(wn_.xz);
+    if (steep > 0.8 || (COLOR.g > 0.5 && steep > 0.55)) {
+        vec2 sun_h = sun_dir.xz / max(length(sun_dir.xz), 1e-4);
+        step_ = COLOR.g > 0.5 ? mix(0.5, 0.64, smoothstep(-0.35, 0.35, dot(wn_.xz / max(steep, 1e-4), sun_h)))
+                              : min(step_, 0.56);
+    }
     // a pit's floor in shade: from above it is the same lawn as its rim
-    step_ *= 1.0 - hollow_ink * ground_hollow;
+    // - not on a rock: the foot of its wall lies under the blurred cap, and
+    // a bay of it took the hollow's shade in a stepped wedge
+    step_ *= 1.0 - hollow_ink * ground_hollow * (1.0 - smoothstep(0.05, 0.2, COLOR.g));
     vec4 paint = vec4(soil * step_ * mix(vec3(1.0), cink.rgb, cink.a), 1.0);";
 
     private const string ReliefGrid = @"    {

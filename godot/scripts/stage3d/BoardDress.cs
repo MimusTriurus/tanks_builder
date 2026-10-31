@@ -127,7 +127,7 @@ public static class BoardDress
     /// </summary>
     public static MeshInstance3D? Shadows(Stage3D stage, float squash, float rise)
     {
-        List<Vector3> tris = stage.GroundTriangles();
+        List<Vector3> tris = stage.GroundTriangles(skin: true);
         if (tris.Count == 0)
             return null;
         Vector3 lie = Stage3D.Clear(squash, rise);

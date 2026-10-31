@@ -121,14 +121,17 @@ vec4 rock_look(int g, vec3 at, vec3 n, float grain, float share, float aux) {
     float cover = smoothstep(0.5, 0.62, share);
     if (ty == 1) {
         // the mesa's cap: paler sand-swept top, a dark lip at the rim, scrub
-        float lid = smoothstep(pb.x - 0.07 * pb.y, pb.x - 0.03 * pb.y, at.y) * (1.0 - face);
+        // by how flat as well as how high: on a facet a wall tall, height
+        // alone hung the cap's colour down it in spikes
+        float lid = smoothstep(pb.x - 0.07 * pb.y, pb.x - 0.03 * pb.y, at.y) * (1.0 - smoothstep(0.4, 0.6, hl));
         vec3 cap = mix(rock_row(g, 6).rgb, rock_row(g, 7).rgb, 1.0 - smoothstep(0.55, 0.8, share));
         float bush = (1.0 - smoothstep(0.15, 0.28, rock_cells(q / 0.16).x))
                    * step(0.45, rock_noise(q / 0.5)) * smoothstep(0.75, 0.9, share) * clamp(pa.z / 0.35, 0.0, 1.0);
         cap = mix(cap, vec3(0.36, 0.38, 0.22), bush);
         c = mix(c, cap * (0.85 + 0.3 * grain), lid);
         vec3 scree = rock_row(g, 8).rgb * (0.8 + 0.4 * rock_noise(q / 0.05));
-        c = mix(c, scree, aux * (1.0 - cover));
+        // the scree lies at the foot, not up a facet the wall tall
+        c = mix(c, scree, aux * (1.0 - cover) * (1.0 - face));
         cover = max(cover, aux);
     } else if (ty == 2) {
         // the yardangs' sand in the lee
@@ -155,7 +158,10 @@ vec4 rock_look(int g, vec3 at, vec3 n, float grain, float share, float aux) {
         float spot = (1.0 - smoothstep(0.08, 0.15, rock_cells(q / 0.14).x)) * flat_r;
         c = mix(c, rock_row(g, 7).rgb, 0.5 * spot);
     }
-    return vec4(c, cover);
+    // a face of the rock is the rock all the way down: its share falls off
+    // across a facet the wall tall, and the ground's pale art came up it in
+    // wedges at the foot
+    return vec4(c, max(cover, face * smoothstep(0.05, 0.2, share)));
 }
 ";
 }

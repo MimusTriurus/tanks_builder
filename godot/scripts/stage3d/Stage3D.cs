@@ -2444,10 +2444,10 @@ void fragment() {{
     /// Tops only. A collider for the walls of the prisms would be a second
     /// question - what happens to a brick that goes over the rim - and this board
     /// answers it by letting the brick fall to whatever top is under it.</summary>
-    public List<Vector3> GroundTriangles()
+    public List<Vector3> GroundTriangles(bool skin = false)
     {
         if (Relief is not null && Field.Atlas is not null)
-            return ReliefTriangles(Relief);
+            return ReliefTriangles(Relief, skin);
         var outp = new List<Vector3>();
         if (Field.Atlas is null)
             return outp;
