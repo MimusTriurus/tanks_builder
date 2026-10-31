@@ -2,7 +2,7 @@
   "format": 3,
   "name": "woodtest",
   "size": [12, 8],
-  "paint": "soil",
+  "paint": "mixed",
   "height": true,
   "plinth": 1,
   "homes": [[0, 7], [11, 7]],

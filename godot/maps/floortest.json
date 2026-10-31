@@ -2,7 +2,7 @@
   "format": 3,
   "name": "floortest",
   "size": [10, 8],
-  "paint": "soil",
+  "paint": "mixed",
   "height": true,
   "plinth": 1,
   "homes": [[0, 7], [9, 0]],

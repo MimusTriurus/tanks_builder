@@ -21801,8 +21801,11 @@ public static partial class SelfTest
             Check("a format-2 file carrying a block of 3 is refused by its number",
                 Refusal(With(second, "\"rocks\": []"), "test").Contains("format 3"),
                 Refusal(With(second, "\"rocks\": []"), "test"));
-            Check("a block of 3 this build does not read is refused by its name",
-                Refusal(With(good, "\"roads\": []"), "test").Contains("\"roads\""),
+            // Every block of 3 is read since Ф5 (MapFile.Unread, which stays for
+            // the next block a format adds): the last one to come off the list
+            // reads rather than being refused by its name.
+            Check("a block of 3 this build reads is not refused - every one is read since Ф5",
+                Refusal(With(good, "\"roads\": []"), "test").Length == 0,
                 Refusal(With(good, "\"roads\": []"), "test"));
             Check("a key no field answers to is refused, not skipped",
                 Refusal(With(good, "\"roadz\": []"), "test").Contains("roadz"),
@@ -22115,12 +22118,14 @@ public static partial class SelfTest
 
             // What the alphabet cannot carry, and every one of these is a cell
             // that could not be saved if the brush let it through.
+            // Sand on a rise is format 3's floor (docs/map-format3-plan.md, Ф3):
+            // the letter keeps the hill, the floor grid says sand under it.
             draw.Begin();
             draw.Level(middle, 1, out _);
-            Check("sand does not lie on a rise, and the brush says so",
-                !draw.Floor(middle, Foundation.Sand, out string sandWhy),
-                "sand was painted on to level " + draw.GlyphAt(middle).Level);
-            Note("    " + sandWhy);
+            Check("sand lies on a rise, the hill kept - format 3's floor carries it",
+                draw.Floor(middle, Foundation.Sand, out string sandWhy)
+                && draw.GlyphAt(middle).Level == 1,
+                $"{sandWhy}; the cell is at level {draw.GlyphAt(middle).Level}");
             Check("a floor made of water has no letter",
                 !draw.Floor(middle, Foundation.Shallow, out string wetWhy),
                 "shallow was painted");
@@ -22131,6 +22136,20 @@ public static partial class SelfTest
                 "a cell was raised to a rock");
             Note("    " + highWhy);
             draw.Undo();
+
+            // A board opened bare and wooded in the editor comes up on the mix:
+            // the plate its letters gave is derived again, not kept (MapEdit.Of;
+            // five format-3 maps were saved as soil with their woods under it).
+            {
+                MapEdit opened = MapEdit.Of(BoardMap.ByName("drill10"));
+                opened.Begin();
+                bool planted = opened.Over(new Vector2I(0, 0), Cover.Forest, out string plantWhy);
+                BoardMap wooded = opened.Build();
+                Check("a bare board wooded in the editor comes up on the mix, its plate not kept",
+                    BoardMap.ByName("drill10").Paint == TerrainSet.Default && opened.Paint is null
+                    && planted && wooded.Paint == TerrainSet.Mixed,
+                    $"opened as {opened.Paint ?? "derived"}, planted {planted} {plantWhy}, built on {wooded.Paint}");
+            }
 
             // The rock is the whole cell.
             draw.Begin();

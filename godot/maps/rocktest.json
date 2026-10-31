@@ -2,7 +2,7 @@
   "format": 3,
   "name": "rocktest",
   "size": [12, 10],
-  "paint": "soil",
+  "paint": "mixed",
   "height": true,
   "plinth": 1,
   "homes": [[0, 9], [11, 0]],

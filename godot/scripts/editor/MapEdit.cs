@@ -245,7 +245,11 @@ public sealed class MapEdit
         var edit = new MapEdit
         {
             Name = map.Name,
-            Paint = map.Paint,
+            // the plate the letters give is left to be derived again: kept, it
+            // stays the bare board's "soil" once woods are painted, and the
+            // woods' kinds sit under it (BoardMap.Paint) - five format-3 maps
+            // were saved so. A plate the board chose against its letters is kept.
+            Paint = map.Paint == MapFile.PaintFor(ground) ? null : map.Paint,
             Height = map.Height,
             Plinth = map.Plinth,
             Columns = map.Columns,
