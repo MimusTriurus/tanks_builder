@@ -29,7 +29,7 @@ public sealed partial class Tank3DBench
         public Vector2I Cell;
         public float Heading, Yaw, Elevation, MudCoat, MudDry;
         public bool Fired, Bonus;
-        public int Razed, MinesSpent, AmbushShots;
+        public int Razed, MinesSpent, AmbushShots, SmokeDispersed;
         /// <summary>Its ambush before the move lifted it (Tank3DBench.Ambush).</summary>
         public (int A, int B)? Watch;
     }
@@ -47,7 +47,7 @@ public sealed partial class Tank3DBench
         {
             Cell = CellHere, Heading = _heading, Yaw = _model.Yaw, Elevation = _model.Elevation,
             MudCoat = _mudCoat, MudDry = _mudDry, Fired = _mt.Fired, Bonus = _mt.Bonus,
-            Razed = _razed.Count, MinesSpent = MinesSpent(), AmbushShots = _ambushShots,
+            Razed = _razed.Count, MinesSpent = MinesSpent(), AmbushShots = _ambushShots, SmokeDispersed = _smokeDispersed,
             Watch = _ambush.TryGetValue(_unitId, out var watch) ? watch : null,
         };
     }
@@ -84,6 +84,9 @@ public sealed partial class Tank3DBench
         // a round was fired at it on the way: the enemy's ambush is spent (Д7)
         if (_ambushShots != s.AmbushShots)
             return "сработала засада — ход не отменить";
+        // smoke driven into is gone (Д8)
+        if (_smokeDispersed != s.SmokeDispersed)
+            return "дым рассеян — ход не отменить";
         return "";
     }
 

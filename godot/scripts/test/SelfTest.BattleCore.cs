@@ -318,6 +318,95 @@ public static partial class SelfTest
                   $"MT 90+30 {sectorSet ?? "ok"}, spent {spent}; TD across {hull}; MT 90+210 {apart}; lifted {lifted}; after the shot {after}");
         }
 
+        // Д8, upgrades.md «Дымовая шашка», field.md «дым»: an HM at (4,7)
+        // smokes (4,6); the medium behind it at (4,8) fires up the column.
+        {
+            var at = new Vector2I(4, 7);
+            Vector2I wood = HexField.Step(at, 150), below = HexField.Step(at, 270);
+            BattleState s = Probe(9, 10, woods: new[] { wood });
+            Put(s, 0, "HMR", Camp.Green, at.X, at.Y, 90, kit: Kit.Smoke);
+            Put(s, 1, "LTR", Camp.Brown, 4, 2, 90);
+            Put(s, 2, "MTR", Camp.Green, below.X, below.Y, 90);
+            string? onWood = null, onTank = null, far = null, laid = null, noKit = null;
+            Act(s, 0, st => onWood = Battle.Smoke(st, wood));
+            Act(s, 0, st => onTank = Battle.Smoke(st, below));
+            Act(s, 0, st => far = Battle.Smoke(st, new Vector2I(4, 5)));
+            Act(s, 0, st => laid = Battle.Smoke(st, new Vector2I(4, 6)));
+            s.Bonus = false;
+            Act(s, 2, st => noKit = Battle.Smoke(st, HexField.Step(below, 330)));
+            check("the grenade lays smoke on a free hex beside, not on a wood, a tank, further off, or without the kit",
+                  laid is null && s.Board.Smoked(new Vector2I(4, 6)) && onWood is not null && onTank is not null
+                  && far is not null && noKit is not null,
+                  $"wood {onWood}; on a tank {onTank}; (4,5) {far}; laid {laid ?? "ok"}; no kit {noKit}");
+
+            // a round up the column stops in it; the mortar's goes over
+            BattleState shot = Probe(9, 10);
+            Put(shot, 0, "MTR", Camp.Green, 4, 8, 90);
+            Put(shot, 1, "LTR", Camp.Brown, 4, 4, 90);
+            shot.Board.SetSmoke(new Vector2I(4, 6), true);
+            shot.Smoke[new Vector2I(4, 6)] = 2;
+            Act(shot, 0, st => Battle.Fire(st, new Vector2I(4, 4)));
+            bool stopped = shot.Unit(1)!.Fate == UnitFate.Alive
+                           && shot.Events.Any(e => e.Kind == BattleEventKind.Spent && e.Cell == new Vector2I(4, 6));
+            BattleState lob = Probe(9, 10);
+            Put(lob, 0, "HMR", Camp.Green, 4, 8, 90);
+            Put(lob, 1, "LTR", Camp.Brown, 4, 4, 90);
+            lob.Board.SetSmoke(new Vector2I(4, 6), true);
+            lob.Smoke[new Vector2I(4, 6)] = 2;
+            Act(lob, 0, st => Battle.Fire(st, new Vector2I(4, 4)));
+            // and an ambush's axis through it sees nothing
+            BattleState watch = Probe(9, 10);
+            Put(watch, 0, "MTR", Camp.Green, 4, 8, 90);
+            watch.Unit(0)!.Watch = 90;
+            watch.Board.SetSmoke(new Vector2I(4, 6), true);
+            watch.Smoke[new Vector2I(4, 6)] = 2;
+            var mid = new Vector2I(4, 5);
+            Put(watch, 1, "LTR", Camp.Brown, HexField.Step(mid, 30).X, HexField.Step(mid, 30).Y, 210);
+            Act(watch, 1, st => Battle.Move(st, new[] { HexField.Step(mid, 30), mid, HexField.Step(mid, 210) }, -1));
+            check("smoke stops a gun's round and an ambush's axis; the mortar's bomb goes over it",
+                  stopped && lob.Unit(1)!.Fate == UnitFate.Knocked && watch.Unit(0)!.Ambushing
+                  && watch.Unit(1)!.Fate == UnitFate.Alive,
+                  $"gun: {Said(shot)}; mortar: {Said(lob)}; ambush: {Said(watch)}");
+
+            // a unit coming on to it disperses it; left alone it goes at the second round's end
+            BattleState driven = Probe(9, 10);
+            Put(driven, 0, "LTR", Camp.Green, 4, 8, 90);
+            Put(driven, 1, "LTR", Camp.Brown, 0, 0, 90);
+            driven.Board.SetSmoke(new Vector2I(4, 7), true);
+            driven.Smoke[new Vector2I(4, 7)] = 2;
+            Act(driven, 0, st => Battle.Move(st, new[] { new Vector2I(4, 7), new Vector2I(4, 6) }, -1));
+            BattleState left = Probe(9, 10);
+            Put(left, 0, "HMR", Camp.Green, 4, 8, 90, kit: Kit.Smoke);
+            Put(left, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(left, 0, st => Battle.Smoke(st, new Vector2I(4, 7)));
+            Turns(left, 2);
+            bool afterOne = left.Board.Smoked(new Vector2I(4, 7));
+            Turns(left, 2);
+            check("smoke is dispersed by a unit driving through it, and blown away at the second round's end",
+                  !driven.Board.Smoked(new Vector2I(4, 7)) && driven.Unit(0)!.Cell == new Vector2I(4, 6)
+                  && afterOne && !left.Board.Smoked(new Vector2I(4, 7)),
+                  $"driven: {Said(driven)}; after a round {afterOne}, after two {left.Board.Smoked(new Vector2I(4, 7))}");
+        }
+
+        // Д8, upgrades.md «Минный трал»: nose first over the mine it is
+        // cleared; backing on to it, the hull goes up as any.
+        {
+            var mine = new Vector2I(4, 7);
+            BattleState ahead = Probe(9, 10, mines: new[] { mine });
+            Put(ahead, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Trawl);
+            Put(ahead, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(ahead, 0, st => Battle.Move(st, new[] { mine, new Vector2I(4, 6) }, -1));
+            BattleState back = Probe(9, 10, mines: new[] { mine });
+            Put(back, 0, "MTR", Camp.Green, 4, 8, 270, kit: Kit.Trawl);
+            Put(back, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(back, 0, st => Battle.Move(st, new[] { mine }, -1));
+            check("the trawl clears a mine driven on to nose first, not one backed on to",
+                  ahead.Unit(0)!.Fate == UnitFate.Alive && ahead.Unit(0)!.Cell == new Vector2I(4, 6)
+                  && ahead.Events.Any(e => e.Kind == BattleEventKind.MineCleared)
+                  && back.Unit(0)!.Fate == UnitFate.Knocked,
+                  $"ahead: {Said(ahead)}; back: {Said(back)}");
+        }
+
         // A copy is a copy.
         {
             BattleState s = Probe(9, 10);

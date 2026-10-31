@@ -129,7 +129,7 @@ public sealed partial class Tank3DBench
         // A move by the steps (Steps, docs/hud3d-plan.md): the class's budget,
         // what each cell costs, where the move has to end.
         Steps.Reach reach = Steps.Plan(_field, new Steps.Pose(here, HullSide()),
-                                       Steps.Mover.Of(_profile, RigSnorkel, barred));
+                                       RigMover(barred));
         // The way shown on the board, if it is to this cell (Tab's pick among
         // equal ways, Tank3DBench.Course) - else the straightest.
         Steps.Route? shown = ShownWay(cell);

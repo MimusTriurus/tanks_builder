@@ -40,6 +40,7 @@ public sealed class BattleBoard : IHexBoard
     private readonly Cover[] _cover;
     private readonly CoverState[] _state;
     private readonly byte[] _sides;
+    private readonly bool[] _smoke;
 
     private BattleBoard(int columns, int rows, bool leveled, bool ramped, bool slopes, int maxClimb)
     {
@@ -57,6 +58,7 @@ public sealed class BattleBoard : IHexBoard
         _cover = new Cover[n];
         _state = new CoverState[n];
         _sides = new byte[n];
+        _smoke = new bool[n];
     }
 
     /// <summary>Every cell of <paramref name="board"/>, as it answers now.</summary>
@@ -76,6 +78,7 @@ public sealed class BattleBoard : IHexBoard
                 b._cover[i] = board.CoverAt(cell);
                 b._state[i] = board.CoverStateAt(cell);
                 b._sides[i] = (byte)board.SidesAt(cell);
+                b._smoke[i] = board.Smoked(cell);
             }
         return b;
     }
@@ -90,6 +93,7 @@ public sealed class BattleBoard : IHexBoard
         Array.Copy(_cover, b._cover, _cover.Length);
         Array.Copy(_state, b._state, _state.Length);
         Array.Copy(_sides, b._sides, _sides.Length);
+        Array.Copy(_smoke, b._smoke, _smoke.Length);
         return b;
     }
 
@@ -137,6 +141,15 @@ public sealed class BattleBoard : IHexBoard
     {
         if (InBounds(cell))
             _sides[Index(cell)] = (byte)mask;
+    }
+
+    public bool Smoked(Vector2I cell) => InBounds(cell) && _smoke[Index(cell)];
+
+    /// <summary>Smoke laid on the hex, or gone from it.</summary>
+    public void SetSmoke(Vector2I cell, bool on)
+    {
+        if (InBounds(cell))
+            _smoke[Index(cell)] = on;
     }
 
     public bool IsRamp(Vector2I cell) => BoardRules.IsRamp(this, cell);

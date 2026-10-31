@@ -19,10 +19,10 @@ namespace TankSpriteTest;
 /// heavy's bulldozing, fire on a unit, putting it out, burning out at the end
 /// of its side's turn, the blast of a destroyed unit and its chain, the wood's
 /// fire by rounds, the win by destruction, the stalemate (Д6), the ambush and
-/// the medium's sector (Д7).
+/// the medium's sector (Д7), the smoke grenade and its smoke (Д8).
 ///
-/// <b>Not yet</b> (stages Д8-Д9): smoke, the upgrades past the wading gear and
-/// the trawl, the control point, placement.
+/// <b>Not yet</b> (stages Д8-Д9): the upgrades past the wading gear, the trawl
+/// and the grenade, the control point, placement.
 /// </summary>
 public static class Battle
 {
@@ -424,6 +424,7 @@ public static class Battle
             // a hull out of the fight shoved on to an axis is crossing it too
             // (units.md: «Отброшенный тараном вражеский танк»; states.md: the
             // ambush's round on it is the one that destroys it)
+            Disperse(s, victim);
             Ambushes(s, victim);
         }
         Entered(s, u, way, forward: true);
@@ -514,10 +515,55 @@ public static class Battle
     private static void Entered(BattleState s, BattleUnit u, int way, bool forward)
     {
         UnitFate was = u.Fate;
+        Disperse(s, u);
         Arrive(s, u, way, forward);
         if (u.Fate == was)
             Ambushes(s, u);
     }
+
+    // --- smoke ------------------------------------------------------------------------
+
+    /// <summary>Smoke a unit comes on to, or drives through, is gone (field.md, «дым»).</summary>
+    private static void Disperse(BattleState s, BattleUnit u)
+    {
+        if (!s.Smoke.Remove(u.Cell))
+            return;
+        s.Board.SetSmoke(u.Cell, false);
+        s.Events.Add(new BattleEvent(BattleEventKind.SmokeGone, u.Id, u.Cell, 0, "dispersed"));
+    }
+
+    /// <summary>
+    /// The smoke grenade (upgrades.md, «Дымовая шашка»; п. 5б): smoke on a
+    /// hex beside the unit - not its own, not one with a tank, a wood in any
+    /// state, walls or a minefield (the hex's one obstacle slot, field.md) -
+    /// for two rounds. It stops rounds and ambushes' axes as a wood does; the
+    /// mortar's go over it.
+    /// </summary>
+    public static string? Smoke(BattleState s, Vector2I cell)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.Smoke) == 0)
+            return "no smoke grenade";
+        if (s.Bonus)
+            return "the bonus act is spent";
+        if (HexField.HeadingTo(u.Cell, cell) < 0 || !s.Board.InBounds(cell))
+            return "only on a hex beside";
+        if (s.At(cell) is not null)
+            return "a tank stands there";
+        if (s.Board.CoverAt(cell) != Cover.None)
+            return $"{s.Board.CoverAt(cell)} there";
+        if (s.Board.Smoked(cell))
+            return "smoke there already";
+        s.Bonus = true;
+        Lift(s, u, "smoke");
+        s.Board.SetSmoke(cell, true);
+        s.Smoke[cell] = SmokeRounds;
+        s.Events.Add(new BattleEvent(BattleEventKind.SmokeLaid, u.Id, cell, SmokeRounds));
+        return null;
+    }
+
+    private const int SmokeRounds = 2;
 
     /// <summary>
     /// Unit <paramref name="entered"/> has come on to its hex - driven, shoved
@@ -671,6 +717,14 @@ public static class Battle
             s.Fires.Remove(c);
             s.Board.SetCoverState(c, CoverState.Burnt);
             s.Events.Add(new BattleEvent(BattleEventKind.WoodBurnt, -1, c));
+        }
+        foreach (Vector2I c in new List<Vector2I>(s.Smoke.Keys))
+        {
+            if (--s.Smoke[c] > 0)
+                continue;
+            s.Smoke.Remove(c);
+            s.Board.SetSmoke(c, false);
+            s.Events.Add(new BattleEvent(BattleEventKind.SmokeGone, -1, c, 0, "blown away"));
         }
         s.Events.Add(new BattleEvent(BattleEventKind.FieldTick, -1, default, s.Round));
     }

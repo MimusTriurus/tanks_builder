@@ -58,6 +58,8 @@ public sealed partial class Tank3DBench
         _acts.AddChild(new Control { CustomMinimumSize = new Vector2(18.0f, 0.0f), MouseFilter = Control.MouseFilterEnum.Ignore });
         (_slotBonus, _slotBonusText) = Slot(SlotBonus);
         _actRam = ActButton("Таран   Tab", toggle: true, RamToggle);
+        // the grenade (Д8, Tank3DBench.Smoke): a mode, no key - none is free
+        _actSmoke = ActButton("Дым", toggle: true, SmokeToggle);
         _actDouse = ActButton("Тушить   J", toggle: false, () => Execute(new Command(CommandKind.Douse)));
         // the wall ahead rammed through (Д5): no key of its own - none is free
         _actRamWall = ActButton("Таран стены", toggle: false, () => Execute(new Command(CommandKind.RamWall, Side: HullSide())));
@@ -141,6 +143,8 @@ public sealed partial class Tank3DBench
     {
         if (Match && AmbushClick(screen))
             return true;
+        if (Match && SmokeClick(screen))
+            return true;
         if (!Match || !_ramMode)
             return false;
         if (_overTarget || _overParked is not null)
@@ -171,6 +175,8 @@ public sealed partial class Tank3DBench
         _actAmbush!.Visible = attack;
         _actAmbush.SetPressedNoSignal(_ambushMode);
         _actRam!.Visible = bonus;
+        _actSmoke!.Visible = bonus && RigSmokes;
+        _actSmoke.SetPressedNoSignal(_smokeMode);
         _actDouse!.Visible = bonus && Burning(_unitId);
         _actRamWall!.Visible = bonus && WallAhead;
         _actRam.SetPressedNoSignal(_ramMode);

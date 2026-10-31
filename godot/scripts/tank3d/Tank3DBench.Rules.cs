@@ -45,6 +45,8 @@ public sealed partial class Tank3DBench
         {
             if (_hexWas is Vector2I came && _fate == Fate.Alive)
             {
+                // smoke first: a unit on it disperses it (Tank3DBench.Smoke)
+                SmokeEntered(here);
                 HexEffects(_unitId, _side, _modelTag, here);
                 // then the enemy's ambushes (match.md п. 4; Tank3DBench.Ambush)
                 if (_fate == Fate.Alive)
@@ -62,6 +64,8 @@ public sealed partial class Tank3DBench
             }
             if (_otherHexWas != there)
             {
+                if (_otherHexWas is not null && o.Fate != Fate.Destroyed)
+                    SmokeEntered(there);
                 if (_otherHexWas is not null && o.Fate == Fate.Alive)
                     HexEffects(o.Id, o.Side, o.Tag, there);
                 // a hull shoved on to an axis crosses it, one out of the fight too
@@ -100,7 +104,11 @@ public sealed partial class Tank3DBench
     /// whoever stands in a wood it reached alight.</summary>
     private void FieldTick()
     {
-        if (!Match || _wildfire is null || !_wildfire.Ruled)
+        if (!Match)
+            return;
+        // the smoke a round shorter (Tank3DBench.Smoke)
+        SmokeRound();
+        if (_wildfire is null || !_wildfire.Ruled)
             return;
         foreach (Vector2I cell in _wildfire.Round())
         {

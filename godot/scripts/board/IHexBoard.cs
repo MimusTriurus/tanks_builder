@@ -42,6 +42,9 @@ public interface IHexBoard
     /// <summary>The cell's own standing walls, a mask over
     /// <see cref="HexField.EdgeIndex"/>; 0 where its cover is not walls.</summary>
     int SidesAt(Vector2I cell);
+    /// <summary>Smoke on the hex (field.md, «дым»; Д8): a match's, never a
+    /// map's - laid by the grenade, gone in two rounds or when a unit comes on.</summary>
+    bool Smoked(Vector2I cell);
 
     bool IsRamp(Vector2I cell);
     bool IsWater(Vector2I cell);
@@ -124,12 +127,14 @@ public static class BoardRules
         TerrainRules.Of(Cover.Walls).Blocks && Walled(b, from, heading);
 
     /// <summary><see cref="HexField.Screened"/>: what stands on the hex stops a
-    /// round crossing it - a wood. Not masonry: a wall stands on an edge and
+    /// round crossing it - a wood, smoke (field.md, «дым»: «танки стрелять
+    /// сквозь гексы с дымом не могут»; Д8). Not masonry: a wall stands on an edge and
     /// stops what crosses that edge (<see cref="Blocked"/>), not the hex
     /// (GDD field.md, «кирпичные стены»; П-26, Д4). <c>terrain.json</c> has
     /// the walls screen for the 2D board's capon, which asks the table.</summary>
     public static bool Screened(IHexBoard b, Vector2I cell) =>
-        b.CoverAt(cell) != Cover.Walls && TerrainRules.Screens(b.CoverAt(cell), b.CoverStateAt(cell));
+        b.Smoked(cell)
+        || (b.CoverAt(cell) != Cover.Walls && TerrainRules.Screens(b.CoverAt(cell), b.CoverStateAt(cell)));
 
     /// <summary><see cref="HexField.Lane"/>.</summary>
     public static List<Vector2I> Lane(IHexBoard b, Vector2I cell, int heading, int limit = int.MaxValue)

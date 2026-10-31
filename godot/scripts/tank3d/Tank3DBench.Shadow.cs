@@ -105,6 +105,8 @@ public sealed partial class Tank3DBench
             for (int q = 0; q < s.Board.Columns; q++)
                 if (s.Board.CoverStateAt(new Vector2I(q, r)) == CoverState.Burning)
                     s.Fires[new Vector2I(q, r)] = 2;
+        foreach (KeyValuePair<Vector2I, int> smoke in _smokeLeft)
+            s.Smoke[smoke.Key] = smoke.Value;
         return s;
     }
 
@@ -209,6 +211,8 @@ public sealed partial class Tank3DBench
             for (int q = 0; q < core.Board.Columns; q++)
             {
                 var cell = new Vector2I(q, r);
+                if (core.Board.Smoked(cell) != bench.Board.Smoked(cell))
+                    _shadowSaid.Add($"smoke {MapAt(cell)} core {core.Board.Smoked(cell)} bench {bench.Board.Smoked(cell)}");
                 if (core.Board.SidesAt(cell) != bench.Board.SidesAt(cell))
                     _shadowSaid.Add($"walls {MapAt(cell)} core {core.Board.SidesAt(cell)} bench {bench.Board.SidesAt(cell)}");
                 CoverState cs = core.Board.CoverStateAt(cell), bs = bench.Board.CoverStateAt(cell);

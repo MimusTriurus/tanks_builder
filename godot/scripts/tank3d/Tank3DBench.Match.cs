@@ -162,6 +162,19 @@ public sealed partial class Tank3DBench
     /// <summary>The unit on the rig has the wading gear.</summary>
     private bool RigSnorkel => Snorkel(_unitId);
 
+    /// <summary>Unit <paramref name="id"/>'s kit; none off a match (Д8: the
+    /// trawl and the smoke grenade are read off it).</summary>
+    private Kit KitOf(int id) => Match && id >= 0 && id < _kits.Length ? _kits[id] : Kit.None;
+
+    /// <summary>How the unit on the rig moves: its class, its wading gear and
+    /// its trawl (upgrades.md: a mine taken nose first is cleared, Д8).</summary>
+    private Steps.Mover RigMover(IReadOnlySet<Vector2I>? barred = null)
+    {
+        Steps.Mover m = Steps.Mover.Of(_profile, RigSnorkel, barred);
+        m.Trawl = (KitOf(_unitId) & Kit.Trawl) != 0;
+        return m;
+    }
+
     private static Side SideOf(Lineup.Unit u) => u.Side == Parking.Brown ? Side.Brown : Side.Green;
 
     /// <summary>
@@ -402,6 +415,7 @@ public sealed partial class Tank3DBench
     {
         _passIn = null;
         _ramMode = false;
+        _smokeMode = false;
         _ambushMode = false;
         _ambushPick = null;
         _matchNote = "";
@@ -517,6 +531,8 @@ public sealed partial class Tank3DBench
         StalemateTick(busy);
         // the rules core takes the turn off the bench (Tank3DBench.Shadow)
         ShadowTick(busy);
+        // the smoke on the board, drawn (Tank3DBench.Smoke)
+        SmokeTick(dt);
         // the watchers out of the fight out of ambush (Tank3DBench.Ambush)
         AmbushTick();
         // what a hex does to a hull coming on to it (Tank3DBench.Rules)

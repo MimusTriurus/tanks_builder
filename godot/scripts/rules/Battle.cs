@@ -50,6 +50,7 @@ public enum BattleEventKind
     WoodAlight, WoodBurnt, WoodCleared, WallDown, Shoved, RamRefused,
     TurnEnded, FieldTick, Won, Drawn,
     AmbushSet, AmbushFired, AmbushLifted,
+    SmokeLaid, SmokeGone,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench
@@ -83,6 +84,9 @@ public sealed class BattleState
     public bool Drawn;
     /// <summary>Burning woods and the rounds they have left (2 when lit, GDD match.md).</summary>
     public Dictionary<Vector2I, int> Fires = new();
+    /// <summary>Smoke and the rounds it has left (2 when laid, field.md «дым»); the
+    /// board says where it is (<see cref="BattleBoard.Smoked"/>).</summary>
+    public Dictionary<Vector2I, int> Smoke = new();
     public List<BattleEvent> Events = new();
 
     public bool Over => Won is not null || Drawn;
@@ -115,6 +119,7 @@ public sealed class BattleState
         s.Board = Board.Clone();
         s.Units = Units.Select(u => u.Clone()).ToList();
         s.Fires = new Dictionary<Vector2I, int>(Fires);
+        s.Smoke = new Dictionary<Vector2I, int>(Smoke);
         s.Events = new List<BattleEvent>(Events);
         return s;
     }

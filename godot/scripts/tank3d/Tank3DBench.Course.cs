@@ -184,7 +184,7 @@ public sealed partial class Tank3DBench
             // a set of its own: the search keeps it
             _reachBarred = new HashSet<Vector2I>(_barredNow);
             _reachVersion++;
-            Steps.Mover mover = Steps.Mover.Of(_profile, RigSnorkel, _reachBarred);
+            Steps.Mover mover = RigMover(_reachBarred);
             // the zone gives no mine away (Steps.Mover.MinesUnseen); the hull finds it
             mover.MinesUnseen = true;
             _reach = Steps.Plan(_field!, new Steps.Pose(here, side), mover);

@@ -133,13 +133,22 @@ public sealed partial class Tank3DBench
                 && UnderHull(mine.At, _rig.Position, ahead, _foot, out float along))
             {
                 Blow(mine);
-                MinedOwn(mine, along);
+                // the trawl ahead takes it, driven nose first (upgrades.md,
+                // «Минный трал»; Д8): the hex cleared, the hull whole
+                if ((KitOf(_unitId) & Kit.Trawl) != 0 && (_speed > 0.0f || RamRunning) && along >= 0.0f)
+                    Log.Print($"tank3d: match: the trawl takes the mine on {MapAt(mine.Cell)}");
+                else
+                    MinedOwn(mine, along);
             }
             else if (_other is { } o && o.Slid > 0.0f
                      && UnderHull(mine.At, o.Rig.Position, o.Ahead, o.Foot, out float alongOther))
             {
                 Blow(mine);
-                MinedOther(o, alongOther);
+                // shoved nose first, its trawl takes it too (Battle.Arrive: forward)
+                if (o.Unit && (KitOf(o.Id) & Kit.Trawl) != 0 && o.Ahead.Dot(ahead) > 0.85f && alongOther >= 0.0f)
+                    Log.Print($"tank3d: match: {o.Tag}'s trawl takes the mine on {MapAt(mine.Cell)}");
+                else
+                    MinedOther(o, alongOther);
             }
         }
     }

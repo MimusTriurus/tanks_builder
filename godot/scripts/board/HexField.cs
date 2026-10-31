@@ -1912,6 +1912,15 @@ public sealed partial class HexField : Node2D, IHexBoard
     /// question.</summary>
     public bool Screened(Vector2I cell) => BoardRules.Screened(this, cell);
 
+    /// <summary>The match's smoke (field.md, «дым»; Д8): a layer of the
+    /// match, not of the map - no file writes it, a new board has none.</summary>
+    private readonly HashSet<Vector2I> _smoke = new();
+
+    public bool Smoked(Vector2I cell) => _smoke.Contains(cell);
+
+    /// <summary>Smoke laid on the hex, or gone from it; true when that changed.</summary>
+    public bool SetSmoke(Vector2I cell, bool on) => on ? _smoke.Add(cell) : _smoke.Remove(cell);
+
     /// <summary>
     /// Whether a step from a cell in a heading is refused by what stands on the
     /// edge - the cover half of the question <see cref="Passable"/> answers for
