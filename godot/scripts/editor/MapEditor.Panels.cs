@@ -105,8 +105,8 @@ public sealed partial class MapEditor
         }
         box.AddChild(tools);
 
-        // Seven tabs in two rows of toggles, none scrolled off: a TabBar is one
-        // row, and seven names do not fit the panel's width in one (Look and
+        // Eight tabs in two rows of toggles, none scrolled off: a TabBar is one
+        // row, and eight names do not fit the panel's width in one (Look and
         // Roads, 2026-10-28). Foundation as Floor - the readout's own word.
         _tabs = new GridContainer { Columns = 4 };
         _tabs.AddThemeConstantOverride("h_separation", 2);
@@ -311,6 +311,9 @@ public sealed partial class MapEditor
                     };
                 return _presets.Select((p, i) => (p.Name,
                     (Action)(() => _preset = i), (Func<bool>)(() => _preset == i))).ToList();
+            case MapEdit.Tab.Match:
+                // the zones and the control point (MapEditor.Arena)
+                return ArenaBrushes();
             case MapEdit.Tab.Units:
                 // A side's five, then the other's: Lineup.Pairs' order, the
                 // roster's, so Q walks green LT to brown HM
@@ -471,7 +474,9 @@ public sealed partial class MapEditor
             ? "none"
             : $"{_picked.X},{_picked.Y} {_edit.LetterAt(_picked)} "
               + $"{(_edit.IsRamp(_picked) ? "r" : "-")} "
-              + $"{_edit.SlotAt(_picked)}";
+              + $"{_edit.SlotAt(_picked)} "
+              // the zone and the point said there (MapEditor.Arena)
+              + $"{_edit.Arena.ZoneAt(_picked)} {_edit.Arena.Point}";
 
     private void Fit()
     {
@@ -581,6 +586,8 @@ public sealed partial class MapEditor
                 () => _edit.Home(_picked, _edit.Homes.Count, out string why)
                     ? "" : why));
         }
+        // the zone and the control point (MapEditor.Arena)
+        Staked(into);
         Board(into);
     }
 

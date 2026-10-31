@@ -73,6 +73,9 @@ public sealed partial class MapEditor
             (MapEdit.Tab.Level, "level -1") => Prism(Grass, -1),
             (MapEdit.Tab.Level, "ramp") => Prism(Grass, 0, ramp: true),
             (MapEdit.Tab.Units, string unit) => TankIcon(unit),
+            (MapEdit.Tab.Match, "green zone") => Prism(Grass, 0, ring: GreenInk),
+            (MapEdit.Tab.Match, "brown zone") => Prism(Grass, 0, ring: BrownInk),
+            (MapEdit.Tab.Match, "control point") => Prism(Grass, 0, ring: PointInk),
             (MapEdit.Tab.Presets, string preset) => PresetIcon(preset),
             _ => null,
         };

@@ -62,6 +62,9 @@ public sealed partial class MapEditor
             Vector2I of = _edit.Twin(twin, _symmetry) ?? twin;
             return (_edit.Pair(of, twin, _symmetry, out why), why);
         }
+        // a zone's twin is the other side's; the point is one (MapEditor.Arena)
+        if (_tab == MapEdit.Tab.Match)
+            return (ArenaWrite(twin, true, out why), why);
         if (_tab == MapEdit.Tab.Cover && _bunker)
             return (_edit.Over(twin, Cover.Walls, out why)
                     && _edit.Shelter(twin, true, MapEdit.Turned(_facing, _symmetry), out why), why);

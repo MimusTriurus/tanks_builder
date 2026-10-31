@@ -103,7 +103,7 @@ public sealed partial class MapEditor : SceneRoot
     private static readonly MapEdit.Tab[] TabOrder =
     {
         MapEdit.Tab.Foundation, MapEdit.Tab.Look, MapEdit.Tab.Roads, MapEdit.Tab.Cover,
-        MapEdit.Tab.Level, MapEdit.Tab.Units, MapEdit.Tab.Presets,
+        MapEdit.Tab.Level, MapEdit.Tab.Units, MapEdit.Tab.Presets, MapEdit.Tab.Match,
     };
 
     /// <summary>Which way the board's-edge brush writes: a cell on to the plot
@@ -241,6 +241,7 @@ public sealed partial class MapEditor : SceneRoot
                     "presets" => MapEdit.Tab.Presets,
                     "look" => MapEdit.Tab.Look,
                     "roads" => MapEdit.Tab.Roads,
+                    "match" => MapEdit.Tab.Match,
                     _ => MapEdit.Tab.Foundation,
                 };
             else if (args[i] == "--radius" && i + 1 < args.Length
@@ -525,6 +526,7 @@ public sealed partial class MapEditor : SceneRoot
         Tanks();
         TurnProbe();
         UnitsProbe();
+        ArenaProbe();
         ClipProbe();
         SymmetryProbe();
         BoardProbe();
@@ -1239,7 +1241,7 @@ public sealed partial class MapEditor : SceneRoot
         // a tank stands on one cell whatever the radius; selecting, the
         // pointer paints nothing (MapEditor.Select)
         _edit.Inside(_under) && !Selecting
-            ? _edit.Ring(_under, _tab == MapEdit.Tab.Units || _instrument == Instrument.Pick ? 0 : _radius)
+            ? _edit.Ring(_under, _tab == MapEdit.Tab.Units || ArenaClicks || _instrument == Instrument.Pick ? 0 : _radius)
             : Array.Empty<Vector2I>();
 
     /// <summary>The cells a stroke would write: the brush's and, with a
@@ -1370,6 +1372,8 @@ public sealed partial class MapEditor : SceneRoot
 
             // The marked cells and the piece in hand (MapEditor.Select), then
             // last, over everything: what the brush would do (MapEditor.Help).
+            // the zones and the control point (MapEditor.Arena)
+            editor.DrawArena(this);
             editor.DrawAxis(this);
             editor.DrawSelection(this);
             editor.Ghost(this);
@@ -1497,7 +1501,7 @@ public sealed partial class MapEditor : SceneRoot
         switch (key.Keycode)
         {
             // the number keys walk the bar (TabOrder)
-            case >= Key.Key1 and <= Key.Key7: _tab = TabOrder[key.Keycode - Key.Key1]; break;
+            case >= Key.Key1 and <= Key.Key8: _tab = TabOrder[key.Keycode - Key.Key1]; break;
             case Key.Q: Cycle(); break;
             case Key.W: Toggle(true); break;
             case Key.E: Toggle(false); break;
@@ -1570,7 +1574,7 @@ public sealed partial class MapEditor : SceneRoot
             return;
         // A tank is put by a click, not painted: a drag would carry it over the
         // others and put each one it crossed on the brush's side and class
-        if (_tab == MapEdit.Tab.Units && !started)
+        if ((_tab == MapEdit.Tab.Units || ArenaClicks) && !started)
             return;
         if (started)
         {
@@ -1639,6 +1643,7 @@ public sealed partial class MapEditor : SceneRoot
             MapEdit.Tab.Roads => Refuse("a road is laid by its points - click them, Enter lays", out why),
             MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
             MapEdit.Tab.Units => _edit.Unit(cell, _unitSide, _unitClass, out why),
+            MapEdit.Tab.Match => ArenaWrite(cell, false, out why),
             _ => _rampBrush ? _edit.Ramp(cell, true, out why)
                             : _edit.Level(cell, _level, out why),
         };
@@ -1659,7 +1664,7 @@ public sealed partial class MapEditor : SceneRoot
     private void Fill()
     {
         // tanks are put one by one: a region of them is not a board
-        if (_tab == MapEdit.Tab.Units || (!_edit.Inside(_under) && _selected.Count == 0))
+        if (_tab == MapEdit.Tab.Units || ArenaClicks || (!_edit.Inside(_under) && _selected.Count == 0))
             return;
         _edit.Begin();
         // the marked cells when there are any (MapEditor.Select), else the
@@ -1910,6 +1915,7 @@ public sealed partial class MapEditor : SceneRoot
         MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
                                      : "cover: " + _cover.ToString().ToLowerInvariant(),
         MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",
+        MapEdit.Tab.Match => ArenaLaid(),
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
     };
 

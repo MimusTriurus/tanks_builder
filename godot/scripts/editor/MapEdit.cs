@@ -50,6 +50,10 @@ public sealed class MapEdit
         /// <summary>The roads (format 3, <see cref="Road"/>): laid by points
         /// (MapEditor.Roads), the eraser cuts the roads in a cell.</summary>
         Roads,
+        /// <summary>The match's ground (Д9): the sides' deployment zones and
+        /// the control point (<see cref="TankSpriteTest.Arena"/>); the eraser
+        /// takes a cell out of its zone, or the point off.</summary>
+        Match,
     }
 
     public string Name { get; set; } = "untitled";
@@ -819,6 +823,9 @@ public sealed class MapEdit
             _walls.Remove(cell);
         if (GlyphAt(cell).Floor != Foundation.Rock)
             _rocks.Remove(cell);
+        // a zone is somewhere to stand: a cell taken off the board leaves it
+        if (!OnBoard(cell) && Arena.ZoneAt(cell) is not null)
+            Zone(cell, null, out _);
     }
 
     private static string Say(Foundation floor, Cover over, int level, bool water)
@@ -1013,6 +1020,7 @@ public sealed class MapEdit
         Tab.Presets => Wipe(cell, out why),
         Tab.Look => Wear(cell, Soil.As, out why),
         Tab.Roads => Uncut(cell, out why),
+        Tab.Match => Unzone(cell, out why),
         _ => Ramp(cell, false, out why) && Level(cell, 0, out why),
     };
 
@@ -1303,6 +1311,85 @@ public sealed class MapEdit
         }
         _homes[slot] = _homes[slot] with { Kit = kit };
         return true;
+    }
+
+    // --- the match's ground (Д9) ---------------------------------------------------
+
+    /// <summary>The points a side starts with when the point is first put: the
+    /// editor's offer, not a rule - the GDD leaves N to the map (U-01).</summary>
+    public const int PointScore = 6;
+
+    /// <summary>A cell into <paramref name="side"/>'s deployment zone, out of
+    /// the other's; null takes it out of both. Off the board is refused.</summary>
+    public bool Zone(Vector2I cell, string? side, out string why)
+    {
+        why = "";
+        if (side is not null && !OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is off the board, and a zone is somewhere to stand";
+            return false;
+        }
+        string? was = Arena.ZoneAt(cell);
+        if (was == side)
+        {
+            why = side is null ? $"({cell.X},{cell.Y}) is in no zone" : "";
+            return side is not null;
+        }
+        Arena arena = Arena;
+        if (was is not null)
+            arena = arena.WithZone(was, arena.Zone(was).Where(c => c != cell));
+        if (side is not null)
+            arena = arena.WithZone(side, arena.Zone(side).Append(cell));
+        Arena = arena;
+        return true;
+    }
+
+    /// <summary>The control point put on <paramref name="cell"/>, ringed or
+    /// not; it keeps the points it had, or starts at <see cref="PointScore"/>.</summary>
+    public bool Point(Vector2I cell, bool ring, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is off the board";
+            return false;
+        }
+        Arena = Arena.WithPoint(new ControlPoint(cell, ring, Arena.Point?.Score ?? PointScore));
+        return true;
+    }
+
+    /// <summary>The points each side starts with (N, match.md).</summary>
+    public bool Score(int score, out string why)
+    {
+        why = "";
+        if (Arena.Point is not { } p)
+        {
+            why = "there is no control point to give points to";
+            return false;
+        }
+        if (score < ControlPoint.Least)
+        {
+            why = $"a side starts with {ControlPoint.Least} point at least";
+            return false;
+        }
+        Arena = Arena.WithPoint(p with { Score = score });
+        return true;
+    }
+
+    /// <summary>The Match tab's eraser: the cell out of its zone, else the
+    /// control point off when the cell is one of its hexes.</summary>
+    private bool Unzone(Vector2I cell, out string why)
+    {
+        if (Arena.ZoneAt(cell) is not null)
+            return Zone(cell, null, out why);
+        why = "";
+        if (Arena.Point is { } p && p.Holds(cell))
+        {
+            Arena = Arena.WithPoint(null);
+            return true;
+        }
+        why = $"({cell.X},{cell.Y}) is in no zone and not on the point";
+        return false;
     }
 
     public bool DropHome(int slot, out string why)
@@ -1755,6 +1842,10 @@ public sealed class MapEdit
         }
         (Columns, Rows, _ground, _under, _soil, _trees, _ramps, _homes, _walls, _rocks) =
             (columns, rows, ground, under, soil, trees, ramps, homes, walls, rocks);
+        // the zones and the point moved with the cells; what ran off is gone
+        Arena = new Arena(Arena.Zone(Parking.Green).Select(c => c + by).Where(Fits),
+                          Arena.Zone(Parking.Brown).Select(c => c + by).Where(Fits),
+                          Arena.Point is { } p && Fits(p.Cell + by) ? p with { Cell = p.Cell + by } : null);
         // the roads moved with the cells, cut where they ran off the board
         List<RoadPath> roads = _roads.Select(r => r.Moved(by)).ToList();
         _roads = new List<RoadPath>();
