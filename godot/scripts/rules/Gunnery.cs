@@ -32,6 +32,10 @@ public readonly struct Shot
     /// nothing did.</summary>
     public Barrier Stop { get; init; }
 
+    /// <summary>The hull a destroyer's round goes through on the way - its one
+    /// pass (GDD classes.md, «Тяжёлый снаряд TD») - or null.</summary>
+    public Vector2I? Passed { get; init; }
+
     public bool OnLane => Heading >= 0;
 
     public bool Clear => OnLane && BlockedAt is null;
@@ -210,10 +214,18 @@ public static class Gunnery
     /// end stands at, where it is not its cell's: a tank afloat stands on the
     /// surface of its water, level with the bank (GDD field.md, «Уровни и
     /// линия огня», 2026-10-29). Without it both ends are their cells'.
+    ///
+    /// <paramref name="passes"/> 1 is a destroyer's round (GDD classes.md,
+    /// «Тяжёлый снаряд TD»; units.md: TD's round goes through the first thing
+    /// in its way and is spent on the second): the first hull on the lane that
+    /// <paramref name="passable"/> lets through - any without it - is gone
+    /// through (<see cref="Shot.Passed"/>) and the second one stops it. A wood
+    /// or smoke is never a pass; the walls are the caller's, as above.
     /// </summary>
     public static Shot Solve(IHexBoard field, Vector2I from, Vector2I onto, bool lobs,
                              Func<Vector2I, bool> occupied, bool masonry = true,
-                             Func<Vector2I, int>? standing = null, bool thermal = false)
+                             Func<Vector2I, int>? standing = null, bool thermal = false,
+                             int passes = 0, Func<Vector2I, bool>? passable = null)
     {
         if (onto == from)
             return None;
@@ -223,7 +235,7 @@ public static class Gunnery
         if (heading < 0)
             return None;
         List<Vector2I> lane = field.Lane(from, heading, range);
-        Vector2I? blocked = null;
+        Vector2I? blocked = null, passed = null;
         Barrier stop = Barrier.None;
         // <b>The board's half of the rules is asked of guns and not of the
         // mortar</b> - GDD classes.md, "HM": the bomb "приходит сверху, на любой
@@ -298,6 +310,12 @@ public static class Gunnery
             // the thermal imager sees its line of fire through smoke (upgrades.md)
             if (!tank && !BoardRules.Screened(field, lane[i], thermal))
                 continue;
+            // the destroyer's pass: through the hull, on to the next thing
+            if (tank && passes > 0 && passed is null && (passable?.Invoke(lane[i]) ?? true))
+            {
+                passed = lane[i];
+                continue;
+            }
             blocked = lane[i];
             stop = tank ? Barrier.Tank : Barrier.Cover;
         }
@@ -316,7 +334,7 @@ public static class Gunnery
         return new Shot
         {
             Heading = heading, Range = range,
-            BlockedAt = blocked, Stop = stop,
+            BlockedAt = blocked, Stop = stop, Passed = passed,
         };
     }
 

@@ -79,6 +79,11 @@ public sealed partial class Tank3DBench
         /// target: where the line crosses it.</summary>
         public Vector3? Breach { get; init; }
 
+        /// <summary>A destroyer's pass spent on a hull short of the target
+        /// (<see cref="HoledLeg"/>): the hull, its plate, where the line
+        /// crosses it.</summary>
+        public Leg? Holed { get; init; }
+
         /// <summary>A standing tank shuts the lane: the line ends on its
         /// plate, drawn without the cross and the word.</summary>
         public bool Screened { get; init; }
@@ -94,7 +99,9 @@ public sealed partial class Tank3DBench
                 string what = Pierces ? $"пробьёт ({Level})" : Glances ? "рикошет" : "не пробьёт";
                 if (Onward is { } leg)
                     what += leg.Through ? $" → насквозь: {leg.Says}" : $" → {leg.Says}";
-                return $"{(Breach is null ? "" : "сквозь стену → ")}{FaceWord(Face)} · {what}";
+                string through = Holed is { } h ? $"сквозь {h.Hull!.Tag} ({FaceWord(h.Face)}) → "
+                    : Breach is null ? "" : "сквозь стену → ";
+                return $"{through}{FaceWord(Face)} · {what}";
             }
         }
     }
@@ -283,7 +290,7 @@ public sealed partial class Tank3DBench
             return false;
         if (_profile.Lobs)
             return true;
-        return cells >= DirectNearest && WallOnAxis(from, axis, cells, passOne: ShootsThrough) is null;
+        return cells >= DirectNearest && WallOnAxis(from, axis, cells, passOne: WallPass(from, cell)) is null;
     }
 
     /// <summary>The own tank, the target or a standing one under the pointer -
@@ -389,13 +396,20 @@ public sealed partial class Tank3DBench
         // then the target cannot; WallOnAxis(passOne) finds the wall after.
         int might = _profile.Might;
         Vector3? breach = null;
-        if (why.Length == 0 && !_profile.Lobs && ShootsThrough
+        // ...or a hull first on it (Holes): the round goes through it, holing
+        // it, and on to the target with one less - the near hull's leg
+        Leg? holed = why.Length == 0 && !_profile.Lobs && HullPass(from, cell) is { } hull
+            ? HoledLeg(from, axis, hull) : null;
+        if (holed is not null)
+            might = Gunnery.PassedMight(_profile);
+        bool wallPass = holed is null && ShootsThrough;
+        if (why.Length == 0 && !_profile.Lobs && wallPass
             && WallOnAxis(from, axis, cells) is { Prop.Concrete: false } first)
         {
             breach = first.At;
             might = Gunnery.PassedMight(_profile);
         }
-        if (why.Length == 0 && !_profile.Lobs && WallOnAxis(from, axis, cells, passOne: ShootsThrough) is { } wall)
+        if (why.Length == 0 && !_profile.Lobs && WallOnAxis(from, axis, cells, passOne: wallPass) is { } wall)
         {
             why = $"снаряд уйдёт в стену {MapAt(wall.Cell)}";
             end = wall.At;
@@ -438,12 +452,12 @@ public sealed partial class Tank3DBench
                 end = hit.At;
         }
         var judged = new Judged(from, cell, muzzle, end, axis, face, plate, level, why, _profile.Lobs, cells, stop, TipAt(from));
-        judged = judged with { Breach = breach, Screened = screen is not null };
+        judged = judged with { Breach = breach, Screened = screen is not null, Holed = why.Length == 0 ? holed : null };
         // where it goes on to past the target - the round's own leg (Strike):
         // held by a flank, or a destroyer's with its pass still in hand
         if (judged.Glances && !judged.Lob)
             judged = judged with { Onward = GlanceLeg(o, end, end - judged.Tip, might) };
-        else if (judged.Pierces && !judged.Lob && ShootsThrough && breach is null)
+        else if (judged.Pierces && !judged.Lob && ShootsThrough && breach is null && holed is null)
             judged = judged with { Onward = PassLeg(o, end, end - judged.Tip, Gunnery.PassedMight(_profile)) };
         return judged;
     }
@@ -702,6 +716,9 @@ public sealed partial class Tank3DBench
             else
             {
                 PlateEdge(mesh, cell, HexField.Reverse(shot.Axis), shot.Ink, corner);
+                // a destroyer's pass through a hull short of it: where it went in
+                if (shot.Holed is { } holed)
+                    PlateEdge(mesh, holed.Cell, HexField.Reverse(holed.Axis), holed.Ink, corner);
                 // the ricochet's: the edge it leaves by, and the plate it meets
                 if (shot.Onward is { } leg)
                 {
@@ -952,6 +969,9 @@ void fragment() {
             // the line, shown with it
             if (shot.Breach is Vector3 wall && _fireAxis && OnTarget(shot))
                 Burst(ink, _camera.UnprojectPosition(wall), Mathf.Max(size * 0.8f, hex * 0.18f), AimPierce);
+            // ...or on a hull short of it, holed on the way
+            if (shot.Holed is { } holed && _fireAxis && OnTarget(shot))
+                Burst(ink, _camera.UnprojectPosition(holed.End), Mathf.Max(size * 0.8f, hex * 0.18f), AimPierce);
         }
         else if (shot.Axis >= 0 && !shot.Screened)
         {

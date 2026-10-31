@@ -110,6 +110,9 @@ public sealed partial class Tank3DBench
         bool fiery = FieryLaunch();
         if (_shadowAim is Vector2I aim)
             ShadowAct($"fire{(fiery ? " incendiary" : "")} at {MapAt(aim)}", s => Battle.Fire(s, aim, fiery));
+        // a destroyer's round laid past a hull goes through it (HullPass)
+        Leg? holes = !_profile.Lobs && _shadowAim is Vector2I laid && HullPass(CellHere, laid) is { } hull
+            ? HoledLeg(CellHere, AxisTo(CellHere, laid).Axis, hull) : null;
         _shadowAim = null;
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
@@ -119,7 +122,7 @@ public sealed partial class Tank3DBench
         if (_profile.Lobs && _chargeFor is Vector3 to && Charge(muzzle, bore, to, fall) is float v)
             speed = v;
         _chargeFor = null;
-        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, true, _profile.Lobs);
+        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, true, _profile.Lobs, holes);
     }
 
     /// <summary>Where the bomb being fired was laid on, for its charge.</summary>
@@ -212,9 +215,12 @@ public sealed partial class Tank3DBench
     /// target (<paramref name="strikes"/>), the ground, the board's edge or
     /// <paramref name="longest"/> s, then flown at that pace. A
     /// <paramref name="lob"/> bursts on whatever it meets and is drawn over
-    /// the board, with its shadow.
+    /// the board, with its shadow. <paramref name="holes"/>: a destroyer's
+    /// pass on a standing hull short of the target (<see cref="HoledLeg"/>) -
+    /// struck as the round gets to it, the round on with one less.
     /// </summary>
-    private CelShell.Round Throw(Vector3 from, Vector3 v, float fall, float longest, bool strikes, bool lob)
+    private CelShell.Round Throw(Vector3 from, Vector3 v, float fall, float longest, bool strikes, bool lob,
+                                 Leg? holes = null)
     {
         var path = new List<Vector3> { from };
         var g = new Vector3(0.0f, -fall, 0.0f);
@@ -262,6 +268,22 @@ public sealed partial class Tank3DBench
                 path.Add(roof.At);
                 landed = CaponRoofed(roof.Prop, roof.At, seg);
                 break;
+            }
+            // the hull the pass goes through (HullPass): on its plate where the
+            // round meets it, else as the round comes on to its hex
+            if (strikes && passes > 0 && holes is { Hull: { } holed } && IsInstanceValid(holed.Model))
+            {
+                Leg? at = HitsOf(holed).Cast(p, seg) is { } met && (met.At - p).Length() <= seg.Length() + 0.5f
+                    ? holes with { End = met.At, Part = met.Part, N = met.N }
+                    : _field is not null && _field.FlatCellAt(Board(next)) == holed.Cell ? holes : null;
+                if (at is not null)
+                {
+                    Vector3 way = seg.Normalized();
+                    through.Add((run + Mathf.Min((at.End - p).Length(), seg.Length()), () => StrikeParked(at, way)));
+                    passes--;
+                    might = Gunnery.PassedMight(_profile);
+                    holes = null;
+                }
             }
             if (strikes && _other is { } o && o.Hits.Cast(p, seg) is { } hit
                 && (hit.At - p).Length() <= seg.Length() + 0.5f)
@@ -687,7 +709,7 @@ public sealed partial class Tank3DBench
         // засады обрезается неразрушенной стеной"): a gun's round goes into
         // the first one, halfway up it; the bomb goes over. A destroyer's goes
         // through the first brick one (its pass) and is laid past it.
-        if (!_profile.Lobs && WallOnAxis(own, axis, cells, passOne: ShootsThrough) is { } wall)
+        if (!_profile.Lobs && WallOnAxis(own, axis, cells, passOne: WallPass(own, cell)) is { } wall)
         {
             Aim(wall.At, Foot(wall.At), $"{MapAt(cell)}, axis {axis}: into the wall {MapAt(wall.Cell)}");
             return;

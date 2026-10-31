@@ -479,8 +479,9 @@ public sealed partial class Tank3DBench
         return null;
     }
 
-    /// <summary>The walls the rounds in the air have got to (a destroyer's
-    /// pass), struck on that frame.</summary>
+    /// <summary>The walls and hulls the rounds in the air have got to (a
+    /// destroyer's pass, Tank3DBench.Shell <c>Throw</c>), struck on that frame
+    /// - on a board with no walls too, for the hull's.</summary>
     private void WallsAheadTick()
     {
         for (int i = _wallsAhead.Count - 1; i >= 0; i--)
@@ -613,9 +614,9 @@ public sealed partial class Tank3DBench
     /// </summary>
     private void WallTick(float dt)
     {
+        WallsAheadTick();
         if (_walls.Count == 0 || _field is null || _stage is null)
             return;
-        WallsAheadTick();
         foreach (BunkerProp bunker in _bunkers.Values)
             bunker.Tick(dt, _camera.GlobalBasis);
         _wallBurst?.Tick(dt, _camera.GlobalBasis);

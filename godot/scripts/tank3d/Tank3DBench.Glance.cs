@@ -130,6 +130,37 @@ public sealed partial class Tank3DBench
         return Walk(cell, Nearest(cell, way), at, might) with { Through = true };
     }
 
+    /// <summary>
+    /// The hull a destroyer's round from <paramref name="from"/> along
+    /// <paramref name="axis"/> goes through short of its target - its one pass
+    /// (<see cref="HullPass"/>): from the muzzle's tip to where the round meets
+    /// <paramref name="p"/>, its plate and how deep the gun's whole might gets
+    /// in. What the line of fire shows and the round strikes on its way
+    /// (<see cref="Throw"/>).
+    /// </summary>
+    private Leg HoledLeg(Vector2I from, int axis, Parked p)
+    {
+        Vector3 tip = TipAt(from);
+        Vector3 dir = HexWay(from, axis);
+        bool above = StandingLevel(from, from) > StandingLevel(p.Cell, from);
+        int level = LevelOn(AheadOf(p.Heading), ClassFor(p.Tag), dir, _profile.Might,
+                            out string face, out Gunnery.Plate plate, above);
+        // a knocked-out one goes up whatever its armour (Tank3DBench.Match)
+        if (p.Fate == Fate.Knocked)
+            level = Mathf.Max(level, 1);
+        Vector3 end = p.Rig.Position + Vector3.Up * (0.45f * p.Model.Size.Y * p.Model.PixelsPerUnit);
+        MeshInstance3D? part = null;
+        Vector3 n = -dir;
+        if (HitsOf(p).Cast(tip, (end - tip).Normalized()) is { } hit)
+        {
+            end = hit.At;
+            part = hit.Part;
+            n = hit.N;
+        }
+        return new Leg(axis, tip, end, LegEnd.Tank, p.Cell, _profile.Might)
+            { Hull = p, Part = part, N = n, Face = face, Plate = plate, Level = level, Through = true };
+    }
+
     /// <summary>The leg's walk out of <paramref name="cell"/> along
     /// <paramref name="axis"/> from <paramref name="start"/> - the plate it
     /// left, at its height - to the first thing on it.</summary>

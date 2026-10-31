@@ -475,19 +475,62 @@ public sealed partial class Tank3DBench
         stop = null;
         if (_field is null)
             return "";
-        // In a match every unit still on the board stands in the lane, a
-        // destroyed one does not (Tank3DBench.Match).
-        Shot shot = Gunnery.Solve(_field, own, cell, _profile.Lobs,
-                                  c => (_other is { } o && o.Fate != Fate.Destroyed && OtherCell(o) == c)
-                                       || (Match && ParkedCells.Contains(c)), masonry: false,
-                                  standing: c => StandingLevel(c, own),
-                                  // the thermal imager sees through smoke (Д8)
-                                  thermal: (KitOf(_unitId) & Kit.Thermal) != 0);
+        Shot shot = LaneSolve(own, cell, ShootsThrough ? 1 : 0);
         if (shot.Clear || shot.BlockedAt is not Vector2I at)
             return "";
         stop = at;
         return LaneWhy(shot, at);
     }
+
+    /// <summary>The lane from <paramref name="own"/> to <paramref name="cell"/>
+    /// under the rules: in a match every unit still on the board stands in it,
+    /// a destroyed one does not (Tank3DBench.Match); <paramref name="passes"/>
+    /// 1, a destroyer's, goes through the first hull it holes
+    /// (<see cref="Holes"/>).</summary>
+    private Shot LaneSolve(Vector2I own, Vector2I cell, int passes) =>
+        Gunnery.Solve(_field!, own, cell, _profile.Lobs,
+                      c => (_other is { } o && o.Fate != Fate.Destroyed && OtherCell(o) == c)
+                           || (Match && ParkedCells.Contains(c)), masonry: false,
+                      standing: c => StandingLevel(c, own),
+                      // the thermal imager sees through smoke (Д8)
+                      thermal: (KitOf(_unitId) & Kit.Thermal) != 0,
+                      passes: passes, passable: c => Holes(own, c));
+
+    /// <summary>
+    /// Whether a destroyer's round from <paramref name="own"/> goes through the
+    /// standing hull on <paramref name="cell"/> (GDD classes.md, «Тяжёлый
+    /// снаряд TD»): its pass not spent on a wall short of it - nothing walled
+    /// on the axis before it - and the hull holed, as the pass through the
+    /// target is (<see cref="Strike"/>): a plate that holds spends the round,
+    /// a knocked-out hull goes up whatever its armour. The target itself is
+    /// never passed: it is what is shot at.
+    /// </summary>
+    private bool Holes(Vector2I own, Vector2I cell)
+    {
+        if (UnitStanding(cell) is not { } p)
+            return false;
+        (int axis, int k) = AxisTo(own, cell);
+        if (axis < 0 || WallOnAxis(own, axis, k) is not null)
+            return false;
+        if (p.Fate == Fate.Knocked)
+            return true;
+        bool above = StandingLevel(own, own) > StandingLevel(cell, own);
+        return LevelOn(AheadOf(p.Heading), ClassFor(p.Tag), HexWay(own, axis), _profile.Might,
+                       out _, out _, above) > 0;
+    }
+
+    /// <summary>The standing hull a destroyer's round at <paramref name="cell"/>
+    /// goes through on the way - its one pass - or null; the rules' only.</summary>
+    private Parked? HullPass(Vector2I own, Vector2I cell)
+    {
+        if (!_rules || !ShootsThrough || _field is null || own == cell)
+            return null;
+        return LaneSolve(own, cell, 1).Passed is Vector2I at ? UnitStanding(at) : null;
+    }
+
+    /// <summary>The destroyer's pass is still in hand for a brick wall on the
+    /// way to <paramref name="cell"/>: no hull short of it took it.</summary>
+    private bool WallPass(Vector2I own, Vector2I cell) => ShootsThrough && HullPass(own, cell) is null;
 
     /// <summary>
     /// The level a hull on <paramref name="cell"/> fires from and is shot at:

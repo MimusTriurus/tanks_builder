@@ -152,7 +152,8 @@ public sealed partial class Tank3DBench
     private bool ShotMarked(TankModel model) =>
         _judged is { Fires: true } shot && _other is { Fate: Fate.Alive } o && _blastAt is null
         && (ReferenceEquals(o.Model, model)
-            || (shot.Onward is { Ends: LegEnd.Tank, Hull: { } hull } && ReferenceEquals(hull.Model, model)));
+            || (shot.Onward is { Ends: LegEnd.Tank, Hull: { } hull } && ReferenceEquals(hull.Model, model))
+            || (shot.Holed is { Hull: { } holed } && ReferenceEquals(holed.Model, model)));
 
     // The shield, unit size, y down: its outline, and the two halves the crack
     // splits it into - the crack a zigzag from the top edge to the point.
@@ -272,6 +273,9 @@ public sealed partial class Tank3DBench
         ShotSign(ink, Over(o.Model, o.Rig), r, shot.Pierces, shot.Glances, up);
         if (shot.Onward is { Ends: LegEnd.Tank, Hull: { } hull } leg)
             ShotSign(ink, Over(hull.Model, hull.Rig), r * 0.75f, leg.Pierces, false, up);
+        // the hull a destroyer's round goes through on its way, holed
+        if (shot.Holed is { Hull: { } through } holed)
+            ShotSign(ink, Over(through.Model, through.Rig), r * 0.75f, holed.Pierces, false, up);
     }
 
     private void ShotSign(Control ink, Vector2 at, float r, bool pierces, bool glances, float a)
