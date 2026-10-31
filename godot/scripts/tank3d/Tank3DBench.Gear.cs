@@ -1,0 +1,325 @@
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// The kit's bonus acts aimed at a hex (docs/battle-core-plan.md, Д8; GDD
+/// upgrades.md): the mine layer, the repair kit, the winch. The rules are the
+/// core's - asked of the bench as it stands (<see cref="ShadowOfBench"/>) - and
+/// what the core says happened is what the bench plays (Р-1, as with the
+/// ambush):
+/// <list type="bullet">
+/// <item><b>Мина</b> - a mine on a hex beside: the cell a minefield, the model
+/// laid (<see cref="BoardDress.LayMine"/>), live at once.</item>
+/// <item><b>Ремонт</b> - an own knocked-out hull beside fights again: the pose
+/// up, its pyre out, the char off.</item>
+/// <item><b>Лебёдка</b> - the hull 2 out along an axis slid on to the hex
+/// between (<see cref="PullTick"/>), then what the core said that hex did to
+/// it - a mine, fire, water, smoke - and the ambushes that answered it.</item>
+/// </list>
+/// A button each in the bonus act's group, for a unit with that kit, then a
+/// click on the hex; or <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>.
+/// Not yet: the cable itself is not drawn.
+/// </summary>
+public sealed partial class Tank3DBench
+{
+    private enum Gear { None, Mine, Repair, Winch }
+
+    /// <summary>The panel's mode: a click on a hex is this act.</summary>
+    private Gear _gearMode;
+    private Button? _actMine, _actRepair, _actWinch;
+
+    /// <summary>Seconds the winch takes to pull a hull a hex.</summary>
+    private const float WinchTime = 0.9f;
+
+    /// <summary>A hull on the winch's cable, and the core's account of what
+    /// its new hex does to it, played when it gets there.</summary>
+    private sealed class Pull
+    {
+        public required Parked Hull;
+        public required Vector3 From, To;
+        public required BattleState State;
+        public required int Next;
+        public float T;
+    }
+
+    private Pull? _pull;
+
+    private static Kit KitFor(Gear g) => g switch
+    {
+        Gear.Mine => Kit.MineLayer,
+        Gear.Repair => Kit.RepairKit,
+        _ => Kit.Winch,
+    };
+
+    private static string GearName(Gear g) => g switch
+    {
+        Gear.Mine => "минного заградителя",
+        Gear.Repair => "ремкомплекта",
+        _ => "лебёдки",
+    };
+
+    private bool RigHas(Kit k) => (KitOf(_unitId) & k) != 0;
+
+    private static string? GearAct(Gear g, BattleState s, Vector2I cell) => g switch
+    {
+        Gear.Mine => Battle.LayMine(s, cell),
+        Gear.Repair => Battle.Repair(s, cell),
+        _ => Battle.Winch(s, cell),
+    };
+
+    /// <summary>Why the unit on the rig may not do <paramref name="g"/> on
+    /// <paramref name="cell"/> now, or empty: the turn's gates in the bench's
+    /// words, then the core's own on the bench as it stands.</summary>
+    private string GearWhy(Gear g, Vector2I cell)
+    {
+        if (_field is null || _lineup.Count == 0)
+            return "нет партии";
+        if (_fate != Fate.Alive)
+            return $"{_modelTag} не на ходу";
+        if (_side != _mt.Turn)
+            return $"ходят {SideName(_mt.Turn)}";
+        if (!RigHas(KitFor(g)))
+            return $"у {_modelTag} нет {GearName(g)}";
+        if (MatchBonusSpent)
+            return "доп. действие этого хода уже сделано";
+        return GearAct(g, ShadowOfBench(), cell) is { } no ? Words(no) : "";
+    }
+
+    /// <summary>The core's refusal in the player's words.</summary>
+    private static string Words(string why) => why switch
+    {
+        "only on a hex beside" => "только на соседний гекс",
+        "a tank stands there" => "на гексе танк",
+        "not on water" => "не на воду",
+        "a mine there already" => "там уже мина",
+        "only a hull beside" => "только соседний танк",
+        "nobody there" => "там никого нет",
+        "not one of ours" => "это не свой танк",
+        "a drowned hull is not raised" => "утопленного не поднять",
+        "not knocked out" => "танк не подбит",
+        "heavier than its own hull" => "цель тяжелее своего танка",
+        "only on its own level" => "только на своём уровне",
+        "the hex between is taken" => "гекс между занят",
+        "a wall across the way" => "на пути стена",
+        _ when why.StartsWith("the winch pulls", System.StringComparison.Ordinal)
+            => $"лебёдка тянет танк в {Battle.WinchReach} гексах по оси",
+        _ => why,
+    };
+
+    /// <summary>The act given (the command's executor): the core asked, the
+    /// shadow told, the bonus act spent, and what happened played.</summary>
+    private void GearDo(Gear g, Vector2I cell)
+    {
+        BattleState st = ShadowOfBench();
+        int was = st.Events.Count;
+        if (GearAct(g, st, cell) is { } no)
+        {
+            _orderNote = Words(no);
+            return;
+        }
+        ShadowAct($"{g.ToString().ToLowerInvariant()} {MapAt(cell)}", s => GearAct(g, s, cell));
+        _mt.Bonus = true;
+        _gearMode = Gear.None;
+        for (int i = was; i < st.Events.Count; i++)
+        {
+            BattleEvent e = st.Events[i];
+            switch (e.Kind)
+            {
+                case BattleEventKind.AmbushLifted:
+                    AmbushLift(e.Unit, e.Note);
+                    break;
+                case BattleEventKind.MineLaid:
+                    MineDrop(e.Cell);
+                    break;
+                case BattleEventKind.Repaired:
+                    Raise(e.Unit, e.Cell);
+                    break;
+                case BattleEventKind.Winched:
+                    PullStart(e.Unit, e.Cell, st, i + 1);
+                    return;
+            }
+        }
+    }
+
+    /// <summary>A mine laid on <paramref name="cell"/>: the board's cover and
+    /// the model - a spent one there laid again.</summary>
+    private void MineDrop(Vector2I cell)
+    {
+        _field!.LayMinefield(cell);
+        Laid? old = _mines.Find(m => m.Cell == cell);
+        if (old is not null)
+        {
+            old.Spent = old.Asleep = false;
+            old.Node.Visible = true;
+        }
+        else if (_tile is not null && BoardDress.Mine(out string? note) is { } art)
+        {
+            Node3D node = BoardDress.LayMine(this, art, _field, cell, _tile.HexRect.Size, _pbr, Squash, RiseFactor,
+                                             out Vector3 at);
+            _mines.Add(new Laid { Cell = cell, Node = node, At = at });
+        }
+        else
+            Log.Print($"tank3d: no mine model - the mine on {MapAt(cell)} is laid bare");
+        _matchNote = "мина поставлена";
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} lays a mine on {MapAt(cell)}");
+    }
+
+    /// <summary>The knocked-out unit <paramref name="id"/> repaired: «Активен»,
+    /// its knock-out pose, pyre and char gone.</summary>
+    private void Raise(int id, Vector2I cell)
+    {
+        if (_other is { Unit: true } o && o.Id == id)
+            DropTarget();
+        if (UnitStanding(id) is not { } p)
+            return;
+        p.Fate = Fate.Alive;
+        TankModel m = p.Model;
+        m.Cant = 0.0f;
+        m.Droop = 0.0f;
+        m.Slackness = 0.0f;
+        m.Apply();
+        for (int i = _pyres.Count - 1; i >= 0; i--)
+            if (_pyres[i].Model == m)
+            {
+                _pyres[i].Burn.QueueFree();
+                _pyres.RemoveAt(i);
+            }
+        foreach (ShaderMaterial mat in m.Cel)
+        {
+            mat.Param("char_cover", 0.0f);
+            mat.Param("scorch", 0.0f);
+        }
+        Uncharred(m);
+        _matchNote = $"{p.Tag} снова в бою";
+        Log.Print($"tank3d: match: {SideName(p.Side)} {p.Tag}#{id} on {MapAt(cell)} repaired - it fights from its side's next turn");
+    }
+
+    /// <summary>The winch takes unit <paramref name="id"/>: on to
+    /// <paramref name="mid"/> for the rules now, slid there on the screen.</summary>
+    private void PullStart(int id, Vector2I mid, BattleState st, int next)
+    {
+        if (_other is { Unit: true } o && o.Id == id)
+            DropTarget();
+        if (UnitStanding(id) is not { } p)
+            return;
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId}'s winch pulls {p.Tag}#{id} {MapAt(p.Cell)} -> {MapAt(mid)}");
+        _pull = new Pull { Hull = p, From = p.Rig.Position, To = Foot(CellWorld(mid)), State = st, Next = next };
+        p.Cell = mid;
+        _matchNote = $"лебёдка тянет {p.Tag}";
+    }
+
+    /// <summary>Every frame of a match: the hull on the cable a step nearer,
+    /// and on arrival what its hex did to it. Allocates nothing.</summary>
+    private void PullTick(float dt)
+    {
+        if (_pull is not { } pull)
+            return;
+        if (!IsInstanceValid(pull.Hull.Rig))
+        {
+            _pull = null;
+            return;
+        }
+        pull.T += dt / WinchTime;
+        float k = Mathf.SmoothStep(0.0f, 1.0f, Mathf.Min(pull.T, 1.0f));
+        pull.Hull.Rig.Position = Foot(pull.From.Lerp(pull.To, k));
+        if (pull.T < 1.0f)
+            return;
+        _pull = null;
+        PullLanded(pull);
+    }
+
+    /// <summary>The pulled hull on its hex: the core's events after the pull,
+    /// played on it - the ambushes' rounds by <see cref="AmbushPlay"/>.</summary>
+    private void PullLanded(Pull pull)
+    {
+        Parked p = pull.Hull;
+        BattleState st = pull.State;
+        for (int i = pull.Next; i < st.Events.Count; i++)
+        {
+            BattleEvent e = st.Events[i];
+            switch (e.Kind)
+            {
+                case BattleEventKind.SmokeGone:
+                    SmokeGone(e.Cell, "the winch dragged a hull on to it");
+                    break;
+                case BattleEventKind.MineBlown or BattleEventKind.MineCleared:
+                    if (_mines.Find(m => m.Cell == e.Cell && !m.Spent) is { } mine)
+                        Blow(mine);
+                    else
+                        _field?.SetCoverState(e.Cell, CoverState.Cleared);
+                    break;
+                case BattleEventKind.Knocked or BattleEventKind.Drowned when e.Unit == p.Id:
+                    if (p.Fate == Fate.Alive)
+                        UnitStruck(p, pierced: true);
+                    else if (_field is not null && _field.IsDeep(p.Cell))
+                        Founder(p.Model, p.Cell);
+                    break;
+                case BattleEventKind.Ignited when e.Unit == p.Id:
+                    Ignite(p.Id, p.Side, p.Tag, p.Cell);
+                    break;
+                case BattleEventKind.Doused when e.Unit == p.Id:
+                    Quench(p.Id, steam: true);
+                    break;
+                case BattleEventKind.WoodAlight:
+                    _wildfire?.Light(e.Cell);
+                    break;
+                case BattleEventKind.AmbushFired:
+                    AmbushPlay(st, i);
+                    return;
+            }
+        }
+    }
+
+    // --- the panel ---------------------------------------------------------------------
+
+    /// <summary>A kit act's mode on or off: on, a click on a hex is it.</summary>
+    private void GearToggle(Gear g)
+    {
+        if (_gearMode != g && MatchBonusSpent)
+        {
+            _orderNote = "доп. действие этого хода уже сделано";
+            return;
+        }
+        _gearMode = _gearMode == g ? Gear.None : g;
+        if (_gearMode != Gear.None)
+        {
+            _ramMode = false;
+            _smokeMode = false;
+            _ambushMode = false;
+        }
+        _orderNote = _gearMode switch
+        {
+            Gear.Mine => "мина: щёлкни по соседнему гексу",
+            Gear.Repair => "ремонт: щёлкни по своему подбитому рядом",
+            Gear.Winch => $"лебёдка: щёлкни по танку в {Battle.WinchReach} гексах по оси",
+            _ => "выключено",
+        };
+    }
+
+    /// <summary>The left button with a kit act on: the act on the hex under it.</summary>
+    private bool GearClick(Vector2 screen)
+    {
+        if (_gearMode == Gear.None)
+            return false;
+        if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
+            return true;
+        Vector2I cell = onTank && _other is { } t ? OtherCell(t) : onOwn ? CellHere : _field.FlatCellAt(Board(point));
+        Execute(new Command(CommandOf(_gearMode), cell));
+        return true;
+    }
+
+    private static CommandKind CommandOf(Gear g) => g switch
+    {
+        Gear.Mine => CommandKind.Mine,
+        Gear.Repair => CommandKind.Repair,
+        _ => CommandKind.Winch,
+    };
+
+    private static Gear GearOf(CommandKind k) => k switch
+    {
+        CommandKind.Mine => Gear.Mine,
+        CommandKind.Repair => Gear.Repair,
+        _ => Gear.Winch,
+    };
+}

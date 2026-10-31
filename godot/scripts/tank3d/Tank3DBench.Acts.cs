@@ -18,7 +18,8 @@ namespace TankSpriteTest;
 /// <item><b>Buttons only for the bonus acts</b>, which the mouse cannot say on
 /// its own: <b>Таран</b> - a mode (Tab too), the left button on a tank then
 /// rams it as the right one does (<c>AimAt</c>); <b>Тушить</b> - at once
-/// (<see cref="Douse"/>).</item>
+/// (<see cref="Douse"/>); the kit's <b>Дым</b>, <b>Мина</b>, <b>Ремонт</b>,
+/// <b>Лебёдка</b> (Д8) - modes, a click on a hex then.</item>
 /// <item><b>What may not be done is not there</b> (the author's choice, as
 /// with the roses): no bonus buttons once the bonus act is spent, no
 /// <b>Тушить</b> on a hull that is not burning.</item>
@@ -63,6 +64,10 @@ public sealed partial class Tank3DBench
         _actRam = ActButton("Таран   Tab", toggle: true, RamToggle);
         // the grenade (Д8, Tank3DBench.Smoke): a mode, no key - none is free
         _actSmoke = ActButton("Дым", toggle: true, SmokeToggle);
+        // the kit's acts on a hex (Д8, Tank3DBench.Gear): modes, no keys
+        _actMine = ActButton("Мина", toggle: true, () => GearToggle(Gear.Mine));
+        _actRepair = ActButton("Ремонт", toggle: true, () => GearToggle(Gear.Repair));
+        _actWinch = ActButton("Лебёдка", toggle: true, () => GearToggle(Gear.Winch));
         _actDouse = ActButton("Тушить   J", toggle: false, () => Execute(new Command(CommandKind.Douse)));
         // the wall ahead rammed through (Д5): no key of its own - none is free
         _actRamWall = ActButton("Таран стены", toggle: false, () => Execute(new Command(CommandKind.RamWall, Side: HullSide())));
@@ -148,6 +153,8 @@ public sealed partial class Tank3DBench
             return true;
         if (Match && SmokeClick(screen))
             return true;
+        if (Match && GearClick(screen))
+            return true;
         if (!Match || !_ramMode)
             return false;
         if (_overTarget || _overParked is not null)
@@ -182,6 +189,12 @@ public sealed partial class Tank3DBench
         _actRam!.Visible = bonus;
         _actSmoke!.Visible = bonus && RigSmokes;
         _actSmoke.SetPressedNoSignal(_smokeMode);
+        _actMine!.Visible = bonus && RigHas(Kit.MineLayer);
+        _actMine.SetPressedNoSignal(_gearMode == Gear.Mine);
+        _actRepair!.Visible = bonus && RigHas(Kit.RepairKit);
+        _actRepair.SetPressedNoSignal(_gearMode == Gear.Repair);
+        _actWinch!.Visible = bonus && RigHas(Kit.Winch);
+        _actWinch.SetPressedNoSignal(_gearMode == Gear.Winch);
         _actDouse!.Visible = bonus && Burning(_unitId);
         _actRamWall!.Visible = bonus && WallAhead;
         _actRam.SetPressedNoSignal(_ramMode);

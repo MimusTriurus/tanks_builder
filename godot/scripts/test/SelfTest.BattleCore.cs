@@ -594,6 +594,85 @@ public static partial class SelfTest
                   $"its shot: {Said(shot)}; at it: {Said(back)}; its ambush: {Said(watch)}");
         }
 
+        // Д8, upgrades.md «Минный заградитель»: the medium at (4,8) mines (4,7)
+        // - not a tank's hex, water, a wood, a mine, nor without the kit - and the
+        // light that drives on to it goes up.
+        {
+            var beside = new Vector2I(4, 7);
+            Vector2I wood = HexField.Step(new Vector2I(4, 8), 30), water = HexField.Step(new Vector2I(4, 8), 150);
+            BattleState s = Probe(9, 10, woods: new[] { wood }, deep: new[] { water });
+            Put(s, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.MineLayer);
+            Put(s, 1, "LTR", Camp.Brown, 4, 5, 270);
+            Put(s, 2, "LTR", Camp.Green, 4, 9, 90);
+            string? onTank = null, onWood = null, onWater = null, laid = null, again = null, noKit = null;
+            Act(s, 0, st => onTank = Battle.LayMine(st, new Vector2I(4, 9)));
+            Act(s, 0, st => onWood = Battle.LayMine(st, wood));
+            Act(s, 0, st => onWater = Battle.LayMine(st, water));
+            Act(s, 0, st => laid = Battle.LayMine(st, beside));
+            s.Bonus = false;
+            Act(s, 0, st => again = Battle.LayMine(st, beside));
+            s.Bonus = false;
+            Act(s, 2, st => noKit = Battle.LayMine(st, HexField.Step(new Vector2I(4, 9), 30)));
+            Act(s, 1, st => Battle.Move(st, new[] { new Vector2I(4, 6), beside }, -1));
+            check("the mine layer mines a free hex beside - not a tank's, water, a wood, a mine, nor without it - and it goes off",
+                  laid is null && onTank is not null && onWood is not null && onWater is not null && again is not null
+                  && noKit is not null && s.Unit(1)!.Fate == UnitFate.Knocked && s.Unit(1)!.Cell == beside,
+                  $"tank {onTank}; wood {onWood}; water {onWater}; laid {laid ?? "ok"}; again {again}; no kit {noKit}; {Said(s)}");
+        }
+
+        // Д8, upgrades.md «Ремкомплект»: the medium at (4,8) puts its knocked
+        // light beside back in the fight - not a drowned one, an enemy's, one
+        // further off or one still fighting.
+        {
+            Vector2I drownedAt = HexField.Step(new Vector2I(4, 8), 30);
+            BattleState s = Probe(9, 10, deep: new[] { drownedAt });
+            Put(s, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.RepairKit);
+            Put(s, 1, "LTR", Camp.Green, 4, 7, 90, fate: UnitFate.Knocked);
+            Put(s, 2, "LTR", Camp.Green, drownedAt.X, drownedAt.Y, 90, fate: UnitFate.Drowned);
+            Put(s, 3, "LTR", Camp.Brown, 4, 9, 90, fate: UnitFate.Knocked);
+            Put(s, 4, "LTR", Camp.Green, 4, 5, 90, fate: UnitFate.Knocked);
+            Put(s, 5, "LTR", Camp.Brown, 0, 0, 90);
+            string? drowned = null, enemy = null, far = null, fixedOne = null, alive = null;
+            Act(s, 0, st => drowned = Battle.Repair(st, drownedAt));
+            Act(s, 0, st => enemy = Battle.Repair(st, new Vector2I(4, 9)));
+            Act(s, 0, st => far = Battle.Repair(st, new Vector2I(4, 5)));
+            Act(s, 0, st => fixedOne = Battle.Repair(st, new Vector2I(4, 7)));
+            s.Bonus = false;
+            Act(s, 0, st => alive = Battle.Repair(st, new Vector2I(4, 7)));
+            check("the repair kit raises an own knocked hull beside - not a drowned one, an enemy's, one further off, one fighting",
+                  fixedOne is null && s.Unit(1)!.Fate == UnitFate.Alive && drowned is not null && enemy is not null
+                  && far is not null && alive is not null,
+                  $"drowned {drowned}; enemy {enemy}; far {far}; repaired {fixedOne ?? "ok"}; again {alive}");
+        }
+
+        // Д8, upgrades.md «Лебёдка»: the medium at (4,8) pulls the light 2 up
+        // the column on to (4,7) - a mine there takes it; not a heavy, not 3
+        // out, not past a hull between.
+        {
+            var mid = new Vector2I(4, 7);
+            BattleState s = Probe(9, 10, mines: new[] { mid });
+            Put(s, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Winch);
+            Put(s, 1, "LTR", Camp.Brown, 4, 6, 90);
+            Act(s, 0, st => Battle.Winch(st, new Vector2I(4, 6)));
+            BattleState heavy = Probe(9, 10);
+            Put(heavy, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Winch);
+            Put(heavy, 1, "HTR", Camp.Brown, 4, 6, 90);
+            Put(heavy, 2, "LTR", Camp.Brown, 4, 5, 90);
+            string? tooHeavy = null, tooFar = null, past = null;
+            Act(heavy, 0, st => tooHeavy = Battle.Winch(st, new Vector2I(4, 6)));
+            Act(heavy, 0, st => tooFar = Battle.Winch(st, new Vector2I(4, 5)));
+            BattleState between = Probe(9, 10);
+            Put(between, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Winch);
+            Put(between, 1, "LTR", Camp.Brown, 4, 6, 90);
+            Put(between, 2, "LTR", Camp.Green, 4, 7, 90);
+            Act(between, 0, st => past = Battle.Winch(st, new Vector2I(4, 6)));
+            check("the winch pulls a hull 2 out on to the hex between, which does to it what it does; not heavier, further, or past a hull",
+                  s.Unit(1)!.Cell == mid && s.Unit(1)!.Fate == UnitFate.Knocked
+                  && s.Events.Any(e => e.Kind == BattleEventKind.Winched) && s.Events.Any(e => e.Kind == BattleEventKind.MineBlown)
+                  && tooHeavy is not null && tooFar is not null && past is not null,
+                  $"{Said(s)}; heavy {tooHeavy}; 3 out {tooFar}; past a hull {past}");
+        }
+
         // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
         // list is nothing, a name no upgrade has is refused; written back as read.
         {

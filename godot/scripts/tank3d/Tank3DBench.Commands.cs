@@ -18,7 +18,8 @@ namespace TankSpriteTest;
 /// <b>Ram</b> - the unit on a hex, from where it stands or from a hex of
 /// the move beside it; <b>RamWall</b> - through the wall ahead; <b>Ambush</b> -
 /// on an axis, the medium's on two beside each other (Tank3DBench.Ambush); <b>Smoke</b> - the grenade on a
-/// hex beside (Tank3DBench.Smoke); <b>Douse</b>;
+/// hex beside (Tank3DBench.Smoke); <b>Mine</b>, <b>Repair</b>, <b>Winch</b> - the kit's acts on a
+/// hex (Tank3DBench.Gear); <b>Douse</b>;
 /// <b>Pass</b> - the end of the turn; <b>Undo</b> - the move taken back.</item>
 /// <item>Each lands on the bench where the mouse's lands - <c>OrderTo</c>,
 /// <c>SpinTo</c>, <c>ShotOrder</c>, <c>RamOrder</c>, <c>WallRamGo</c>,
@@ -30,7 +31,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Douse, Pass, Undo }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -42,7 +43,8 @@ public sealed partial class Tank3DBench
             CommandKind.Take => $"take #{Unit}",
             CommandKind.Go => $"go ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
             CommandKind.Turn or CommandKind.RamWall => $"{Kind.ToString().ToLowerInvariant()} {Side}",
-            CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
+            CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke
+                or CommandKind.Mine or CommandKind.Repair or CommandKind.Winch => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
             CommandKind.Ambush => $"ambush {Side}{(Side2 >= 0 ? $"+{Side2}" : "")}",
             _ => Kind.ToString().ToLowerInvariant(),
         };
@@ -94,6 +96,10 @@ public sealed partial class Tank3DBench
                 return AmbushWhy(c.Side, c.Side2);
             case CommandKind.Smoke:
                 return SmokeWhy(c.Cell);
+            case CommandKind.Mine:
+            case CommandKind.Repair:
+            case CommandKind.Winch:
+                return GearWhy(GearOf(c.Kind), c.Cell);
             case CommandKind.Douse:
                 return !Burning(_unitId) ? $"{_modelTag} не горит"
                     : _side != _mt.Turn ? $"ходят {SideName(_mt.Turn)}"
@@ -164,6 +170,11 @@ public sealed partial class Tank3DBench
                 break;
             case CommandKind.Smoke:
                 SmokeLay(c.Cell);
+                break;
+            case CommandKind.Mine:
+            case CommandKind.Repair:
+            case CommandKind.Winch:
+                GearDo(GearOf(c.Kind), c.Cell);
                 break;
             case CommandKind.Douse:
                 Douse();
@@ -261,7 +272,7 @@ public sealed partial class Tank3DBench
 
     /// <summary><c>--do cmd=KIND[:Q,R][:SIDE]</c>, map cells: <c>take:ID</c>,
     /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
-    /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>.</summary>
+    /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>.</summary>
     private Command? ParseCommand(string text)
     {
         string[] parts = text.Split(':');
@@ -282,6 +293,9 @@ public sealed partial class Tank3DBench
                 "ram" => new Command(CommandKind.Ram, Cell(parts[1])),
                 "ramwall" => new Command(CommandKind.RamWall, Side: int.Parse(parts[1])),
                 "smoke" => new Command(CommandKind.Smoke, Cell(parts[1])),
+                "mine" => new Command(CommandKind.Mine, Cell(parts[1])),
+                "repair" => new Command(CommandKind.Repair, Cell(parts[1])),
+                "winch" => new Command(CommandKind.Winch, Cell(parts[1])),
                 "ambush" => new Command(CommandKind.Ambush, Side: int.Parse(parts[1]),
                                         Side2: parts.Length > 2 ? int.Parse(parts[2]) : -1),
                 "douse" => new Command(CommandKind.Douse),

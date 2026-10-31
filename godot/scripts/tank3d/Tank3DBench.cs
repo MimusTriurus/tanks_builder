@@ -1682,9 +1682,12 @@ public sealed partial class Tank3DBench : Node3D
                     _spinHeld = (int)F(what[11..], 90);
                 else if (what.StartsWith("spin-to=", StringComparison.Ordinal))
                     SpinTo((int)F(what[8..], 90));
-                // act=ram|ambush|smoke|fiery|off: the action panel's modes (Tank3DBench.Acts)
+                // act=ram|ambush|smoke|fiery|mine|repair|winch|off: the action panel's modes (Tank3DBench.Acts)
                 else if (what.StartsWith("act=", StringComparison.Ordinal))
                 {
+                    Gear gear = what[4..] switch { "mine" => Gear.Mine, "repair" => Gear.Repair, "winch" => Gear.Winch, _ => Gear.None };
+                    if (gear != _gearMode)
+                        GearToggle(gear == Gear.None ? _gearMode : gear);
                     if ((what[4..] == "fiery") != _fieryMode)
                         FieryToggle();
                     if ((what[4..] == "ram") != _ramMode)
@@ -2410,6 +2413,7 @@ public sealed partial class Tank3DBench : Node3D
                     else if (_ambushMode) AmbushToggle();
                     else if (_smokeMode) SmokeToggle();
                     else if (_fieryMode) FieryToggle();
+                    else if (_gearMode != Gear.None) GearToggle(_gearMode);
                     else if (_ramMode && _ramWaiting is null) RamToggle();
                     else if (_lockCell is not null && !_ramLock) Unlock();
                     else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null || _ramWaiting is not null) CancelOrder();

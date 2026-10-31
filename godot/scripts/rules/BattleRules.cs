@@ -21,11 +21,11 @@ namespace TankSpriteTest;
 /// fire by rounds, the win by destruction, the stalemate (Д6), the ambush and
 /// the medium's sector (Д7), the smoke grenade and its smoke, the incendiary
 /// round, the drive's upgrades (in <see cref="Steps"/>), the spall liner, the
-/// auto-extinguisher, the thermal imager (Д8).
+/// auto-extinguisher, the thermal imager, the mine layer, the repair kit, the
+/// winch (Д8).
 ///
-/// <b>Not yet</b> (stages Д8-Д9): the winch, the mine layer, the repair kit,
-/// the ambush stabilizer; an ambush that holds an incendiary round back - it
-/// fires a plain one; the control point, placement.
+/// <b>Not yet</b> (stages Д8-Д9): the ambush stabilizer; an ambush that holds
+/// an incendiary round back - it fires a plain one; the control point, placement.
 /// </summary>
 public static class Battle
 {
@@ -591,6 +591,125 @@ public static class Battle
     }
 
     private const int SmokeRounds = 2;
+
+    // --- the bonus acts of the kit ---------------------------------------------------
+
+    /// <summary>
+    /// The mine layer (upgrades.md, «Минный заградитель»; п. 5б): a mine on a
+    /// hex beside - not one with a tank, a mine already, water, or another
+    /// cover (the hex's one slot, field.md); a ramp will do. Seen by all, and
+    /// it goes off under its own side as well.
+    /// </summary>
+    public static string? LayMine(BattleState s, Vector2I cell)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.MineLayer) == 0)
+            return "no mine layer";
+        if (s.Bonus)
+            return "the bonus act is spent";
+        if (HexField.HeadingTo(u.Cell, cell) < 0 || !s.Board.InBounds(cell))
+            return "only on a hex beside";
+        if (s.At(cell) is not null)
+            return "a tank stands there";
+        if (s.Board.IsWater(cell))
+            return "not on water";
+        if (s.Board.CoverAt(cell) == Cover.Minefield && s.Board.CoverStateAt(cell) == CoverState.Intact)
+            return "a mine there already";
+        if (!s.Board.LayMinefield(cell))
+            return $"{s.Board.CoverAt(cell)} there";
+        s.Bonus = true;
+        Lift(s, u, "laid a mine");
+        s.Events.Add(new BattleEvent(BattleEventKind.MineLaid, u.Id, cell));
+        return null;
+    }
+
+    /// <summary>
+    /// The repair kit (upgrades.md, «Ремкомплект»; п. 5б): a knocked-out hull
+    /// of the unit's own side on a hex beside fights again - from its side's
+    /// next turn, this one being the repairer's. A drowned one is not raised.
+    /// </summary>
+    public static string? Repair(BattleState s, Vector2I cell)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.RepairKit) == 0)
+            return "no repair kit";
+        if (s.Bonus)
+            return "the bonus act is spent";
+        if (HexField.HeadingTo(u.Cell, cell) < 0)
+            return "only a hull beside";
+        if (s.At(cell) is not { } hull)
+            return "nobody there";
+        if (hull.Side != u.Side)
+            return "not one of ours";
+        if (hull.Fate == UnitFate.Drowned)
+            return "a drowned hull is not raised";
+        if (hull.Fate != UnitFate.Knocked)
+            return "not knocked out";
+        s.Bonus = true;
+        Lift(s, u, "repaired");
+        hull.Fate = UnitFate.Alive;
+        s.Events.Add(new BattleEvent(BattleEventKind.Repaired, hull.Id, cell, u.Id));
+        return null;
+    }
+
+    /// <summary>
+    /// The winch (upgrades.md, «Лебёдка»; п. 5б): the hull 2 out along an axis
+    /// of the unit's own level - either side's, out of the fight too, no heavier
+    /// by mass than its own - pulled on to the hex between, which must be empty
+    /// with no standing wall across either edge it crosses. What the hex does
+    /// is done to it as on any entering (a mine, a fire, water, smoke), and an
+    /// enemy ambush's axis it lands on answers it. Its own ambush is off - it
+    /// was moved, as a ram moves it (a call of this build; the GDD is silent).
+    /// </summary>
+    public static string? Winch(BattleState s, Vector2I cell)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.Winch) == 0)
+            return "no winch";
+        if (s.Bonus)
+            return "the bonus act is spent";
+        if (s.At(cell) is not { } hull)
+            return "nobody there";
+        (int heading, int range) = s.Board.LaneTo(u.Cell, cell);
+        if (heading < 0 || range != WinchReach)
+            return $"the winch pulls a hull {WinchReach} out along an axis";
+        if (hull.Class.Mass > u.Class.Mass)
+            return "heavier than its own hull";
+        Vector2I mid = HexField.Step(u.Cell, heading);
+        int level = s.Board.LevelAt(u.Cell);
+        if (s.Board.LevelAt(mid) != level || s.Board.LevelAt(cell) != level)
+            return "only on its own level";
+        if (s.At(mid) is not null)
+            return "the hex between is taken";
+        if (s.Board.Walled(u.Cell, heading) || s.Board.Walled(mid, heading))
+            return "a wall across the way";
+        s.Bonus = true;
+        Lift(s, u, "winched");
+        Lift(s, hull, "was winched");
+        int way = HexField.Reverse(heading);
+        hull.Cell = mid;
+        s.Events.Add(new BattleEvent(BattleEventKind.Winched, hull.Id, mid, way, $"by #{u.Id}"));
+        if (hull.Fate == UnitFate.Alive)
+            Entered(s, hull, way, forward: way == hull.Heading);
+        else
+        {
+            if (s.Board.IsDeep(mid) && hull.Fate == UnitFate.Knocked)
+            {
+                hull.Fate = UnitFate.Drowned;
+                s.Events.Add(new BattleEvent(BattleEventKind.Drowned, hull.Id, mid));
+            }
+            Disperse(s, hull);
+            Ambushes(s, hull);
+        }
+        Over(s);
+        return null;
+    }
+
+    /// <summary>How far out the winch takes a hull, hexes (upgrades.md).</summary>
+    public const int WinchReach = 2;
 
     /// <summary>
     /// Unit <paramref name="entered"/> has come on to its hex - driven, shoved

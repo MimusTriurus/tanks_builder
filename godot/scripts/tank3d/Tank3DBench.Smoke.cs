@@ -204,6 +204,7 @@ public sealed partial class Tank3DBench
         if (_smokeMode)
         {
             _ramMode = false;
+            _gearMode = Gear.None;
             _ambushMode = false;
         }
         _orderNote = _smokeMode ? "дым: щёлкни по соседнему гексу" : "дым выключен";

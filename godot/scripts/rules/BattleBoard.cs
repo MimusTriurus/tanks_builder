@@ -136,6 +136,17 @@ public sealed class BattleBoard : IHexBoard
             _state[Index(cell)] = state;
     }
 
+    /// <summary><see cref="HexField.LayMinefield"/>: a bare cell, or a spent
+    /// minefield, is a live one.</summary>
+    public bool LayMinefield(Vector2I cell)
+    {
+        if (!InBounds(cell) || _cover[Index(cell)] is not (Cover.None or Cover.Minefield))
+            return false;
+        _cover[Index(cell)] = Cover.Minefield;
+        _state[Index(cell)] = CoverState.Intact;
+        return true;
+    }
+
     /// <summary>The cell's own standing walls, as a mask (a leaf down is a bit gone).</summary>
     public void SetSides(Vector2I cell, int mask)
     {

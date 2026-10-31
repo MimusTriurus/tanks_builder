@@ -51,6 +51,7 @@ public enum BattleEventKind
     TurnEnded, FieldTick, Won, Drawn,
     AmbushSet, AmbushFired, AmbushLifted,
     SmokeLaid, SmokeGone,
+    MineLaid, Repaired, Winched,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench

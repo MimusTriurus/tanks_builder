@@ -1812,6 +1812,23 @@ public sealed partial class HexField : Node2D, IHexBoard
         return true;
     }
 
+    /// <summary>A minefield laid on a bare cell in the match (upgrades.md,
+    /// «Минный заградитель»; Д8), or one spent laid again: the cover slot set,
+    /// intact. Refused on any other cover - a hex holds one (field.md).</summary>
+    public bool LayMinefield(Vector2I cell)
+    {
+        if (!InBounds(cell) || CoverAt(cell) is not (Cover.None or Cover.Minefield))
+            return false;
+        _cover ??= new Cover[Columns * Rows];
+        _coverState ??= new CoverState[Columns * Rows];
+        int i = cell.Y * Columns + cell.X;
+        _cover[i] = Cover.Minefield;
+        _coverState[i] = CoverState.Intact;
+        CoverStamp++;
+        QueueRedraw();
+        return true;
+    }
+
     /// <summary>
     /// Which edges of a cell carry standing masonry, one bit per
     /// <see cref="Masonry.Headings"/> index - that is, <see cref="EdgeIndex"/>,
