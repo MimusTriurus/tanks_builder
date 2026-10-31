@@ -1518,7 +1518,7 @@ public sealed partial class Tank3DBench : Node3D
             case "unburn": FxBurn(false); break;
             case "knock": KnockOut(); break;
             case "destroy": Destroy(); break;
-            case "reset": ResetTank(); WallReset(); MinesReset(); CancelOrder(); break;
+            case "reset": ResetTank(); WoodReset(); WallReset(); MinesReset(); CancelOrder(); break;
             case "pond": ToPond(); break;
             case "amphibious": _amphibious = true; break;
             case "no-amphibious": _amphibious = false; break;
@@ -1682,9 +1682,11 @@ public sealed partial class Tank3DBench : Node3D
                     _spinHeld = (int)F(what[11..], 90);
                 else if (what.StartsWith("spin-to=", StringComparison.Ordinal))
                     SpinTo((int)F(what[8..], 90));
-                // act=ram|ambush|smoke|off: the action panel's modes (Tank3DBench.Acts)
+                // act=ram|ambush|smoke|fiery|off: the action panel's modes (Tank3DBench.Acts)
                 else if (what.StartsWith("act=", StringComparison.Ordinal))
                 {
+                    if ((what[4..] == "fiery") != _fieryMode)
+                        FieryToggle();
                     if ((what[4..] == "ram") != _ramMode)
                         RamToggle();
                     if ((what[4..] == "ambush") != _ambushMode)
@@ -2407,6 +2409,7 @@ public sealed partial class Tank3DBench : Node3D
                     if (_spinPick is not null || _spinPinned) SpinLetGo();
                     else if (_ambushMode) AmbushToggle();
                     else if (_smokeMode) SmokeToggle();
+                    else if (_fieryMode) FieryToggle();
                     else if (_ramMode && _ramWaiting is null) RamToggle();
                     else if (_lockCell is not null && !_ramLock) Unlock();
                     else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null || _ramWaiting is not null) CancelOrder();

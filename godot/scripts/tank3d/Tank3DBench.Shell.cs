@@ -106,8 +106,10 @@ public sealed partial class Tank3DBench
     private void Launch()
     {
         MatchFired();
+        // the incendiary round (Tank3DBench.Incendiary)
+        bool fiery = FieryLaunch();
         if (_shadowAim is Vector2I aim)
-            ShadowAct($"fire at {MapAt(aim)}", s => Battle.Fire(s, aim));
+            ShadowAct($"fire{(fiery ? " incendiary" : "")} at {MapAt(aim)}", s => Battle.Fire(s, aim, fiery));
         _shadowAim = null;
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
@@ -307,8 +309,11 @@ public sealed partial class Tank3DBench
                 bool spent = !strikes;
                 // A bomb on a walled hex brings down every wall on its edges
                 // (GDD classes.md, "HM - Навес").
-                landed = lob && !wet ? () => { Lands(at, wet, spent); WallsBlown(at, "the bomb", WallForce * BlownShare); }
-                                     : () => Lands(at, wet, spent);
+                // The shot's own round set a wood alight if it was incendiary
+                // (Tank3DBench.Incendiary).
+                landed = lob && !wet ? () => { Lands(at, wet, spent); WallsBlown(at, "the bomb", WallForce * BlownShare); FieryWood(at); }
+                       : strikes ? () => { Lands(at, wet, spent); FieryWood(at); }
+                       : () => Lands(at, wet, spent);
                 break;
             }
             path.Add(next);
@@ -414,6 +419,8 @@ public sealed partial class Tank3DBench
         RockedOther(o, k / 3.2f);
         Log.Print($"tank3d: round on {o.Tag} {face} ({plate}), might {might}, level {level}: {what}");
         TankShot();
+        if (level <= 0 && o.Unit)
+            FieryHull(o.Id, o.Side, o.Tag, OtherCell(o), o.Fate);
         UnitStruck(o, level > 0);
     }
 

@@ -13,7 +13,8 @@ namespace TankSpriteTest;
 /// once spent. They are not buttons - the move and the shot stay the mouse's,
 /// as they were: the left button on a cell, the right one on a tank.</item>
 /// <item><b>Засада</b> by the attack's plate (Д7): a mode - the left button on
-/// a hex then picks the axis (Tank3DBench.Ambush).</item>
+/// a hex then picks the axis (Tank3DBench.Ambush). <b>Зажиг.</b> (Д8), for a
+/// unit with the rounds: the next shot is incendiary (Tank3DBench.Incendiary).</item>
 /// <item><b>Buttons only for the bonus acts</b>, which the mouse cannot say on
 /// its own: <b>Таран</b> - a mode (Tab too), the left button on a tank then
 /// rams it as the right one does (<c>AimAt</c>); <b>Тушить</b> - at once
@@ -55,6 +56,8 @@ public sealed partial class Tank3DBench
         (_slotAttack, _slotAttackText) = Slot(SlotAttack);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode, no key - none is free
         _actAmbush = ActButton(AmbushText, toggle: true, AmbushToggle);
+        // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
+        _actFiery = ActButton("Зажиг.", toggle: true, FieryToggle);
         _acts.AddChild(new Control { CustomMinimumSize = new Vector2(18.0f, 0.0f), MouseFilter = Control.MouseFilterEnum.Ignore });
         (_slotBonus, _slotBonusText) = Slot(SlotBonus);
         _actRam = ActButton("Таран   Tab", toggle: true, RamToggle);
@@ -174,6 +177,8 @@ public sealed partial class Tank3DBench
         }
         _actAmbush!.Visible = attack;
         _actAmbush.SetPressedNoSignal(_ambushMode);
+        _actFiery!.Visible = attack && RigBurns;
+        _actFiery.SetPressedNoSignal(_fieryMode);
         _actRam!.Visible = bonus;
         _actSmoke!.Visible = bonus && RigSmokes;
         _actSmoke.SetPressedNoSignal(_smokeMode);

@@ -276,7 +276,7 @@ public sealed partial class Tank3DBench
         _ambushMode = !_ambushMode;
         _ambushPick = null;
         if (_ambushMode)
-            _smokeMode = false;
+            _smokeMode = _fieryMode = false;
         if (_ambushMode)
             _ramMode = false;
         _orderNote = !_ambushMode ? "засада выключена"

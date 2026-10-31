@@ -1284,7 +1284,11 @@ void fragment() {
         _celHit?.Reset();
         _celBlast?.Reset();
         _celBurst?.Reset();
-        WoodReset();
+        // The wood is the match's board, not the tank's: a hand-over swaps the
+        // model on the rig (Unmount), and put out every wood alight and stood
+        // the felled ones up again with it. The match's reset says it itself.
+        if (!Match)
+            WoodReset();
         _celScorch?.Reset();
         _shellSplash?.Reset();
         _deathSplash?.Reset();

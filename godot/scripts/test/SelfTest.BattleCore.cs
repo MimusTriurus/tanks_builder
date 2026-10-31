@@ -407,6 +407,50 @@ public static partial class SelfTest
                   $"ahead: {Said(ahead)}; back: {Said(back)}");
         }
 
+        // Д8, upgrades.md «Зажигательный снаряд»: the medium at (4,8) fires up
+        // the column - into a heavy's front it holds, a light's rear it does not;
+        // into a wood, and the mortar's bomb on one.
+        {
+            BattleState held = Probe(9, 10);
+            Put(held, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Incendiary);
+            Put(held, 1, "HTR", Camp.Brown, 4, 5, 270);
+            Act(held, 0, st => Battle.Fire(st, new Vector2I(4, 5), incendiary: true));
+            BattleState plain = Probe(9, 10);
+            Put(plain, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Incendiary);
+            Put(plain, 1, "HTR", Camp.Brown, 4, 5, 270);
+            Act(plain, 0, st => Battle.Fire(st, new Vector2I(4, 5)));
+            BattleState holed = Probe(9, 10);
+            Put(holed, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Incendiary);
+            Put(holed, 1, "LTR", Camp.Brown, 4, 4, 90);
+            Act(holed, 0, st => Battle.Fire(st, new Vector2I(4, 4), incendiary: true));
+            string? noKit = Battle.Fire(Started(Probe(9, 10), "MTR", 4, 8, 90, extra: ("HTR", 4, 5)),
+                                        new Vector2I(4, 5), incendiary: true);
+            check("an incendiary round sets alight a hull it does not pierce; one it pierces is knocked out; none without the kit",
+                  held.Unit(1)!.Fate == UnitFate.Alive && held.Unit(1)!.Burning && !plain.Unit(1)!.Burning
+                  && holed.Unit(1)!.Fate == UnitFate.Knocked && !holed.Unit(1)!.Burning && noKit is not null,
+                  $"held: {Said(held)}; plain: {Said(plain)}; holed: {Said(holed)}; no kit: {noKit}");
+
+            var wood = new Vector2I(4, 6);
+            BattleState gun = Probe(9, 10, woods: new[] { wood });
+            Put(gun, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Incendiary);
+            Put(gun, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(gun, 0, st => Battle.Fire(st, wood, incendiary: true));
+            BattleState cold = Probe(9, 10, woods: new[] { wood });
+            Put(cold, 0, "MTR", Camp.Green, 4, 8, 90);
+            Put(cold, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(cold, 0, st => Battle.Fire(st, wood));
+            var far = new Vector2I(4, 5);
+            BattleState bomb = Probe(9, 10, woods: new[] { far });
+            Put(bomb, 0, "HMR", Camp.Green, 4, 8, 90, kit: Kit.Incendiary);
+            Put(bomb, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(bomb, 0, st => Battle.Fire(st, far, incendiary: true));
+            check("an incendiary round sets the wood it is spent in alight, the mortar's bomb too; a plain one does not",
+                  gun.Board.CoverStateAt(wood) == CoverState.Burning && gun.Fires.ContainsKey(wood)
+                  && cold.Board.CoverStateAt(wood) == CoverState.Intact
+                  && bomb.Board.CoverStateAt(far) == CoverState.Burning,
+                  $"gun: {Said(gun)}; plain: {Said(cold)}; bomb: {Said(bomb)}");
+        }
+
         // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
         // list is nothing, a name no upgrade has is refused; written back as read.
         {

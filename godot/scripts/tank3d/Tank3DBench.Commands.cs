@@ -14,7 +14,8 @@ namespace TankSpriteTest;
 /// <list type="bullet">
 /// <item><b>Take</b> - unit by its id; <b>Go</b> - to a hex, turned to a side
 /// at the end if the budget has it; <b>Turn</b> - on the spot; <b>Fire</b> - at
-/// a hex; <b>Ram</b> - the unit on a hex, from where it stands or from a hex of
+/// a hex; <b>Burn</b> - the incendiary round at one (Tank3DBench.Incendiary);
+/// <b>Ram</b> - the unit on a hex, from where it stands or from a hex of
 /// the move beside it; <b>RamWall</b> - through the wall ahead; <b>Ambush</b> -
 /// on an axis, the medium's on two beside each other (Tank3DBench.Ambush); <b>Smoke</b> - the grenade on a
 /// hex beside (Tank3DBench.Smoke); <b>Douse</b>;
@@ -29,7 +30,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Ram, RamWall, Ambush, Smoke, Douse, Pass, Undo }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Douse, Pass, Undo }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -41,7 +42,7 @@ public sealed partial class Tank3DBench
             CommandKind.Take => $"take #{Unit}",
             CommandKind.Go => $"go ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
             CommandKind.Turn or CommandKind.RamWall => $"{Kind.ToString().ToLowerInvariant()} {Side}",
-            CommandKind.Fire or CommandKind.Ram or CommandKind.Smoke => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
+            CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
             CommandKind.Ambush => $"ambush {Side}{(Side2 >= 0 ? $"+{Side2}" : "")}",
             _ => Kind.ToString().ToLowerInvariant(),
         };
@@ -66,8 +67,11 @@ public sealed partial class Tank3DBench
             case CommandKind.Turn:
                 return _fate != Fate.Alive ? $"{_modelTag} не на ходу" : MatchMoveWhy();
             case CommandKind.Fire:
+            case CommandKind.Burn:
                 if (_fate != Fate.Alive)
                     return $"{_modelTag} не на ходу";
+                if (c.Kind == CommandKind.Burn && !RigBurns)
+                    return $"у {_modelTag} нет зажигательных";
                 return ShotWhy(CellHere, c.Cell, out _, out _, out _);
             case CommandKind.Ram:
                 if (_fate != Fate.Alive)
@@ -134,6 +138,9 @@ public sealed partial class Tank3DBench
                     return Failed(c);
                 break;
             case CommandKind.Fire:
+            case CommandKind.Burn:
+                // the round is chosen as the button chooses it, and leaves with the shot
+                _fieryMode = c.Kind == CommandKind.Burn;
                 ShotOrder(c.Cell);
                 break;
             case CommandKind.Ram:
@@ -252,7 +259,7 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary><c>--do cmd=KIND[:Q,R][:SIDE]</c>, map cells: <c>take:ID</c>,
-    /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>ram:Q,R</c>,
+    /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
     /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>.</summary>
     private Command? ParseCommand(string text)
     {
@@ -270,6 +277,7 @@ public sealed partial class Tank3DBench
                 "go" => new Command(CommandKind.Go, Cell(parts[1]), parts.Length > 2 ? int.Parse(parts[2]) : -1),
                 "turn" => new Command(CommandKind.Turn, Side: int.Parse(parts[1])),
                 "fire" => new Command(CommandKind.Fire, Cell(parts[1])),
+                "burn" => new Command(CommandKind.Burn, Cell(parts[1])),
                 "ram" => new Command(CommandKind.Ram, Cell(parts[1])),
                 "ramwall" => new Command(CommandKind.RamWall, Side: int.Parse(parts[1])),
                 "smoke" => new Command(CommandKind.Smoke, Cell(parts[1])),

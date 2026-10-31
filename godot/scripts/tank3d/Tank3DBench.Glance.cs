@@ -242,7 +242,12 @@ public sealed partial class Tank3DBench
         System.Action? landed = leg.Ends switch
         {
             LegEnd.Wall when leg.Wall is { } prop => WallStruck(prop, leg.End, dir, inside: false, lob: false, through: false),
-            LegEnd.Wood or LegEnd.Ground => () => Lands(new Vector3(leg.End.X, ShellGround(leg.End, out _), leg.End.Z), false, false),
+            LegEnd.Wood => () =>
+            {
+                Lands(new Vector3(leg.End.X, ShellGround(leg.End, out _), leg.End.Z), false, false);
+                FieryWood(leg.Cell);
+            },
+            LegEnd.Ground => () => Lands(new Vector3(leg.End.X, ShellGround(leg.End, out _), leg.End.Z), false, false),
             LegEnd.Tank => () => StrikeParked(leg, dir),
             _ => null,
         };
@@ -286,6 +291,8 @@ public sealed partial class Tank3DBench
                  + (leg.Pierces ? "pierced" : "held, spent"));
         // a match's unit has a fate (Tank3DBench.Match)
         TankShot();
+        if (!leg.Pierces)
+            FieryHull(p.Id, p.Side, p.Tag, p.Cell, p.Fate);
         UnitStruck(p, leg.Pierces);
     }
 

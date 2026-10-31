@@ -417,6 +417,7 @@ public sealed partial class Tank3DBench
         _passIn = null;
         _ramMode = false;
         _smokeMode = false;
+        _fieryMode = _fiery = false;
         _ambushMode = false;
         _ambushPick = null;
         _matchNote = "";

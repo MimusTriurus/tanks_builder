@@ -19,10 +19,12 @@ namespace TankSpriteTest;
 /// heavy's bulldozing, fire on a unit, putting it out, burning out at the end
 /// of its side's turn, the blast of a destroyed unit and its chain, the wood's
 /// fire by rounds, the win by destruction, the stalemate (Д6), the ambush and
-/// the medium's sector (Д7), the smoke grenade and its smoke (Д8).
+/// the medium's sector (Д7), the smoke grenade and its smoke, the incendiary
+/// round (Д8).
 ///
-/// <b>Not yet</b> (stages Д8-Д9): the upgrades past the wading gear, the trawl
-/// and the grenade, the control point, placement.
+/// <b>Not yet</b> (stages Д8-Д9): the upgrades past the wading gear, the trawl,
+/// the grenade and the incendiary round; an ambush that holds an incendiary
+/// round back - it fires a plain one; the control point, placement.
 /// </summary>
 public static class Battle
 {
@@ -198,13 +200,19 @@ public static class Battle
     /// the axes (units.md, «Цель выстрела»); a casemate's axis is its hull's, a
     /// mortar's hex is 3 to 5 along it. The round is spent on the first thing
     /// it meets (<see cref="Fly"/>); one aimed at empty ground flies on past it.
+    /// <paramref name="incendiary"/> - the incendiary round (upgrades.md,
+    /// «Зажигательный снаряд») in place of the plain one, by the same rules of
+    /// aim and axis: a hull it does not pierce catches fire, a living wood it is
+    /// spent in catches; the mortar's bomb the same.
     /// </summary>
-    public static string? Fire(BattleState s, Vector2I aim)
+    public static string? Fire(BattleState s, Vector2I aim, bool incendiary = false)
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
         if (s.Fired)
             return "already fired";
+        if (incendiary && (u.Kit & Kit.Incendiary) == 0)
+            return "no incendiary rounds";
         (int heading, int range) = s.Board.LaneTo(u.Cell, aim);
         if (heading < 0)
             return "not on an axis";
@@ -220,10 +228,10 @@ public static class Battle
         s.Fired = true;
         Lift(s, u, "fired");
         if (u.Class.Lobs)
-            Lob(s, aim);
+            Lob(s, aim, incendiary);
         else
             Fly(s, u.Cell, heading, u.Class.Might, Level(s, u), passes: u.Class.Might >= 4 && !u.Class.Turreted ? 1 : 0,
-                glance: true, aim: aim);
+                glance: true, aim: aim, fiery: incendiary);
         return null;
     }
 
@@ -239,10 +247,12 @@ public static class Battle
     /// down; a hull is struck by its plate; ground and wood spend it. The
     /// destroyer's round (<paramref name="passes"/> 1) goes through the first
     /// wall or hull it meets at one less might. A side that holds sends it on
-    /// mirrored across the hull (<paramref name="glance"/>, once).
+    /// mirrored across the hull (<paramref name="glance"/>, once). A
+    /// <paramref name="fiery"/> round sets alight what it meets and does not
+    /// pierce: a hull, a living wood - on every leg, the ricochet's too.
     /// </summary>
     private static void Fly(BattleState s, Vector2I from, int heading, int might, int fromLevel,
-                            int passes, bool glance, Vector2I? aim)
+                            int passes, bool glance, Vector2I? aim, bool fiery = false)
     {
         int ontoLevel = aim is Vector2I a && s.Board.InBounds(a)
             ? (s.At(a) is { } t ? Level(s, t) : s.Board.LevelAt(a)) : fromLevel;
@@ -275,7 +285,7 @@ public static class Battle
             if (s.At(c) is { } hit && Level(s, hit) >= floor)
             {
                 bool through = passes > 0;
-                Strike(s, hit, heading, might, fromLevel, glance && !through, through);
+                Strike(s, hit, heading, might, fromLevel, glance && !through, through, fiery);
                 if (!through)
                     return;
                 passes--;
@@ -292,6 +302,9 @@ public static class Battle
             if (s.Board.LevelAt(c) >= floor && s.Board.Screened(c))
             {
                 s.Events.Add(new BattleEvent(BattleEventKind.Spent, -1, c, heading, "wood"));
+                // the one way to set a wood alight with a shot (upgrades.md)
+                if (fiery)
+                    WoodAlight(s, c);
                 return;
             }
         }
@@ -300,7 +313,7 @@ public static class Battle
     /// <summary>A round of <paramref name="might"/> travelling
     /// <paramref name="heading"/> into a hull (units.md, «Броня», «Рикошет»).</summary>
     private static void Strike(BattleState s, BattleUnit hit, int heading, int might, int fromLevel,
-                               bool glance, bool through)
+                               bool glance, bool through, bool fiery = false)
     {
         s.LastStrike = s.Round;
         if (hit.Out)
@@ -317,13 +330,16 @@ public static class Battle
             return;
         }
         s.Events.Add(new BattleEvent(BattleEventKind.Glanced, hit.Id, hit.Cell, might, plate.ToString()));
+        // not pierced, set alight (upgrades.md, «Зажигательный снаряд»)
+        if (fiery)
+            Ignite(s, hit, "incendiary");
         if (through || !glance || !Gunnery.Ricochets(plate))
             return;
         // the side plate a mirror along the hull: «2·hull − arrival»
         int onward = (((2 * hit.Heading - heading) % 360) + 360) % 360;
         s.Events.Add(new BattleEvent(BattleEventKind.Ricochet, hit.Id, hit.Cell, onward));
         // the onward round: no floor's gap to keep, no second glance (units.md)
-        Fly(s, hit.Cell, onward, might, Level(s, hit), passes: 0, glance: false, aim: null);
+        Fly(s, hit.Cell, onward, might, Level(s, hit), passes: 0, glance: false, aim: null, fiery: fiery);
     }
 
     /// <summary>The plate a round meets: the roof from above, else the face of
@@ -337,8 +353,10 @@ public static class Battle
     /// <summary>The mortar's bomb on a hex (classes.md, «HM»): a hull takes it
     /// whole - knocked out, or gone up if it was out already; with none, every
     /// wall on the hex comes down and a mine there goes off. Woods and water
-    /// are a miss.</summary>
-    private static void Lob(BattleState s, Vector2I aim)
+    /// are a miss - but a <paramref name="fiery"/> bomb sets a living wood
+    /// alight (upgrades.md: «у HM - мина миномёта с теми же свойствами»); on a
+    /// hull it knocks out as any bomb, there is nothing it does not pierce.</summary>
+    private static void Lob(BattleState s, Vector2I aim, bool fiery = false)
     {
         if (s.At(aim) is { } hit)
         {
@@ -361,6 +379,11 @@ public static class Battle
         {
             s.Board.SetCoverState(aim, CoverState.Cleared);
             s.Events.Add(new BattleEvent(BattleEventKind.MineBlown, -1, aim));
+            any = true;
+        }
+        if (fiery && s.Board.CoverAt(aim) == Cover.Forest && s.Board.CoverStateAt(aim) == CoverState.Intact)
+        {
+            WoodAlight(s, aim);
             any = true;
         }
         if (!any)
@@ -781,13 +804,13 @@ public static class Battle
         Over(s);
     }
 
-    private static void Ignite(BattleState s, BattleUnit u)
+    private static void Ignite(BattleState s, BattleUnit u, string why = "")
     {
         if (u.Fate != UnitFate.Alive || u.Burning || s.Board.IsWater(u.Cell))
             return;
         u.Burning = true;
         u.BurnSince = s.TurnNo;
-        s.Events.Add(new BattleEvent(BattleEventKind.Ignited, u.Id, u.Cell));
+        s.Events.Add(new BattleEvent(BattleEventKind.Ignited, u.Id, u.Cell, 0, why));
     }
 
     private static void Douse(BattleState s, BattleUnit u)
