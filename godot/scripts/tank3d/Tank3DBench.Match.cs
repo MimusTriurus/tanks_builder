@@ -167,13 +167,10 @@ public sealed partial class Tank3DBench
     private Kit KitOf(int id) => Match && id >= 0 && id < _kits.Length ? _kits[id] : Kit.None;
 
     /// <summary>How the unit on the rig moves: its class, its wading gear and
-    /// its trawl (upgrades.md: a mine taken nose first is cleared, Д8).</summary>
-    private Steps.Mover RigMover(IReadOnlySet<Vector2I>? barred = null)
-    {
-        Steps.Mover m = Steps.Mover.Of(_profile, RigSnorkel, barred);
-        m.Trawl = (KitOf(_unitId) & Kit.Trawl) != 0;
-        return m;
-    }
+    /// what else its kit says of driving (upgrades.md, Д8: the trawl, wide
+    /// tracks, the reverse gear, the double turn - <see cref="Steps.Kitted"/>).</summary>
+    private Steps.Mover RigMover(IReadOnlySet<Vector2I>? barred = null) =>
+        Steps.Kitted(Steps.Mover.Of(_profile, RigSnorkel, barred), KitOf(_unitId));
 
     private static Side SideOf(Lineup.Unit u) => u.Side == Parking.Brown ? Side.Brown : Side.Green;
 
@@ -1032,6 +1029,8 @@ public sealed partial class Tank3DBench
               + (_mt.QuietRounds > 0 ? $" (без выстрела по танку {_mt.QuietRounds} из {MatchRules.QuietRoundsDraw})" : "")
               + $" · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
               + $"атака {(_mt.Fired ? "сделана" : "есть")}, доп. действие {(_mt.Bonus ? "сделано" : "есть")}"
+              // its upgrades (Д8): the passive ones show nowhere else
+              + (KitOf(_unitId) != Kit.None ? $" · апгрейды: {Kits.Names(KitOf(_unitId))}" : "")
               + (Burning(_unitId) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               // its ambush (Tank3DBench.Ambush): any order lifts it
               + (_ambush.ContainsKey(_unitId) ? $" · {_modelTag} в засаде: любой приказ её снимет" : "")

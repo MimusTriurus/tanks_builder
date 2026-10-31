@@ -168,6 +168,8 @@ public sealed partial class Tank3DBench
         // the rules core plays it too (Tank3DBench.Shadow)
         var cells = new List<Vector2I>(path);
         int face = _routeGoal?.Side ?? -1;
+        // astern the whole way, the reverse gear's bend too (Steps.Route.Back)
+        bool back = _routeBack;
         if (ram)
         {
             // the rammed one's ambush is off with the ram (units.md, «Длится»)
@@ -176,7 +178,7 @@ public sealed partial class Tank3DBench
             ShadowAct($"ram {MapAt(cells[^1])}", s => Battle.Ram(s, cells[^1]));
         }
         else
-            ShadowAct($"move to {MapAt(cells[^1])} facing {face}", s => Battle.Move(s, cells, face));
+            ShadowAct($"move to {MapAt(cells[^1])} facing {face}{(back ? " astern" : "")}", s => Battle.Move(s, cells, face, back));
     }
 
     /// <summary>The flat side the hull points at - the nearest of the six to

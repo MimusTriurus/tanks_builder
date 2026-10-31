@@ -65,9 +65,12 @@ public static class Battle
     /// path ends there, deep water drowns without the gear, a wood alight sets
     /// the hull alight, water puts a fire out, a burning hull sets a wood alight,
     /// the heavy knocks down a wall it crosses. The cost is the route planner's
-    /// (<see cref="Steps"/>) and not checked again here.
+    /// (<see cref="Steps"/>) and not checked again here. <paramref name="back"/>:
+    /// the move is astern (<see cref="Steps.Route.Back"/>), each cell entered
+    /// tail first - the reverse gear's bend between two of them a turn; null
+    /// reads each step against the hull, the one cell back as before.
     /// </summary>
-    public static string? Move(BattleState s, IReadOnlyList<Vector2I> path, int face)
+    public static string? Move(BattleState s, IReadOnlyList<Vector2I> path, int face, bool? back = null)
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
@@ -84,18 +87,17 @@ public static class Battle
             int way = HexField.HeadingTo(u.Cell, next);
             if (way < 0)
                 return $"({next.X},{next.Y}) is not beside ({u.Cell.X},{u.Cell.Y})";
-            bool back = way == HexField.Reverse(u.Heading);
+            bool astern = back ?? way == HexField.Reverse(u.Heading);
             if (s.Board.Walled(u.Cell, way))
             {
                 if (!u.Class.Bulldozes)
                     return $"a wall across ({u.Cell.X},{u.Cell.Y})>{way}";
                 WallDown(s, u.Cell, way);
             }
-            if (!back)
-                u.Heading = way;
+            u.Heading = astern ? HexField.Reverse(way) : way;
             u.Cell = next;
             s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, next, way));
-            Entered(s, u, way, forward: !back);
+            Entered(s, u, way, forward: !astern);
             if (u.Fate != UnitFate.Alive)
                 return null;
         }
@@ -112,8 +114,9 @@ public static class Battle
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
-        int cost = Steps.Turning(u.Heading, face);
-        if (cost > Steps.BudgetAt(s.Board, u.Cell, MoverOf(s, u)))
+        Steps.Mover mover = MoverOf(s, u);
+        int cost = Steps.TurnCost(u.Heading, face, mover);
+        if (cost > Steps.BudgetAt(s.Board, u.Cell, mover))
             return $"no steps to turn {cost}";
         return Move(s, new[] { u.Cell }, face);
     }
@@ -134,7 +137,7 @@ public static class Battle
             return $"({cell.X},{cell.Y}) is out of reach";
         if (face >= 0 && face != route.End.Heading && reach.TurnTo(route, face) is null)
             return $"no steps left to turn to {face}";
-        return Move(s, route.Cells(), face >= 0 ? face : route.End.Heading);
+        return Move(s, route.Cells(), face >= 0 ? face : route.End.Heading, route.Back);
     }
 
     /// <summary>How unit <paramref name="u"/> moves on this state: its class,
@@ -146,7 +149,7 @@ public static class Battle
             if (o.Standing && o.Id != u.Id)
                 barred.Add(o.Cell);
         Steps.Mover mover = Steps.Mover.Of(u.Class, (u.Kit & Kit.Snorkel) != 0, barred);
-        mover.Trawl = (u.Kit & Kit.Trawl) != 0;
+        Steps.Kitted(mover, u.Kit);
         return mover;
     }
 

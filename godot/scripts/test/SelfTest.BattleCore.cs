@@ -451,6 +451,78 @@ public static partial class SelfTest
                   $"gun: {Said(gun)}; plain: {Said(cold)}; bomb: {Said(bomb)}");
         }
 
+        // Д8, upgrades.md «Широкие гусеницы»: the medium at (4,8) up the column
+        // through mud on (4,7) - stopped in it without, on past it with; begun
+        // in it, one step without and the speed with.
+        {
+            var mudCell = new Vector2I(4, 7);
+            BattleState field = Probe(9, 10, mud: new[] { mudCell });
+            Steps.Mover plain = Steps.Mover.Of(MovementProfile.Medium);
+            Steps.Mover wide = Steps.Kitted(Steps.Mover.Of(MovementProfile.Medium), Kit.WideTracks);
+            Steps.Reach without = Steps.Plan(field.Board, new Steps.Pose(new Vector2I(4, 8), 90), plain);
+            Steps.Reach with = Steps.Plan(field.Board, new Steps.Pose(new Vector2I(4, 8), 90), wide);
+            int inMud = Steps.BudgetAt(field.Board, mudCell, plain), inMudWide = Steps.BudgetAt(field.Board, mudCell, wide);
+            check("wide tracks drive through mud as ground, and a move begun in it has the full budget",
+                  without.Reaches(mudCell) && !without.Reaches(new Vector2I(4, 6))
+                  && with.Reaches(new Vector2I(4, 5)) && inMud == 1 && inMudWide == MovementProfile.Medium.Steps,
+                  $"plain to (4,6) {without.Reaches(new Vector2I(4, 6))}, wide to (4,5) {with.Reaches(new Vector2I(4, 5))}; "
+                  + $"budget in mud {inMud} / {inMudWide}");
+        }
+
+        // Д8, upgrades.md «Задний ход»: the medium at (4,4) facing up backs two
+        // cells, and bends between them; without the gear one cell, nothing more.
+        {
+            var start = new Vector2I(4, 4);
+            Vector2I one = HexField.Step(start, 270), two = HexField.Step(one, 270);
+            // backed one, turned to 30, backed again: tail first along 210
+            Vector2I bend = HexField.Step(one, 210);
+            BattleState field = Probe(9, 10);
+            Steps.Mover plain = Steps.Mover.Of(MovementProfile.Medium);
+            Steps.Mover gear = Steps.Kitted(Steps.Mover.Of(MovementProfile.Medium), Kit.Reverse);
+            Steps.Reach without = Steps.Plan(field.Board, new Steps.Pose(start, 90), plain);
+            Steps.Reach with = Steps.Plan(field.Board, new Steps.Pose(start, 90), gear);
+            Steps.Route? straight = with.RouteTo(two), bent = with.RouteTo(bend);
+            BattleState go = Probe(9, 10);
+            Put(go, 0, "MTR", Camp.Green, start.X, start.Y, 90, kit: Kit.Reverse);
+            Put(go, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(go, 0, st => Battle.Go(st, bend));
+            BattleUnit mt = go.Unit(0)!;
+            check("the reverse gear backs two cells and turns between them; without it one cell only",
+                  without.Reaches(one) && without.RouteTo(one)!.Back && without.RouteTo(one)!.Final
+                  && (without.RouteTo(two) is null || !without.RouteTo(two)!.Back)
+                  && straight is { Back: true, Spent: 2 } && bent is { Back: true, Spent: 3 }
+                  && mt.Cell == bend && mt.Heading == 30,
+                  $"plain to {two}: {without.RouteTo(two)}; gear: {straight}; bent: {bent}; went {Said(go)}");
+        }
+
+        // Д8, upgrades.md «Двойной поворот»: the first 60° on the spot is free -
+        // the medium (4 steps) reaches four cells out along 30, not three.
+        {
+            var start = new Vector2I(4, 6);
+            Vector2I c = start;
+            for (int k = 0; k < 4; k++)
+                c = HexField.Step(c, 30);
+            BattleState field = Probe(9, 10);
+            Steps.Mover plain = Steps.Mover.Of(MovementProfile.Medium);
+            Steps.Mover twice = Steps.Kitted(Steps.Mover.Of(MovementProfile.Medium), Kit.DoubleTurn);
+            bool without = Steps.Plan(field.Board, new Steps.Pose(start, 90), plain).Reaches(c);
+            bool with = Steps.Plan(field.Board, new Steps.Pose(start, 90), twice).Reaches(c);
+            // in mud the budget is one step: 120° on the spot is one with it, two without
+            BattleState turn = Probe(9, 10, mud: new[] { start });
+            Put(turn, 0, "HMR", Camp.Green, start.X, start.Y, 90, kit: Kit.DoubleTurn);
+            Put(turn, 1, "HMR", Camp.Brown, 0, 0, 90);
+            string? free = null, paid = null;
+            Act(turn, 0, st => free = Battle.Turn(st, 330));
+            BattleState slow = Probe(9, 10, mud: new[] { start });
+            Put(slow, 0, "HMR", Camp.Green, start.X, start.Y, 90);
+            Put(slow, 1, "HMR", Camp.Brown, 0, 0, 90);
+            Act(slow, 0, st => paid = Battle.Turn(st, 330));
+            check("the double turn's first 60° costs nothing: four cells out along 30; 120° in mud for its one step",
+                  !without && with && Steps.TurnCost(90, 30, twice) == 0 && Steps.TurnCost(90, 330, twice, turned: true) == 2
+                  && free is null && turn.Unit(0)!.Heading == 330 && paid is not null,
+                  $"plain {without}, double {with}; in mud with {free ?? "ok"}, without {paid}");
+        }
+
         // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
         // list is nothing, a name no upgrade has is refused; written back as read.
         {
@@ -492,7 +564,7 @@ public static partial class SelfTest
     /// walls (a cell and an edge) and levels asked for.</summary>
     private static BattleState Probe(int columns, int rows, Vector2I[]? woods = null, Vector2I[]? mines = null,
                                      Vector2I[]? deep = null, (Vector2I Cell, int Heading)[]? walls = null,
-                                     int[]? levels = null)
+                                     int[]? levels = null, Vector2I[]? mud = null)
     {
         var field = new HexField { Trees = false, Columns = columns, Rows = rows };
         var cover = new Cover[columns * rows];
@@ -505,6 +577,8 @@ public static partial class SelfTest
             cover[c.Y * columns + c.X] = Cover.Walls;
         foreach (Vector2I d in deep ?? Array.Empty<Vector2I>())
             ground[d.Y * columns + d.X] = Foundation.Deep;
+        foreach (Vector2I m in mud ?? Array.Empty<Vector2I>())
+            ground[m.Y * columns + m.X] = Foundation.Mud;
         field.SetGround(ground);
         field.SetCover(cover);
         if (levels is not null)

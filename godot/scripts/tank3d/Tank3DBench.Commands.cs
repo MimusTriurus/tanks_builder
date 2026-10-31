@@ -209,10 +209,11 @@ public sealed partial class Tank3DBench
     {
         if (_field is null || Array.IndexOf(HexField.EdgeHeadings, side) < 0)
             return false;
-        int cost = Steps.Turning(HullSide(), side);
-        if (cost == 0)
+        if (Steps.Turning(HullSide(), side) == 0)
             return true;
-        int budget = Steps.BudgetAt(_field, CellHere, RigMover());
+        Steps.Mover mover = RigMover();
+        int cost = Steps.TurnCost(HullSide(), side, mover);
+        int budget = Steps.BudgetAt(_field, CellHere, mover);
         if (cost > budget)
         {
             _orderNote = "на этот разворот шагов нет";

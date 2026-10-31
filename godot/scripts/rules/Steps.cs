@@ -23,9 +23,12 @@ namespace TankSpriteTest;
 /// <item>a cell forward - 1, into sand 2 (U-21); a turn of 60° on the spot - 1;</item>
 /// <item>a cell back - 1 (2 into sand), and only as the whole move: one cell, no
 /// turn before or after (match.md «назад на 1, не сочетается с поворотом»;
-/// field.md, the ramp: «назад можно на одну клетку»);</item>
+/// field.md, the ramp: «назад можно на одну клетку»); with the reverse gear
+/// (upgrades.md) up to two, turns before, between and after, never mixed with
+/// driving ahead;</item>
 /// <item>mud and wood end the move on entry; a turn begun in either has one step
-/// (the budget is 1);</item>
+/// (the budget is 1) - on wide tracks mud is ground (upgrades.md);</item>
+/// <item>with the double turn the move's first 60° on the spot is free.</item>
 /// <item>a mine fires on entry and the move ends there (a trawl driving forward
 /// passes it); deep water without the snorkel drowns the tank, and that ends
 /// it too; a burning wood sets the tank alight - a <see cref="Risk"/> on the
@@ -65,6 +68,16 @@ public static class Steps
         public bool Amphibious;
         /// <summary>The mine trawl: a mine driven over forward is cleared.</summary>
         public bool Trawl;
+        /// <summary>Wide tracks (upgrades.md): mud is ground - it neither ends
+        /// the move nor cuts the budget to one. A wood still does.</summary>
+        public bool WideTracks;
+        /// <summary>The reverse gear (upgrades.md, «Задний ход»): back up to
+        /// <see cref="ReverseCells"/> cells and with turns, each a step as ever -
+        /// a move astern, not mixed with driving forward.</summary>
+        public bool Reverse;
+        /// <summary>The double turn (upgrades.md): the move's first 60° on the
+        /// spot costs no step.</summary>
+        public bool FreeTurn;
         /// <summary>Cells no step may enter - the other tanks.</summary>
         public IReadOnlySet<Vector2I>? Barred;
         /// <summary>The way is planned as if the board had no mines: the HUD's
@@ -81,6 +94,18 @@ public static class Steps
             Amphibious = amphibious,
             Barred = barred,
         };
+    }
+
+    /// <summary>The kit's say in how <paramref name="mover"/> drives: the
+    /// trawl, wide tracks, the reverse gear, the double turn - one reading
+    /// for the core and the bench.</summary>
+    public static Mover Kitted(Mover mover, Kit kit)
+    {
+        mover.Trawl = (kit & Kit.Trawl) != 0;
+        mover.WideTracks = (kit & Kit.WideTracks) != 0;
+        mover.Reverse = (kit & Kit.Reverse) != 0;
+        mover.FreeTurn = (kit & Kit.DoubleTurn) != 0;
+        return mover;
     }
 
     /// <summary>One step of a way: where it leaves the tank, how, and the steps
@@ -120,8 +145,15 @@ public static class Steps
 
     /// <summary>A pose in the search, whether it ends the move, and whether
     /// every cell to it - the start among them - was road: the road's step
-    /// (<see cref="Paved"/>) is had only on such a way.</summary>
-    internal readonly record struct State(Pose Pose, bool Final, bool Paved = false);
+    /// (<see cref="Paved"/>) is had only on such a way. <paramref name="Gear"/>
+    /// for the reverse gear: nothing driven yet (0), cells backed (1, 2), driven
+    /// forward (<see cref="Ahead"/>); <paramref name="Turned"/> - the double
+    /// turn's free one is spent.</summary>
+    internal readonly record struct State(Pose Pose, bool Final, bool Paved = false, int Gear = 0, bool Turned = false);
+
+    /// <summary>How far the reverse gear backs (upgrades.md, «до 2 клеток»).</summary>
+    public const int ReverseCells = 2;
+    private const int Ahead = ReverseCells + 1;
 
     /// <summary>Everything a turn can do from one pose, searched once.</summary>
     public sealed class Reach
@@ -137,6 +169,8 @@ public static class Steps
         internal readonly Dictionary<State, List<State>> Pred = new();
         internal readonly Dictionary<State, Risk> Risks = new();
         internal IHexBoard Field = null!;
+        /// <summary>Who it was searched for.</summary>
+        public Mover Mover { get; internal set; } = null!;
         private Dictionary<Vector2I, int>? _cells;
 
         /// <summary>Every cell a move may end on, with the fewest steps that
@@ -234,15 +268,16 @@ public static class Steps
         /// The steps a turn on the spot to <paramref name="heading"/> costs at
         /// the end of <paramref name="route"/>, or null when it may not be had:
         /// over the budget, after a final step (mud, wood, a mine, the step
-        /// back), or not a flat side at all. 0 for the side it already faces.
+        /// back), or not a flat side at all. 0 for the side it already faces -
+        /// and for one 60° when the double turn's free one is still to be had.
         /// </summary>
         public int? TurnTo(Route route, int heading)
         {
             if (!HexField.EdgeHeadings.Contains(heading))
                 return null;
-            int turns = Turning(route.End.Heading, heading);
-            if (turns == 0)
+            if (Turning(route.End.Heading, heading) == 0)
                 return 0;
+            int turns = TurnCost(route.End.Heading, heading, Mover, route.Turns > 0);
             if (route.Final || route.Spent + turns > Cap(route))
                 return null;
             return turns;
@@ -278,9 +313,9 @@ public static class Steps
     }
 
     /// <summary>The steps a turn begun on <paramref name="cell"/> has: the
-    /// speed, or one in mud or a wood.</summary>
+    /// speed, or one in mud (not on wide tracks) or a wood.</summary>
     public static int BudgetAt(IHexBoard field, Vector2I cell, Mover mover) =>
-        Stops(field, cell) ? Math.Min(1, mover.Speed) : mover.Speed;
+        Stops(field, cell, mover) ? Math.Min(1, mover.Speed) : mover.Speed;
 
     /// <summary>
     /// The road's step: one more when every cell the move passes, the start
@@ -295,12 +330,23 @@ public static class Steps
     public static bool Stops(IHexBoard field, Vector2I cell) =>
         field.FoundationAt(cell) == Foundation.Mud || field.CoverAt(cell) == Cover.Forest;
 
+    /// <summary>The same for one who drives: on wide tracks mud is ground.</summary>
+    public static bool Stops(IHexBoard field, Vector2I cell, Mover mover) =>
+        (field.FoundationAt(cell) == Foundation.Mud && !mover.WideTracks) || field.CoverAt(cell) == Cover.Forest;
+
     /// <summary>60° turns between two flat sides, the short way round.</summary>
     public static int Turning(int from, int to)
     {
         int d = ((to - from) % 360 + 360) % 360 / 60;
         return Math.Min(d, 6 - d);
     }
+
+    /// <summary>The steps a turn on the spot from <paramref name="from"/> to
+    /// <paramref name="to"/> costs <paramref name="mover"/>: <see cref="Turning"/>,
+    /// one less with the double turn while the move has <paramref name="turned"/>
+    /// not yet.</summary>
+    public static int TurnCost(int from, int to, Mover mover, bool turned = false) =>
+        Math.Max(0, Turning(from, to) - (mover.FreeTurn && !turned ? 1 : 0));
 
     /// <summary>
     /// Search the turn from <paramref name="start"/>: every pose within the
@@ -312,7 +358,7 @@ public static class Steps
         bool road = field.FoundationAt(start.Cell) == Foundation.Road;
         var reach = new Reach
         {
-            Start = start, Budget = road ? plain + Paved : plain, Plain = plain, Field = field,
+            Start = start, Budget = road ? plain + Paved : plain, Plain = plain, Field = field, Mover = mover,
         };
         var first = new State(start, false, road);
         reach.Cost[first] = 0;
@@ -329,19 +375,35 @@ public static class Steps
 
             if (!onRamp)
             {
-                Offer(new State(new Pose(cell, Turn(heading, 60)), false, s.Paved), cost + 1, s, Risk.None);
-                Offer(new State(new Pose(cell, Turn(heading, -60)), false, s.Paved), cost + 1, s, Risk.None);
+                // the double turn's first 60° is free (upgrades.md); without it
+                // the state does not carry the turn, and the search is as it was
+                int turn = mover.FreeTurn && !s.Turned ? 0 : 1;
+                Offer(s with { Pose = new Pose(cell, Turn(heading, 60)), Turned = mover.FreeTurn }, cost + turn, s, Risk.None);
+                Offer(s with { Pose = new Pose(cell, Turn(heading, -60)), Turned = mover.FreeTurn }, cost + turn, s, Risk.None);
             }
-            if (Enter(field, mover, cell, heading, forward: true) is { } ahead)
-                Offer(new State(new Pose(ahead.To, heading), ahead.Ends,
-                                s.Paved && field.FoundationAt(ahead.To) == Foundation.Road),
+            // Ahead: not once the reverse gear has backed.
+            if ((!mover.Reverse || s.Gear is 0 or Ahead)
+                && Enter(field, mover, cell, heading, forward: true) is { } ahead)
+                Offer(s with
+                      {
+                          Pose = new Pose(ahead.To, heading), Final = ahead.Ends,
+                          Paved = s.Paved && field.FoundationAt(ahead.To) == Foundation.Road,
+                          Gear = mover.Reverse ? Ahead : 0,
+                      },
                       cost + ahead.Price, s, ahead.Risk);
-            // The step back: from the start pose only, the whole move.
-            if (s == first && !onRamp
+            // The step back: from the start pose only, the whole move - with
+            // the reverse gear, up to two cells and turns between, not after
+            // driving ahead. Never off nor on to a ramp.
+            bool backs = mover.Reverse ? s.Gear < ReverseCells : s == first;
+            if (backs && !onRamp
                 && Enter(field, mover, cell, HexField.Reverse(heading), forward: false) is { } behind
                 && !field.IsRamp(behind.To))
-                Offer(new State(new Pose(behind.To, heading), true,
-                                s.Paved && field.FoundationAt(behind.To) == Foundation.Road),
+                Offer(s with
+                      {
+                          Pose = new Pose(behind.To, heading), Final = !mover.Reverse || behind.Ends,
+                          Paved = s.Paved && field.FoundationAt(behind.To) == Foundation.Road,
+                          Gear = mover.Reverse ? s.Gear + 1 : 0,
+                      },
                       cost + behind.Price, s, behind.Risk);
         }
         return reach;
@@ -376,7 +438,7 @@ public static class Steps
         if (!field.Passable(cell, way) || (!mover.Bulldozer && field.Blocked(cell, way)))
             return null;
         int price = field.FoundationAt(to) == Foundation.Sand ? 2 : 1;
-        bool ends = Stops(field, to);
+        bool ends = Stops(field, to, mover);
         Risk risk = Risk.None;
         if (!mover.MinesUnseen && field.CoverAt(to) == Cover.Minefield && field.CoverStateAt(to) != CoverState.Cleared
             && !(mover.Trawl && forward))

@@ -690,7 +690,7 @@ public sealed partial class Tank3DBench
             // a mine is no stop sign (2026-10-29, the author's note): it is
             // driven on to and goes off - the ghost on it shows that
             // (Tank3DBench.Ghost, GhostMined), the mine is seen on the board
-            if (Steps.Stops(_field!, cell) || (_field!.IsDeep(cell) && !RigSnorkel))
+            if (Steps.Stops(_field!, cell, _reach.Mover) || (_field!.IsDeep(cell) && !RigSnorkel))
             {
                 Vector2 at = Screen(cell) + new Vector2(hex * 0.42f, -hex * 0.30f);
                 ink.DrawCircle(at, r * 0.8f, StopInk);

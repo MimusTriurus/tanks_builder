@@ -168,8 +168,8 @@ public sealed partial class Tank3DBench
         // from here: square on already, or a turn on the spot if the move is still to be had
         if (SideTo(CellHere, target) is int here)
         {
-            int turns = Steps.Turning(HullSide(), here);
-            if (turns == 0 || (MatchMayMove && _reach is not null && turns <= _reach.Budget))
+            int turns = _reach is null ? Steps.Turning(HullSide(), here) : Steps.TurnCost(HullSide(), here, _reach.Mover);
+            if (Steps.Turning(HullSide(), here) == 0 || (MatchMayMove && _reach is not null && turns <= _reach.Budget))
                 Offer(CellHere, here, -1, turns, false);
         }
         // after the move: a cell beside the target the way reaches, and the

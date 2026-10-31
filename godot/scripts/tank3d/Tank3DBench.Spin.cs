@@ -61,7 +61,8 @@ public sealed partial class Tank3DBench
     {
         if (_reach is null)
             return null;
-        int cost = Steps.Turning(HullSide(), side);
+        // the double turn's first 60° is free (Steps.TurnCost)
+        int cost = Steps.TurnCost(HullSide(), side, _reach.Mover);
         return cost <= _reach.Budget ? cost : null;
     }
 
