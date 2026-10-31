@@ -57,7 +57,8 @@ public sealed partial class BoardMap
                             SoilCells is null ? null : ring.Spread(SoilCells, Soil.As),
                             Roads.Select(r => r.Moved(ring.Shift)).ToList(),
                             Unpaved is null ? null : ring.Spread(Unpaved, Foundation.Deep),
-                            WoodMix, TreeCells is null ? null : ring.Spread(TreeCells, Species.As))
+                            WoodMix, TreeCells is null ? null : ring.Spread(TreeCells, Species.As),
+                            Arena.Moved(ring.Shift))
         {
             Sea = ring.Sea,
             Shift = ring.Shift,

@@ -90,6 +90,13 @@ public static class MapRules
 
         public IReadOnlyList<Vector2I> Homes = Array.Empty<Vector2I>();
 
+        /// <summary>The homes with their sides, for <see cref="ArenaFaults"/>;
+        /// empty where only the cells were handed in.</summary>
+        public IReadOnlyList<Parking> Parked = Array.Empty<Parking>();
+
+        /// <summary>The zones and the point (<see cref="TankSpriteTest.Arena"/>).</summary>
+        public Arena Arena = Arena.Empty;
+
         /// <summary>What the walled cells carry, for <see cref="WallFaults"/>.
         /// Empty on a board that authored no shapes, which is a board of closed
         /// rings and has nothing for that rule to say.</summary>
@@ -162,6 +169,8 @@ public static class MapRules
             Plot = map.Plot,
             Sea = map.Sea,
             Homes = map.Homes,
+            Parked = map.Parked,
+            Arena = map.Arena,
             Walling = map.Walling,
         };
     }
@@ -191,7 +200,10 @@ public static class MapRules
         /// <summary>One of <c>ramp.bridge</c>, <c>ramp.foot</c>,
         /// <c>ramp.rock</c>, <c>ramp.near</c>, <c>water.step</c>,
         /// <c>water.level</c>, <c>home.park</c>, <c>reach.stranded</c>,
-        /// <c>reach.rock</c>.</summary>
+        /// <c>reach.rock</c>, <c>wall.run</c>, and the match's ground
+        /// (<see cref="ArenaFaults"/>): <c>zone.both</c>, <c>zone.home</c>,
+        /// <c>zone.park</c>, <c>zone.point</c>, <c>point.off</c>,
+        /// <c>point.dead</c>.</summary>
         public string Rule { get; }
 
         public string Text { get; }
@@ -732,6 +744,91 @@ public static class MapRules
         faults.AddRange(WaterFaults(draft));
         faults.AddRange(HomeFaults(draft));
         faults.AddRange(WallFaults(draft));
+        faults.AddRange(ArenaFaults(draft));
+        return faults;
+    }
+
+    // --- the match's ground ----------------------------------------------------
+
+    /// <summary>Why a tank could not be set down on a cell, or empty: the
+    /// homes' rule (<see cref="HomeFaults"/>).</summary>
+    private static string Unparkable(Draft draft, Vector2I cell) =>
+        !draft.On(cell) ? "off the board"
+        : draft.IsCliff(cell) ? "on a rock"
+        : draft.IsRamp(cell) ? "on a ramp"
+        : draft.IsWater(cell) ? "in the water"
+        : "";
+
+    /// <summary>
+    /// The deployment zones and the control point (GDD match.md, Д9):
+    /// <list type="bullet">
+    /// <item><c>zone.both</c> - a cell in both sides' zones: whose is it?</item>
+    /// <item><c>zone.home</c> - a home outside its side's zone, when the side
+    /// has one: the row the match starts in (match.md, «в ряд») stands in the
+    /// zone.</item>
+    /// <item><c>zone.park</c>, named, not refused - a zone cell no tank can be
+    /// set down on: the placement skips it, and a broad brush over a pond is
+    /// not a broken board.</item>
+    /// <item><c>point.off</c> - a hex of the point off the board;
+    /// <c>point.dead</c> - a point with no hex a tank can stand on: nobody
+    /// ever holds it, and both sides only bleed.</item>
+    /// <item><c>zone.point</c>, named - a zone on the point: that side holds it
+    /// from the first tick.</item>
+    /// </list>
+    /// </summary>
+    public static List<Fault> ArenaFaults(Draft draft)
+    {
+        var faults = new List<Fault>();
+        Arena arena = draft.Arena;
+        if (arena.Plain)
+            return faults;
+        foreach (Vector2I c in arena.Zone(Parking.Green))
+            if (arena.Zone(Parking.Brown).Contains(c))
+                faults.Add(new Fault(c, "zone.both",
+                    $"({c.X},{c.Y}) is in both zones, and a cell deploys one side",
+                    brief: $"({c.X},{c.Y}) in both zones"));
+        foreach (string side in Parking.Sides)
+            foreach (Vector2I c in arena.Zone(side))
+            {
+                string why = Unparkable(draft, c);
+                if (why.Length > 0)
+                    faults.Add(new Fault(c, "zone.park",
+                        $"({c.X},{c.Y}) of the {side} zone is {why}: no tank will be set down there",
+                        false, $"({c.X},{c.Y}) of the {side} zone is {why}"));
+                if (arena.Point is { } p && p.Holds(c))
+                    faults.Add(new Fault(c, "zone.point",
+                        $"({c.X},{c.Y}) of the {side} zone is on the control point: {side} hold it from the first round",
+                        false, $"({c.X},{c.Y}) of the {side} zone on the point"));
+            }
+        string[] sides = Parking.SidesOf(draft.Parked);
+        for (int i = 0; i < draft.Parked.Count; i++)
+        {
+            Vector2I home = draft.Parked[i].Cell;
+            IReadOnlyList<Vector2I> zone = arena.Zone(sides[i]);
+            if (zone.Count > 0 && !zone.Contains(home))
+                faults.Add(new Fault(home, "zone.home",
+                    $"the {sides[i]} home at ({home.X},{home.Y}) is outside the {sides[i]} zone, "
+                    + "and the match starts with a side's row in its zone",
+                    brief: $"{sides[i]} home ({home.X},{home.Y}) outside its zone"));
+        }
+        if (arena.Point is { } point)
+        {
+            bool any = false;
+            foreach (Vector2I c in point.Cells())
+            {
+                if (!draft.On(c))
+                    faults.Add(new Fault(c, "point.off",
+                        $"({c.X},{c.Y}) of the control point is off the board",
+                        brief: $"point ({c.X},{c.Y}) off the board"));
+                else
+                    any |= Unparkable(draft, c).Length == 0;
+            }
+            if (!any)
+                faults.Add(new Fault(point.Cell, "point.dead",
+                    $"no hex of the control point at ({point.Cell.X},{point.Cell.Y}) takes a tank, "
+                    + "so nobody ever holds it and both sides only lose points",
+                    brief: $"point ({point.Cell.X},{point.Cell.Y}) holds no tank"));
+        }
         return faults;
     }
 

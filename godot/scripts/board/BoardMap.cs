@@ -196,6 +196,11 @@ public sealed partial class BoardMap
     /// </summary>
     public IReadOnlyList<Parking> Parked { get; }
 
+    /// <summary>The sides' deployment zones and the control point (format 3's
+    /// <c>zones</c> and <c>point</c>, <see cref="TankSpriteTest.Arena"/>);
+    /// <see cref="TankSpriteTest.Arena.Empty"/> when the map said neither.</summary>
+    public Arena Arena { get; }
+
     /// <summary>Height per cell, for <see cref="HexField.SetRelief"/>.</summary>
     public int[] Levels { get; }
 
@@ -431,8 +436,10 @@ public sealed partial class BoardMap
                      IReadOnlyList<RoadPath>? roads = null,
                      Foundation[]? unpaved = null,
                      IReadOnlyDictionary<char, int>? wood = null,
-                     char[]? treeCells = null)
+                     char[]? treeCells = null,
+                     Arena? arena = null)
     {
+        Arena = arena ?? Arena.Empty;
         WoodMix = wood;
         TreeCells = treeCells;
         Roads = roads ?? Array.Empty<RoadPath>();
@@ -740,7 +747,8 @@ public sealed partial class BoardMap
                                         string[]? soilCells = null,
                                         IReadOnlyList<RoadPath>? roads = null,
                                         IReadOnlyDictionary<char, int>? wood = null,
-                                        string[]? trees = null)
+                                        string[]? trees = null,
+                                        Arena? arena = null)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
@@ -993,6 +1001,18 @@ public sealed partial class BoardMap
             }
         }
 
+        // The zones and the point (Д9): a cell off the board is a zone or a
+        // point nobody can stand in; what the rules say of the rest - a home
+        // outside its zone, a cell in both - is MapRules.ArenaFaults'
+        if (arena is { Plain: false })
+        {
+            foreach ((Vector2I c, string what) in arena.Named())
+                if (c.X < 0 || c.X >= columns || c.Y < 0 || c.Y >= rows || g[c.X, c.Y] == Off)
+                    wrong.Add($"({c.X},{c.Y}) of {what} is off the board");
+            if (arena.Point is { Score: < ControlPoint.Least } low)
+                wrong.Add($"the control point gives a side {low.Score} points, and a side starts with {ControlPoint.Least} at least");
+        }
+
         if (wrong.Count > 0)
             throw new InvalidOperationException(
                 name + ": " + string.Join("; ", wrong));
@@ -1005,7 +1025,8 @@ public sealed partial class BoardMap
                                    water, kinds, cliffs, walls, floor, over,
                                    plot, paint, height, plinth, walling,
                                    rocking, climate, soilBase, looks, roads, unpaved,
-                                   wood is { Count: > 0 } ? wood : null, treeCells));
+                                   wood is { Count: > 0 } ? wood : null, treeCells,
+                                   arena));
     }
 
     /// <summary>

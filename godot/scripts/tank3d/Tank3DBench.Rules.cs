@@ -108,6 +108,8 @@ public sealed partial class Tank3DBench
             return;
         // the smoke a round shorter (Tank3DBench.Smoke)
         SmokeRound();
+        // the control point held or not, the points taken (Tank3DBench.Point)
+        PointTick();
         if (_wildfire is null || !_wildfire.Ruled)
             return;
         foreach (Vector2I cell in _wildfire.Round())
@@ -147,11 +149,13 @@ public sealed partial class Tank3DBench
     /// (<c>Battle.Stalemate</c>).</summary>
     private void StalemateTick(bool busy)
     {
-        if (MatchOver || busy || _passIn is not null || _mt.QuietRounds < MatchRules.QuietRoundsDraw)
+        if (MatchOver || busy || _passIn is not null || _pointDue is not null || _mt.QuietRounds < MatchRules.QuietRoundsDraw)
             return;
         _mt.Drawn = true;
         _commands.Clear();
-        Banner($"Ничья по пату · раундов без выстрела по танку: {_mt.QuietRounds}", Colors.White, stay: true);
-        Log.Print($"tank3d: match: {_mt.QuietRounds} rounds without a shot at a tank - drawn in round {_mt.Round}");
+        Banner($"Ничья по пату · раундов без выстрела по танку{(_pointCells is null ? "" : " и смены удержания")}: {_mt.QuietRounds}",
+               Colors.White, stay: true);
+        Log.Print($"tank3d: match: {_mt.QuietRounds} rounds without a shot at a tank"
+                 + (_pointCells is null ? "" : " or the point changing hands") + $" - drawn in round {_mt.Round}");
     }
 }

@@ -22,10 +22,11 @@ namespace TankSpriteTest;
 /// the medium's sector (Д7), the smoke grenade and its smoke, the incendiary
 /// round, the drive's upgrades (in <see cref="Steps"/>), the spall liner, the
 /// auto-extinguisher, the thermal imager, the mine layer, the repair kit, the
-/// winch, the ambush stabilizer (Д8).
+/// winch, the ambush stabilizer (Д8), the control point - holding, points on
+/// the field's tick, the win on points (Д9).
 ///
-/// <b>Not yet</b> (stage Д9): an ambush that holds an incendiary round back -
-/// it fires a plain one; the control point, placement.
+/// <b>Not yet</b>: an ambush that holds an incendiary round back - it fires a
+/// plain one; placement, which is before the first turn and the bench's.
 /// </summary>
 public static class Battle
 {
@@ -847,7 +848,8 @@ public static class Battle
 
     /// <summary>Пат (match.md, «Пат — ничья»): <see cref="MatchRules.QuietRoundsDraw"/>
     /// whole rounds without a shot at a tank - a round into the ground, a wall
-    /// or a wood is no shot at one, nor a mine or a fire. Read after the win:
+    /// or a wood is no shot at one, nor a mine or a fire - and without the
+    /// point changing hands (<see cref="BattleState.LastShift"/>). Read after the win:
     /// the last tank burnt out on the same tick is a win, not a draw.</summary>
     private static void Stalemate(BattleState s)
     {
@@ -892,7 +894,56 @@ public static class Battle
             s.Board.SetSmoke(c, false);
             s.Events.Add(new BattleEvent(BattleEventKind.SmokeGone, -1, c, 0, "blown away"));
         }
+        PointTick(s);
         s.Events.Add(new BattleEvent(BattleEventKind.FieldTick, -1, default, s.Round));
+    }
+
+    // --- the control point ------------------------------------------------------------
+
+    /// <summary>Who holds the point with <paramref name="green"/> and
+    /// <paramref name="brown"/> active units on it: more is holding, a tie -
+    /// none on it too - is nobody (match.md, «Удержание точки»). The bench asks
+    /// this too.</summary>
+    public static Camp? Holding(int green, int brown) =>
+        green > brown ? Camp.Green : brown > green ? Camp.Brown : null;
+
+    /// <summary>Who holds the point now: the active units on its hexes, the
+    /// knocked out and drowned not counted.</summary>
+    public static Camp? HeldBy(BattleState s)
+    {
+        if (s.Point is null)
+            return null;
+        int green = 0, brown = 0;
+        foreach (BattleUnit u in s.Units)
+            if (u.Fate == UnitFate.Alive && Array.IndexOf(s.Point, u.Cell) >= 0)
+            {
+                if (u.Side == Camp.Green)
+                    green++;
+                else
+                    brown++;
+            }
+        return Holding(green, brown);
+    }
+
+    /// <summary>The point at the round's end (match.md): the side that does
+    /// not hold it loses a point, both when nobody does; the holding changing
+    /// hands puts the stalemate's clock back.</summary>
+    private static void PointTick(BattleState s)
+    {
+        if (s.Point is null)
+            return;
+        Camp? held = HeldBy(s);
+        if (held != s.Holder)
+        {
+            s.Holder = held;
+            s.LastShift = s.Round;
+        }
+        if (held != Camp.Green)
+            s.Score[(int)Camp.Green]--;
+        if (held != Camp.Brown)
+            s.Score[(int)Camp.Brown]--;
+        s.Events.Add(new BattleEvent(BattleEventKind.Held, -1, s.Point[0], held is Camp h ? (int)h : -1,
+            $"green {s.Score[(int)Camp.Green]}, brown {s.Score[(int)Camp.Brown]}"));
     }
 
     // --- fates and fires --------------------------------------------------------------
@@ -1006,11 +1057,32 @@ public static class Battle
                 WallDown(s, cell, h);
     }
 
-    /// <summary>A side with every unit destroyed has lost (match.md, «Уничтожение»).</summary>
+    /// <summary>A side with every unit destroyed has lost (match.md,
+    /// «Уничтожение») - in a match on the point too; with a point, a side whose
+    /// points are spent has lost, and both spent on one tick is a draw (the
+    /// GDD does not say; docs/battle-core-plan.md, Д9).</summary>
     private static void Over(BattleState s)
     {
         if (s.Over)
             return;
+        Destroyed(s);
+        if (s.Over || s.Point is null)
+            return;
+        bool green = s.Score[(int)Camp.Green] <= 0, brown = s.Score[(int)Camp.Brown] <= 0;
+        if (green && brown)
+        {
+            s.Drawn = true;
+            s.Events.Add(new BattleEvent(BattleEventKind.Drawn, -1, default, 0, "both out of points"));
+        }
+        else if (green || brown)
+        {
+            s.Won = green ? Camp.Brown : Camp.Green;
+            s.Events.Add(new BattleEvent(BattleEventKind.Won, -1, default, (int)s.Won.Value, "on points"));
+        }
+    }
+
+    private static void Destroyed(BattleState s)
+    {
         foreach (Camp side in new[] { Camp.Green, Camp.Brown })
         {
             bool any = false, alive = false;

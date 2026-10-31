@@ -703,6 +703,82 @@ public static partial class SelfTest
                   $"after the heavy {after1}: {Said(s)}; rammed: {Said(rammed)}");
         }
 
+        // Д9, match.md «Удержание точки»: the point a ring at (4,5), three points a
+        // side. Round 1 the green light alone on it - green hold, brown lose one;
+        // round 2 a brown medium on the ring too - one each, nobody holds, both
+        // lose one, and the holding changed hands twice (the stalemate's clock);
+        // round 3 the medium knocked out - it does not count, green hold, brown
+        // are out of points and green win on them. Both out on one tick: a draw.
+        {
+            ControlPoint ring = new(new Vector2I(4, 5), true, 3);
+            BattleState s = Probe(9, 10);
+            s.Point = ring.Cells().ToArray();
+            s.Score = new[] { ring.Score, ring.Score };
+            Put(s, 0, "LTR", Camp.Green, 4, 5, 90);
+            Put(s, 1, "LTR", Camp.Brown, 0, 0, 270);
+            Turns(s, 2);
+            (int G, int B, Camp? Holder, int Shift) round1 = (s.Score[0], s.Score[1], s.Holder, s.LastShift);
+            Put(s, 2, "MTR", Camp.Brown, 4, 4, 270);
+            Turns(s, 2);
+            (int G, int B, Camp? Holder, int Shift, int Quiet) round2 = (s.Score[0], s.Score[1], s.Holder, s.LastShift, s.QuietRounds);
+            s.Unit(2)!.Fate = UnitFate.Knocked;
+            Turns(s, 2);
+            BattleState both = Probe(9, 10);
+            both.Point = new[] { new Vector2I(4, 5) };
+            both.Score = new[] { 1, 1 };
+            Put(both, 0, "LTR", Camp.Green, 0, 9, 90);
+            Put(both, 1, "LTR", Camp.Brown, 0, 0, 270);
+            Turns(both, 2);
+            check("the control point: more active units hold it, the other side loses a point a round, both when nobody does; "
+                  + "out of points loses, both out draws",
+                  round1 == (3, 2, Camp.Green, 1) && round2 == (2, 1, null, 2, 0)
+                  && s.Won == Camp.Green && s.Score[1] == 0 && s.Holder == Camp.Green && s.LastShift == 3
+                  && s.Events.Any(e => e.Kind == BattleEventKind.Won && e.Note == "on points")
+                  && both.Drawn && both.Won is null,
+                  $"round 1 {round1}, round 2 {round2}; {Said(s)}; both: {Said(both)}");
+        }
+
+        // Д9: a map's zones and point are read, written back the same, refused
+        // where they cannot mean anything, and judged by the rules - a home
+        // outside its side's zone, a cell in both zones.
+        {
+            string drill = System.IO.File.ReadAllText(MapFile.PathOf("drill10")).Replace("\"format\": 2", "\"format\": 3");
+            string zoned = drill.Replace("\"ground\": [", "\"zones\": { \"green\": [[1, 7], [3, 4], [7, 2], [8, 7], [6, 7], [2, 8]], "
+                                                          + "\"brown\": [[3, 2], [6, 2], [5, 3], [6, 3], [7, 3]] },\n"
+                                                          + "  \"point\": { \"at\": [4, 5], \"ring\": true, \"score\": 6 },\n  \"ground\": [");
+            BoardMap map = MapFile.Parse(zoned, "drill10");
+            BoardMap again = MapFile.Parse(MapFile.Write(map), "drill10");
+            List<MapRules.Fault> clean = MapRules.ArenaFaults(MapRules.Draft.Of(map));
+            string? Refused(string text)
+            {
+                try
+                {
+                    MapFile.Parse(text, "drill10");
+                    return null;
+                }
+                catch (InvalidOperationException e)
+                {
+                    return e.Message;
+                }
+            }
+            string? noScore = Refused(zoned.Replace(", \"score\": 6", ""));
+            string? red = Refused(zoned.Replace("\"brown\": [[3, 2]", "\"red\": [[3, 2]"));
+            string? off = Refused(zoned.Replace("[2, 8]]", "[12, 8]]"));
+            string? old = Refused(zoned.Replace("\"format\": 3", "\"format\": 2"));
+            var homeOut = MapRules.ArenaFaults(MapRules.Draft.Of(MapFile.Parse(zoned.Replace("\"brown\": [[3, 2], ", "\"brown\": ["), "drill10")));
+            var twice = MapRules.ArenaFaults(MapRules.Draft.Of(MapFile.Parse(zoned.Replace("[7, 3]] }", "[7, 3], [2, 8]] }"), "drill10")));
+            check("a map's zones and control point read, write back the same, refuse a point without points, a side "
+                  + "nobody is and a cell off the board, and the rules name a home outside its zone and a cell in both",
+                  map.Arena.Point == ring() && map.Arena.Zone(Parking.Green).Count == 6 && map.Arena.Zone(Parking.Brown).Count == 5
+                  && again.Arena.Say() == map.Arena.Say() && clean.Count(f => f.Fatal) == 0
+                  && noScore is not null && red is not null && off is not null && old is not null
+                  && homeOut.Any(f => f.Rule == "zone.home" && f.Cell == new Vector2I(3, 2))
+                  && twice.Any(f => f.Rule == "zone.both" && f.Cell == new Vector2I(2, 8)),
+                  $"{map.Arena}; again {again.Arena}; clean {string.Join("; ", clean)}; no score: {noScore}; red: {red}; "
+                  + $"off: {off}; format 2: {old}; home out: {string.Join("; ", homeOut)}; twice: {string.Join("; ", twice)}");
+            static ControlPoint ring() => new(new Vector2I(4, 5), true, 6);
+        }
+
         // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
         // list is nothing, a name no upgrade has is refused; written back as read.
         {

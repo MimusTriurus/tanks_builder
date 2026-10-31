@@ -51,7 +51,7 @@ public enum BattleEventKind
     Moved, Turned, MineBlown, MineCleared, Hit, Glanced, Ricochet, Passed, Spent,
     Knocked, Drowned, Exploded, Ignited, Doused, Afloat,
     WoodAlight, WoodBurnt, WoodCleared, WallDown, Shoved, RamRefused,
-    TurnEnded, FieldTick, Won, Drawn,
+    TurnEnded, FieldTick, Won, Drawn, Held,
     AmbushSet, AmbushFired, AmbushLifted,
     SmokeLaid, SmokeGone,
     MineLaid, Repaired, Winched,
@@ -84,6 +84,17 @@ public sealed class BattleState
     /// <summary>The round of the last shot at a tank, nought for none yet
     /// (match.md, «Пат — ничья»).</summary>
     public int LastStrike;
+    /// <summary>The control point's hexes (match.md, «Удержание точки»); null in
+    /// a match played to the last tank.</summary>
+    public Vector2I[]? Point;
+    /// <summary>Each side's points left, by <see cref="Camp"/>; read only with a
+    /// <see cref="Point"/>.</summary>
+    public int[] Score = new int[2];
+    /// <summary>Who held the point at the last field tick; null for nobody.</summary>
+    public Camp? Holder;
+    /// <summary>The round the holding last changed hands in, nought for never -
+    /// the stalemate's other clock (match.md, «Пат — ничья»).</summary>
+    public int LastShift;
     public Camp? Won;
     public bool Drawn;
     /// <summary>Burning woods and the rounds they have left (2 when lit, GDD match.md).</summary>
@@ -95,9 +106,9 @@ public sealed class BattleState
 
     public bool Over => Won is not null || Drawn;
 
-    /// <summary>Whole rounds played since the last shot at a tank - the
-    /// stalemate's count, the one under way not yet in it.</summary>
-    public int QuietRounds => Math.Max(0, Round - 1 - LastStrike);
+    /// <summary>Whole rounds played since the last shot at a tank, or the point
+    /// changing hands - the stalemate's count, the one under way not yet in it.</summary>
+    public int QuietRounds => Math.Max(0, Round - 1 - Math.Max(LastStrike, LastShift));
 
     public BattleUnit? Unit(int id)
     {
@@ -122,6 +133,7 @@ public sealed class BattleState
         var s = (BattleState)MemberwiseClone();
         s.Board = Board.Clone();
         s.Units = Units.Select(u => u.Clone()).ToList();
+        s.Score = (int[])Score.Clone();
         s.Fires = new Dictionary<Vector2I, int>(Fires);
         s.Smoke = new Dictionary<Vector2I, int>(Smoke);
         s.Events = new List<BattleEvent>(Events);

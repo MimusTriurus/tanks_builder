@@ -79,6 +79,9 @@ public sealed partial class Tank3DBench
             Board = BattleBoard.Of(_field!),
             Turn = CampOf(_mt.Turn), Round = _mt.Round, TurnNo = _mt.TurnNo,
             Drove = _mt.Drove, Fired = _mt.Fired, Bonus = _mt.Bonus, LastStrike = _mt.LastStrike,
+            // the control point (Tank3DBench.Point)
+            Point = _pointCells, Score = (int[])_mt.Score.Clone(), LastShift = _mt.LastShift,
+            Holder = _mt.Holder is Side held ? CampOf(held) : null,
             Won = _mt.Won is Side w ? CampOf(w) : null, Drawn = _mt.Drawn,
             Active = _side == _mt.Turn && _unitId >= 0 ? _unitId : null,
         };
@@ -148,12 +151,12 @@ public sealed partial class Tank3DBench
     /// out and its chain gone up, nothing of the turn spent yet.</summary>
     private void ShadowTick(bool busy)
     {
-        if (_shadow is null && !busy && _field is not null && _lineup.Count > 0 && !MatchOver
+        if (_shadow is null && !busy && _pointDue is null && _field is not null && _lineup.Count > 0 && !MatchOver
             && _passIn is null && !_mt.Drove && !_mt.Fired && !_mt.Bonus)
             ShadowBegin();
         // the match over at the hand-over: the last turn's end - the outcome
         // with it - read all the same, once the bench has settled
-        else if (MatchOver && _shadowEnded is { } ended && !busy)
+        else if (MatchOver && _shadowEnded is { } ended && !busy && _pointDue is null)
         {
             ShadowRead("the end of the last turn", ended, ShadowOfBench());
             _shadowEnded = null;
@@ -187,6 +190,10 @@ public sealed partial class Tank3DBench
         int woods = 0;
         if (core.LastStrike != bench.LastStrike)
             _shadowSaid.Add($"last shot at a tank core round {core.LastStrike} bench {bench.LastStrike}");
+        if (core.Point is not null && (core.Score[0] != bench.Score[0] || core.Score[1] != bench.Score[1]
+                                       || core.Holder != bench.Holder || core.LastShift != bench.LastShift))
+            _shadowSaid.Add($"point core {core.Holder?.ToString() ?? "nobody"} {core.Score[0]}:{core.Score[1]} since {core.LastShift}"
+                            + $" bench {bench.Holder?.ToString() ?? "nobody"} {bench.Score[0]}:{bench.Score[1]} since {bench.LastShift}");
         if (core.Drawn != bench.Drawn || core.Won != bench.Won)
             _shadowSaid.Add($"outcome core {(core.Drawn ? "drawn" : core.Won?.ToString() ?? "on")}"
                             + $" bench {(bench.Drawn ? "drawn" : bench.Won?.ToString() ?? "on")}");

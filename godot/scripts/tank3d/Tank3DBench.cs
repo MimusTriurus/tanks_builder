@@ -990,6 +990,7 @@ public sealed partial class Tank3DBench : Node3D
         }
         TankFromBoard(map);
         _parkings = map.Parked;
+        _arena = map.Arena;
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         Log.Print($"tank3d: board {map.Name} {map.Columns}x{map.Rows}, terrain {terrain.Note}");
         _field = new HexField
@@ -1027,6 +1028,7 @@ public sealed partial class Tank3DBench : Node3D
         _home = _startCell ?? (map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2));
         // a match: who stands where, and which of them rides the rig
         LineUpSides();
+        PointSetup();
 
         // What the stage aims its own camera by: it mirrors a 2D camera, and
         // this scene has none - its camera is its own (BuildCamera), current

@@ -147,6 +147,10 @@ public sealed class MapEdit
     /// <summary>The board's wind and ice (format 3's <c>climate</c>).</summary>
     public RockClimate Climate { get; set; }
 
+    /// <summary>The sides' deployment zones and the control point (format 3's
+    /// <c>zones</c> and <c>point</c>, <see cref="TankSpriteTest.Arena"/>).</summary>
+    public Arena Arena { get; set; } = Arena.Empty;
+
     /// <summary>The parkings, cell and class each - see
     /// <see cref="Parking"/>.</summary>
     public IReadOnlyList<Parking> Homes => _homes;
@@ -259,6 +263,7 @@ public sealed class MapEdit
             _walls = map.Walling.ToDictionary(kv => kv.Key,
                                               kv => kv.Value.Copy()),
             Climate = map.Climate,
+            Arena = map.Arena,
         };
         for (int r = 0; r < map.Rows; r++)
         for (int q = 0; q < map.Columns; q++)
@@ -661,7 +666,7 @@ public sealed class MapEdit
                                         List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls,
                                         Dictionary<Vector2I, RockNote> Rocks,
-                                        RockClimate Climate,
+                                        RockClimate Climate, Arena Arena,
                                         int Columns, int Rows);
 
     private Snap Taken() => new((char[])_ground.Clone(), (char[])_under.Clone(),
@@ -671,13 +676,13 @@ public sealed class MapEdit
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
                                                     kv => kv.Value.Copy()),
-                                new Dictionary<Vector2I, RockNote>(_rocks), Climate,
+                                new Dictionary<Vector2I, RockNote>(_rocks), Climate, Arena,
                                 Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _under, _soil, SoilBase, _trees, Wood, _roads, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+        (_ground, _under, _soil, SoilBase, _trees, Wood, _roads, _ramps, _homes, _walls, _rocks, Climate, Arena, Columns, Rows) =
             (was.Ground, was.Under, was.Soil, was.SoilBase, was.Trees, was.Wood, was.Roads, was.Ramps, was.Homes, was.Walls,
-             was.Rocks, was.Climate, was.Columns, was.Rows);
+             was.Rocks, was.Climate, was.Arena, was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
 
@@ -723,7 +728,7 @@ public sealed class MapEdit
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
                                            && now.Say() == kv.Value.Say())
-                    && was.Climate == Climate && was.Rocks.Count == _rocks.Count
+                    && was.Climate == Climate && was.Arena.Say() == Arena.Say() && was.Rocks.Count == _rocks.Count
                     && was.Rocks.All(kv => _rocks.TryGetValue(kv.Key, out RockNote? now)
                                            && now == kv.Value);
         if (same)
@@ -1047,6 +1052,7 @@ public sealed class MapEdit
         _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
         _rocks = new Dictionary<Vector2I, RockNote>(_rocks),
         Climate = Climate,
+        Arena = Arena,
     };
 
     /// <summary>
@@ -1779,7 +1785,8 @@ public sealed class MapEdit
                               RockClimate climate = default, string[]? floors = null,
                               IReadOnlyDictionary<Foundation, char>? soilBase = null,
                               string[]? soilCells = null, IReadOnlyList<RoadPath>? roads = null,
-                              IReadOnlyDictionary<char, int>? wood = null, string[]? trees = null)
+                              IReadOnlyDictionary<char, int>? wood = null, string[]? trees = null,
+                              Arena? arena = null)
     {
         int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
         if (columns < 1 || ground.Any(row => row.Length != columns))
@@ -1798,6 +1805,7 @@ public sealed class MapEdit
             _ramps = new bool[columns * rows],
             _homes = homes.ToList(),
             Climate = climate,
+            Arena = arena ?? Arena.Empty,
         };
         for (int r = 0; r < rows; r++)
         for (int q = 0; q < columns; q++)
@@ -2001,6 +2009,8 @@ public sealed class MapEdit
             Ground = new Foundation[Columns * Rows],
             Cliffs = new bool[Columns * Rows],
             Homes = _homes.Select(h => h.Cell).ToList(),
+            Parked = _homes.ToList(),
+            Arena = Arena,
             Walling = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
         };
         var plot = new HashSet<Vector2I>();
@@ -2048,7 +2058,7 @@ public sealed class MapEdit
                                                        kv => kv.Value.Copy()),
                                    Rocking(), Climate, Floors(),
                                    SoilBase.Count > 0 ? SoilBase : null, SoilRows(), _roads,
-                                   Wood.Count > 0 ? Wood : null, TreeRows());
+                                   Wood.Count > 0 ? Wood : null, TreeRows(), Arena);
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

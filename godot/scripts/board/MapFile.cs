@@ -197,7 +197,65 @@ public static class MapFile
                                    Walling(file.Walls, name),
                                    Rocking(file.Rocks, name), Climate(file.Climate, name),
                                    file.Floor, SoilBase(file.Soil, name), file.Soil?.Cells,
-                                   Paths(file.Roads, name), Wood(file.Wood, name), file.Trees);
+                                   Paths(file.Roads, name), Wood(file.Wood, name), file.Trees,
+                                   Arenaed(file, name));
+    }
+
+    /// <summary>
+    /// The zones and the point (format 3, Д9 of docs/battle-core-plan.md):
+    /// <c>"zones": { "green": [[q, r], …], "brown": […] }</c> and
+    /// <c>"point": { "at": [q, r], "ring": true, "score": 6 }</c>. A side
+    /// nothing answers to, a cell that is not a pair, a point with no
+    /// <c>at</c> or no <c>score</c> are refused here; a cell off the board,
+    /// by <see cref="BoardMap.FromGround"/>; what the rules say of the rest,
+    /// by <see cref="MapRules.ArenaFaults"/>.
+    /// </summary>
+    private static Arena? Arenaed(Shape file, string name)
+    {
+        if (file.Zones is null && file.Point is null)
+            return null;
+        var zones = new Dictionary<string, List<Vector2I>>();
+        foreach ((string side, int[][]? cells) in file.Zones ?? new Dictionary<string, int[][]?>())
+        {
+            string key = side.ToLowerInvariant();
+            if (!Parking.Sides.Contains(key))
+                throw new InvalidOperationException(
+                    $"{name}: a zone is for side \"{side}\", and the sides are " + string.Join(", ", Parking.Sides));
+            var list = new List<Vector2I>();
+            foreach (int[] at in cells ?? Array.Empty<int[]>())
+            {
+                if (at is not { Length: 2 })
+                    throw new InvalidOperationException($"{name}: a cell of the {key} zone is a pair of numbers");
+                list.Add(new Vector2I(at[0], at[1]));
+            }
+            zones[key] = list;
+        }
+        ControlPoint? point = null;
+        if (file.Point is { } p)
+        {
+            if (p.At is not { Length: 2 } at)
+                throw new InvalidOperationException($"{name}: the control point needs an \"at\", a pair of numbers");
+            if (p.Score is not int score)
+                throw new InvalidOperationException(
+                    $"{name}: the control point needs a \"score\" - the points a side starts with, the map's to say (match.md)");
+            point = new ControlPoint(new Vector2I(at[0], at[1]), p.Ring ?? false, score);
+        }
+        return new Arena(zones.GetValueOrDefault(Parking.Green), zones.GetValueOrDefault(Parking.Brown), point);
+    }
+
+    /// <summary>The zones and the point under everything else, each only when
+    /// said: a zone a line, the point on one.</summary>
+    private static void Arenaed(StringBuilder text, Arena arena)
+    {
+        var zones = Parking.Sides.Where(s => arena.Zone(s).Count > 0).ToList();
+        if (zones.Count > 0)
+            text.Append(",\n\n  \"zones\": {\n" + string.Join(",\n", zones.Select(s =>
+                $"    {Quote(s)}: [" + string.Join(", ", arena.Zone(s).Select(c => $"[{c.X}, {c.Y}]")) + "]"))
+                + "\n  }");
+        if (arena.Point is { } p)
+            text.Append((zones.Count > 0 ? ",\n" : ",\n\n")
+                        + $"  \"point\": {{ \"at\": [{p.Cell.X}, {p.Cell.Y}], "
+                        + (p.Ring ? "\"ring\": true, " : "") + $"\"score\": {p.Score} }}");
     }
 
     /// <summary>
@@ -403,6 +461,8 @@ public static class MapFile
         yield return ("roads", file.Roads is not null, true);
         yield return ("wood", file.Wood is not null, true);
         yield return ("trees", file.Trees is not null, true);
+        yield return ("zones", file.Zones is not null, true);
+        yield return ("point", file.Point is not null, true);
     }
 
     /// <summary>
@@ -985,6 +1045,7 @@ public static class MapFile
              map.SoilCells is { } cells ? Rows(cells, map.Columns, map.Rows) : null);
         Paved(text, map.Roads);
         Wooded(text, map.WoodMix, map.TreeCells is { } trees ? Rows(trees, map.Columns, map.Rows) : null);
+        Arenaed(text, map.Arena);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -1221,6 +1282,7 @@ public static class MapFile
         Look(text, edit.Rocking(), edit.Climate, edit.SoilBase, edit.SoilRows());
         Paved(text, edit.Roads);
         Wooded(text, edit.Wood, edit.TreeRows());
+        Arenaed(text, edit.Arena);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -1248,7 +1310,7 @@ public static class MapFile
                            file.Height ?? true, file.Plinth ?? 0,
                            Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor,
                            SoilBase(file.Soil, name), file.Soil?.Cells, Paths(file.Roads, name),
-                           Wood(file.Wood, name), file.Trees);
+                           Wood(file.Wood, name), file.Trees, Arenaed(file, name));
     }
 
     // --- stamps ----------------------------------------------------------------
@@ -1414,6 +1476,18 @@ public static class MapFile
         [JsonPropertyName("roads")] public RoadShape[]? Roads { get; set; }
         [JsonPropertyName("wood")] public Dictionary<string, int>? Wood { get; set; }
         [JsonPropertyName("trees")] public string[]? Trees { get; set; }
+
+        // the match's (Д9 of docs/battle-core-plan.md): blocks of format 3
+        // like the look's, so a format-2 file saying one is not a 2
+        [JsonPropertyName("zones")] public Dictionary<string, int[][]?>? Zones { get; set; }
+        [JsonPropertyName("point")] public PointShape? Point { get; set; }
+    }
+
+    private sealed class PointShape
+    {
+        [JsonPropertyName("at")] public int[]? At { get; set; }
+        [JsonPropertyName("ring")] public bool? Ring { get; set; }
+        [JsonPropertyName("score")] public int? Score { get; set; }
     }
 
     private sealed class RockShape

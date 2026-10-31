@@ -95,11 +95,19 @@ public sealed partial class Tank3DBench
         /// <summary>The round of the last shot at a tank, nought for none -
         /// the stalemate's clock (Tank3DBench.Rules, Д6).</summary>
         public int LastStrike;
+        /// <summary>Each side's points left on the control point, green then
+        /// brown (Tank3DBench.Point, Д9); read only with a point.</summary>
+        public int[] Score = new int[2];
+        /// <summary>Who held the point at the last field tick; null for nobody.</summary>
+        public Side? Holder;
+        /// <summary>The round the point last changed hands in, nought for never.</summary>
+        public int LastShift;
         public Side? Won;
         public bool Drawn;
 
-        /// <summary>Whole rounds since the last shot at a tank (<see cref="BattleState.QuietRounds"/>).</summary>
-        public int QuietRounds => Mathf.Max(0, Round - 1 - LastStrike);
+        /// <summary>Whole rounds since the last shot at a tank or the point
+        /// changing hands (<see cref="BattleState.QuietRounds"/>).</summary>
+        public int QuietRounds => Mathf.Max(0, Round - 1 - Mathf.Max(LastStrike, LastShift));
     }
 
     private readonly MatchTurn _mt = new();
@@ -506,7 +514,8 @@ public sealed partial class Tank3DBench
             Log.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_mt.Won.Value)} win in round {_mt.Round}");
             return true;
         }
-        return false;
+        // out of points on the control point (Tank3DBench.Point)
+        return PointOver();
     }
 
     /// <summary>Every frame: the standing units' marks, the wrecked target
@@ -531,12 +540,16 @@ public sealed partial class Tank3DBench
         }
         RollTick();
         bool busy = MatchBusy;
+        // the control point's tick, owed from the hand-over (Tank3DBench.Point)
+        PointDueTick(busy);
         // the stalemate, once the hand-over's burning out is done (Tank3DBench.Rules)
         StalemateTick(busy);
         // the rules core takes the turn off the bench (Tank3DBench.Shadow)
         ShadowTick(busy);
         // the smoke on the board, drawn (Tank3DBench.Smoke)
         SmokeTick(dt);
+        // the control point on the board (Tank3DBench.Point)
+        PointDraw();
         // the winch's pull (Tank3DBench.Gear)
         PullTick(dt);
         // the watchers out of the fight out of ambush (Tank3DBench.Ambush)
@@ -988,6 +1001,10 @@ public sealed partial class Tank3DBench
         h.Add(_mt.Won);
         h.Add(_mt.Round);
         h.Add(_mt.LastStrike);
+        h.Add(_mt.LastShift);
+        h.Add(_mt.Score[0]);
+        h.Add(_mt.Score[1]);
+        h.Add(PointHolder());
         h.Add(_ambush.Count);
         h.Add(_ambush.TryGetValue(_unitId, out var watching) ? watching.Shots : 0);
         h.Add(_mt.Turn);
@@ -1030,10 +1047,12 @@ public sealed partial class Tank3DBench
     private string MatchHud(string status) =>
         status + "\n"
         + (MatchOver
-            ? (_mt.Drawn ? "Ничья" : $"Победа: {SideName(_mt.Won!.Value)}") + $" · раунд {_mt.Round}"
+            ? (_mt.Drawn ? "Ничья" : $"Победа: {SideName(_mt.Won!.Value)}") + $" · раунд {_mt.Round}" + PointHud()
             : $"Раунд {_mt.Round}"
               // the stalemate's count, once there is one (Tank3DBench.Rules)
               + (_mt.QuietRounds > 0 ? $" (без выстрела по танку {_mt.QuietRounds} из {MatchRules.QuietRoundsDraw})" : "")
+              // the control point and the points (Tank3DBench.Point)
+              + PointHud()
               + $" · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
               + $"атака {(_mt.Fired ? "сделана" : "есть")}, доп. действие {(_mt.Bonus ? "сделано" : "есть")}"
               // its upgrades (Д8): the passive ones show nowhere else
