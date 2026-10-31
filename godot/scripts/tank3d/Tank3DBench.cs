@@ -1482,6 +1482,9 @@ public sealed partial class Tank3DBench : Node3D
                 string[] parts = args[++i].Split('@');
                 _script.Add((parts.Length > 1 ? (int)F(parts[1], 0) : 0, parts[0]));
             }
+            // --first green|brown: player 1 said, no toss (Tank3DBench.Match)
+            else if (a == "--first" && more)
+                _firstSaid = args[++i].ToLowerInvariant() == Parking.Brown ? Side.Brown : Side.Green;
             // --commands "go:3,5;fire:5,3;pass": a match by commands alone, each
             // given when the last is done (Tank3DBench.Commands, CommandsTick)
             else if (a == "--commands" && more)

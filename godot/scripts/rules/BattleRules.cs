@@ -837,7 +837,8 @@ public static class Battle
         s.Turn = ending == Camp.Green ? Camp.Brown : Camp.Green;
         s.Active = null;
         s.Drove = s.Fired = s.Bonus = false;
-        if (s.Turn == Camp.Green)
+        // the round over once player 2 has moved (match.md, «Ход и раунд»)
+        if (s.Turn == s.First)
         {
             FieldTick(s);
             s.Round++;

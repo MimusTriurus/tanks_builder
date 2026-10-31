@@ -77,7 +77,7 @@ public sealed partial class Tank3DBench
         var s = new BattleState
         {
             Board = BattleBoard.Of(_field!),
-            Turn = CampOf(_mt.Turn), Round = _mt.Round, TurnNo = _mt.TurnNo,
+            Turn = CampOf(_mt.Turn), First = CampOf(_mt.First), Round = _mt.Round, TurnNo = _mt.TurnNo,
             Drove = _mt.Drove, Fired = _mt.Fired, Bonus = _mt.Bonus, LastStrike = _mt.LastStrike,
             // the control point (Tank3DBench.Point)
             Point = _pointCells, Score = (int[])_mt.Score.Clone(), LastShift = _mt.LastShift,

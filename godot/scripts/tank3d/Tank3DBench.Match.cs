@@ -85,6 +85,8 @@ public sealed partial class Tank3DBench
     private sealed class MatchTurn
     {
         public Side Turn = Side.Green;
+        /// <summary>Player 1, who moves first in every round (<see cref="BattleState.First"/>).</summary>
+        public Side First = Side.Green;
         public int Round = 1;
         /// <summary>Turns played, the first nought: a fire's clock (Tank3DBench.Blast).</summary>
         public int TurnNo;
@@ -137,9 +139,28 @@ public sealed partial class Tank3DBench
         _otherWanted = false;
         _modelTag = Roster[0];
         _modelNamed = true;
-        _side = Side.Green;
-        Log.Print($"tank3d: match on {_mapName}, {Roster.Length} a side; stalemate - {MatchRules.Said}");
+        // Player 1 (match.md, «Расстановка и первый ход»): a toss in hot-seat.
+        // A run by script - commands, a capture, a recipe, a measure - is not
+        // hot-seat and keeps green first, so it plays the same each time;
+        // --first says either side for one.
+        bool scripted = _commands.Count > 0 || _capturePath is not null || _sequenceDir is not null
+                        || _script.Count > 0 || _perfDir is not null;
+        _tossed = _firstSaid is null && !scripted;
+        // the OS's seed: the engine's GD.Randi came up brown four runs of four
+        _mt.First = _firstSaid ?? (_tossed && Random.Shared.Next(2) == 1 ? Side.Brown : Side.Green);
+        _side = _mt.Turn = _mt.First;
+        Log.Print($"tank3d: match on {_mapName}, {Roster.Length} a side; stalemate - {MatchRules.Said}; "
+                 + $"{SideName(_mt.First)} move first - {(_firstSaid is not null ? "--first" : _tossed ? "the toss" : "a script keeps green")}");
     }
+
+    /// <summary><c>--first</c>: player 1 said; null tosses.</summary>
+    private Side? _firstSaid;
+
+    /// <summary>Player 1 came by the toss: the first banner says so.</summary>
+    private bool _tossed;
+
+    /// <summary>The first banner's word on the toss.</summary>
+    private string TossSaid => _tossed ? $"Жребий: первыми ходят {SideName(_mt.First)} · " : "";
 
     // --- the sides -------------------------------------------------------------
 
@@ -205,7 +226,9 @@ public sealed partial class Tank3DBench
             Log.Print($"tank3d: match: one side has no homes - {green} green, {brown} brown");
         if (_lineup.Count == 0)
             return;
-        _rigUnit = Math.Max(0, _lineup.FindIndex(u => u.Side == Parking.Green));
+        // player 1's first unit rides the rig
+        string first = _mt.First == Side.Brown ? Parking.Brown : Parking.Green;
+        _rigUnit = Math.Max(0, _lineup.FindIndex(u => u.Side == first));
         _unitId = _rigUnit;
         Lineup.Unit rig = _lineup[_rigUnit];
         _modelTag = rig.Model;
@@ -236,7 +259,7 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
-        Banner($"Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+        Banner($"{TossSaid}Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
         // the placement before the first turn, on a map with a zone (Tank3DBench.Deploy)
         DeployStart();
     }
@@ -450,7 +473,8 @@ public sealed partial class Tank3DBench
         for (int tries = 0; tries < 2; tries++)
         {
             _mt.Turn = Across(_mt.Turn);
-            if (_mt.Turn == Side.Green)
+            // the round over once player 2 has moved (match.md, «Ход и раунд»)
+            if (_mt.Turn == _mt.First)
             {
                 FieldTick();
                 _mt.Round++;

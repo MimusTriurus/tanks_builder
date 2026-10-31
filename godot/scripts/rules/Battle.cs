@@ -75,6 +75,10 @@ public sealed class BattleState
     public BattleBoard Board = null!;
     public List<BattleUnit> Units = new();
     public Camp Turn = Camp.Green;
+    /// <summary>Player 1 (match.md, «Расстановка и первый ход»): the side
+    /// that moves first in every round - a toss in hot-seat. The round and the
+    /// field's tick end after the other side's turn.</summary>
+    public Camp First = Camp.Green;
     public int Round = 1;
     /// <summary>Turns played, the first nought: a fire's clock.</summary>
     public int TurnNo;

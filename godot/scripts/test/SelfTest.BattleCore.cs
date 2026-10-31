@@ -738,6 +738,22 @@ public static partial class SelfTest
                   $"round 1 {round1}, round 2 {round2}; {Said(s)}; both: {Said(both)}");
         }
 
+        // Д9, match.md «Расстановка и первый ход»: brown won the toss - brown move
+        // first, the round and the field's tick end after green's turn.
+        {
+            BattleState s = Probe(9, 10);
+            s.First = s.Turn = Camp.Brown;
+            Put(s, 0, "LTR", Camp.Green, 4, 8, 90);
+            Put(s, 1, "LTR", Camp.Brown, 4, 1, 270);
+            Battle.EndTurn(s);
+            (Camp Turn, int Round, bool Ticked) half = (s.Turn, s.Round, s.Events.Any(e => e.Kind == BattleEventKind.FieldTick));
+            Battle.EndTurn(s);
+            check("brown first: the round and the field's tick come after green's turn, and brown open the next",
+                  half == (Camp.Green, 1, false) && s.Turn == Camp.Brown && s.Round == 2
+                  && s.Events.Count(e => e.Kind == BattleEventKind.FieldTick) == 1,
+                  $"after brown {half}; after green {s.Turn} round {s.Round}: {Said(s)}");
+        }
+
         // Д9: a map's zones and point are read, written back the same, refused
         // where they cannot mean anything, and judged by the rules - a home
         // outside its side's zone, a cell in both zones.

@@ -9,12 +9,12 @@ namespace TankSpriteTest;
 /// ход»; docs/battle-core-plan.md, Д9). A side's tanks start on its homes - the
 /// row the map drew in its zone - and before the first turn the side may set
 /// each anywhere in its zone and turn it to any of the six sides, for nothing,
-/// then press «В бой». Green first, then brown.
+/// then press «В бой». Player 1 first (the toss, Tank3DBench.Match), then the other.
 /// <list type="bullet">
 /// <item><b>Blind.</b> While a side places, the other side's tanks are not on
 /// the board, and between the two a curtain covers the screen - in hot-seat
-/// the screen is handed over hidden. Both are shown when brown press «В бой»,
-/// and green take the first turn.</item>
+/// the screen is handed over hidden. Both are shown when player 2 press «В бой»,
+/// and player 1 takes the first turn.</item>
 /// <item><b>Only on a map with a zone.</b> A map that marks none starts on its
 /// homes, as every match did; a side with no zone of its own places among its
 /// homes' cells.</item>
@@ -49,7 +49,8 @@ public sealed partial class Tank3DBench
             || (_arena.Zone(Parking.Green).Count == 0 && _arena.Zone(Parking.Brown).Count == 0))
             return;
         Log.Print("tank3d: match: placement - green zone " + Zoned(Side.Green) + ", brown zone " + Zoned(Side.Brown));
-        DeploySide(Side.Green);
+        // player 1 first (Tank3DBench.Match, the toss)
+        DeploySide(_mt.First);
     }
 
     private string Zoned(Side side) =>
@@ -77,7 +78,9 @@ public sealed partial class Tank3DBench
         _deployCells.AddRange(DeployZone(side));
         if (_passButton is not null)
             _passButton.Text = "В бой   Ctrl+Enter";
-        CurtainUp($"Расстановка: {SideName(side)}\n{(side == Side.Green ? "Коричневые" : "Зелёные")} не смотрят\n\nщелчок или Enter — начать");
+        // the toss said on the first curtain (Tank3DBench.Match)
+        CurtainUp((side == _mt.First && _tossed ? $"Жребий: первыми ходят {SideName(side)}\n\n" : "")
+                  + $"Расстановка: {SideName(side)}\n{(side == Side.Green ? "Коричневые" : "Зелёные")} не смотрят\n\nщелчок или Enter — начать");
         Log.Print($"tank3d: match: {SideName(side)} place their tanks");
     }
 
@@ -158,9 +161,9 @@ public sealed partial class Tank3DBench
             return;
         Log.Print($"tank3d: match: {SideName(side)} are placed - "
                  + string.Join(", ", Units().Where(u => u.Side == side).Select(u => $"{u.Tag}#{u.Id} {MapAt(UnitCell(u.Id))}")));
-        if (side == Side.Green)
+        if (side == _mt.First)
         {
-            DeploySide(Side.Brown);
+            DeploySide(Across(side));
             return;
         }
         _deploy = null;
@@ -169,13 +172,13 @@ public sealed partial class Tank3DBench
         _deployCells.Clear();
         if (_deployMark is not null)
             CellMarks(_deployMark, _deployCells, default, default);
-        _mt.Turn = Side.Green;
-        if (_side != Side.Green && FirstReady(Side.Green) is { } green)
-            TakeOver(green);
+        _mt.Turn = _mt.First;
+        if (_side != _mt.First && FirstReady(_mt.First) is { } first)
+            TakeOver(first);
         if (_passButton is not null)
             _passButton.Text = "Конец хода   Ctrl+Enter";
         Banner($"В бой · раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
-        Log.Print("tank3d: match: both sides placed - in battle, green to move");
+        Log.Print($"tank3d: match: both sides placed - in battle, {SideName(_mt.First)} to move");
     }
 
     /// <summary>Where unit <paramref name="id"/> stands now.</summary>
