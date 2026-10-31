@@ -378,6 +378,8 @@ public sealed partial class Tank3DBench
         if (!Match || _mt.Drove)
             return;
         _mt.Drove = true;
+        // an enemy's ambush that sees it now fires as it sets out (Tank3DBench.Rules)
+        _settingOut = true;
         // the unit as it set out, for the move taken back (Tank3DBench.Undo)
         UndoSnap();
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} moves");

@@ -83,6 +83,19 @@ public static partial class Battle
             return "only LT moves after acting";
         s.Drove = true;
         Lift(s, u, "moved");
+        // a hull an enemy's axis already sees, setting out - off its hex or
+        // turning on it - is seen going: the ambush fires at it where it
+        // stands, and one that knocks it out ends the move before it begins
+        // (the author, 2026-10-31)
+        bool goes = face >= 0 && face != u.Heading;
+        foreach (Vector2I next in path)
+            goes |= next != u.Cell;
+        if (goes)
+        {
+            Ambushes(s, u);
+            if (u.Fate != UnitFate.Alive)
+                return null;
+        }
         foreach (Vector2I next in path)
         {
             if (next == u.Cell)

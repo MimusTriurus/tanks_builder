@@ -28,6 +28,8 @@ public sealed partial class Tank3DBench
     /// <summary>Whose hexes those are: a hand-over moves the rig to another
     /// unit's hex, and that is not a unit coming on to it.</summary>
     private int _hexUnit = -1, _otherHexUnit = -1;
+    /// <summary>The own unit was given its move this frame (<c>MatchMoved</c>).</summary>
+    private bool _settingOut;
 
     /// <summary>Every frame of a match: the own tank's and the target's hex,
     /// and what the new one does when it changes.</summary>
@@ -36,6 +38,16 @@ public sealed partial class Tank3DBench
         if (!Match || _field is null)
             return;
         Vector2I here = CellHere;
+        // the move given (MatchMoved), on the frame after, still on its hex:
+        // a hull an enemy's axis already sees is seen setting out - off the
+        // hex or turning on it - as the core's Move has it (the author,
+        // 2026-10-31); one knocked out stops before it is under way
+        if (_settingOut)
+        {
+            _settingOut = false;
+            if (_fate == Fate.Alive)
+                AmbushWatch(_unitId, here, here, rig: true);
+        }
         if (_hexUnit != _unitId)
         {
             _hexUnit = _unitId;
