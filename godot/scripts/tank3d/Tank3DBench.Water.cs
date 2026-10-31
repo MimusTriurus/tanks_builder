@@ -251,8 +251,8 @@ public sealed partial class Tank3DBench
         Rings(way, halfLen, might);
         Log.Print($"tank3d: {_modelTag} into the pond at {MapAt(cell)}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
                  + $"deck {_deckPx:F1} px, draught {_deckPx * _profile.Draught:F1} px, might {might:F2}"
-                 + (_amphibious ? "" : " - no wading gear, the engine is drowned"));
-        if (!_amphibious)
+                 + (RigSnorkel ? "" : " - no wading gear, the engine is drowned"));
+        if (!RigSnorkel)
             Drown();
     }
 

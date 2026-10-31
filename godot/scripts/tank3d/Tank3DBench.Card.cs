@@ -76,7 +76,7 @@ public sealed partial class Tank3DBench
             _cardModel = _modelTag;
             (_cardTitle, _cardName) = PanelNames(_profile, _modelTag);
         }
-        Badge badge = _fate == Fate.Knocked || Match ? BadgeOf(_side, _modelTag, _fate, CellHere) : Badge.None;
+        Badge badge = _fate == Fate.Knocked || Match ? BadgeOf(_unitId, _fate, CellHere) : Badge.None;
         UnitPanel(c, ThemeDB.FallbackFont, new Rect2(Vector2.Zero, c.Size), _profile, _cardTitle, _cardName,
                   _side, badge, turn: true);
     }

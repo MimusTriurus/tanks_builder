@@ -40,6 +40,7 @@ public sealed partial class Tank3DBench
 
     private struct RosterSlot
     {
+        public int Id;
         public string Tag;
         public Fate Fate;
         public Vector2I Cell;
@@ -102,13 +103,13 @@ public sealed partial class Tank3DBench
         if (_roster is null)
             return;
         _rosterCount = 0;
-        if (_side == _turn)
-            RosterAdd(_modelTag, _fate, CellHere, riding: true, null);
+        if (_side == _mt.Turn)
+            RosterAdd(_unitId, _modelTag, _fate, CellHere, riding: true, null);
         foreach (Parked p in _parked)
-            if (p.Side == _turn)
-                RosterAdd(p.Tag, p.Fate, p.Cell, riding: false, p);
-        if (_other is { Unit: true } o && o.Side == _turn)
-            RosterAdd(o.Tag, o.Fate, o.Cell, riding: false, null);
+            if (p.Side == _mt.Turn)
+                RosterAdd(p.Id, p.Tag, p.Fate, p.Cell, riding: false, p);
+        if (_other is { Unit: true } o && o.Side == _mt.Turn)
+            RosterAdd(o.Id, o.Tag, o.Fate, o.Cell, riding: false, null);
         // in the roster's order: a handful, sorted in place
         for (int i = 1; i < _rosterCount; i++)
             for (int j = i; j > 0 && _rosterSlots[j - 1].Order > _rosterSlots[j].Order; j--)
@@ -133,14 +134,15 @@ public sealed partial class Tank3DBench
         _roster.QueueRedraw();
     }
 
-    private void RosterAdd(string tag, Fate fate, Vector2I cell, bool riding, Parked? parked)
+    private void RosterAdd(int id, string tag, Fate fate, Vector2I cell, bool riding, Parked? parked)
     {
         if (_rosterCount >= _rosterSlots.Length)
             return;
         _rosterSlots[_rosterCount++] = new RosterSlot
         {
-            Tag = tag, Fate = fate, Cell = cell, Riding = riding, Parked = parked,
-            Order = Array.IndexOf(Roster, tag),
+            Id = id, Tag = tag, Fate = fate, Cell = cell, Riding = riding, Parked = parked,
+            // the class's place, then the unit's: two of a class keep their order
+            Order = Array.IndexOf(Roster, tag) * 64 + id,
         };
     }
 
@@ -190,7 +192,7 @@ public sealed partial class Tank3DBench
         }
         // the own one taken for a target: back to standing, then over
         DropTarget();
-        if (_parked.Count > 0 && _parked[^1].Tag == s.Tag && MatchTakes(_parked[^1]))
+        if (_parked.Count > 0 && _parked[^1].Id == s.Id && MatchTakes(_parked[^1]))
             TakeOver(_parked[^1]);
     }
 
@@ -199,7 +201,7 @@ public sealed partial class Tank3DBench
         if (_roster is not { } c || _rosterBox is null || _field is null)
             return;
         Font font = ThemeDB.FallbackFont;
-        Color ink = SideInk(_turn);
+        Color ink = SideInk(_mt.Turn);
         _rosterChosen!.BorderColor = ink;
         for (int i = 0; i < _rosterCount; i++)
         {
@@ -214,7 +216,7 @@ public sealed partial class Tank3DBench
                 c.DrawRect(box.Grow(-3.0f), new Color(1.0f, 1.0f, 1.0f, 0.06f));
             MovementProfile cls = RosterClass(s);
             // the model's own picture (Tank3DBench.RosterArt); the silhouette until it is in
-            if (_rosterArt.TryGetValue((s.Tag, s.Riding ? _side : _turn), out Texture2D? art))
+            if (_rosterArt.TryGetValue((s.Tag, s.Riding ? _side : _mt.Turn), out Texture2D? art))
             {
                 // fitted into the space over the label, its own proportions kept
                 var room = new Rect2(box.Position + new Vector2(7.0f, 7.0f), RosterIcon - 14.0f, RosterIcon - 30.0f);
@@ -237,7 +239,7 @@ public sealed partial class Tank3DBench
                 c.DrawLine(new Vector2(m.End.X, m.Position.Y), new Vector2(m.Position.X, m.End.Y), RosterCross, 3.0f, true);
                 continue;
             }
-            Badge badge = s.Riding ? BadgeOf(_side, _modelTag, _fate, CellHere) : BadgeOf(_turn, s.Tag, s.Fate, s.Cell);
+            Badge badge = s.Riding ? BadgeOf(_unitId, _fate, CellHere) : BadgeOf(s.Id, s.Fate, s.Cell);
             if (badge != Badge.None)
                 Sign(c, badge, box.Position + new Vector2(RosterIcon - 12.0f, 12.0f), 8.0f, a: a);
         }
@@ -263,12 +265,12 @@ public sealed partial class Tank3DBench
                 (_cardTitle, _cardName) = PanelNames(_profile, _modelTag);
             }
             UnitPanel(c, font, card, _profile, _cardTitle, _cardName, _side,
-                      BadgeOf(_side, _modelTag, _fate, CellHere), turn: true);
+                      BadgeOf(_unitId, _fate, CellHere), turn: true);
         }
         else
         {
             var (title, name) = RosterNames(ucls, u.Tag);
-            UnitPanel(c, font, card, ucls, title, name, _turn, BadgeOf(_turn, u.Tag, u.Fate, u.Cell), turn: false);
+            UnitPanel(c, font, card, ucls, title, name, _mt.Turn, BadgeOf(u.Id, u.Fate, u.Cell), turn: false);
         }
     }
 

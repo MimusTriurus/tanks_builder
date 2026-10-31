@@ -92,6 +92,8 @@ public sealed partial class Tank3DBench
         /// <summary>A match's unit lifted into the target (Tank3DBench.Match):
         /// its side and its fate, and that it goes back to standing.</summary>
         public bool Unit;
+        /// <summary>Which unit of the match (<c>Parked.Id</c>); -1 for the bench's own target.</summary>
+        public int Id = -1;
         public Side Side;
         public Fate Fate = Fate.Alive;
 
@@ -843,7 +845,7 @@ public sealed partial class Tank3DBench
         // (Tank3DBench.Afloat)
         bool floats = false;
         if (o.Fate == Fate.Alive && _field is not null
-            && AfloatY(_field.CellUnder(Board(o.Rig.Position)), o.Model, o.Profile) is float afloat)
+            && AfloatY(_field.CellUnder(Board(o.Rig.Position)), o.Model, o.Profile, Snorkel(o.Id)) is float afloat)
         {
             ground = afloat;
             up = Vector3.Up;

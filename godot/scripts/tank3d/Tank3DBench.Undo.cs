@@ -44,7 +44,7 @@ public sealed partial class Tank3DBench
         _moveSnap = new MoveSnap
         {
             Cell = CellHere, Heading = _heading, Yaw = _model.Yaw, Elevation = _model.Elevation,
-            MudCoat = _mudCoat, MudDry = _mudDry, Fired = _fired, Bonus = _bonus,
+            MudCoat = _mudCoat, MudDry = _mudDry, Fired = _mt.Fired, Bonus = _mt.Bonus,
             Razed = _razed.Count, MinesSpent = MinesSpent(),
         };
     }
@@ -64,7 +64,7 @@ public sealed partial class Tank3DBench
     {
         if (!Match || MatchOver)
             return "партия окончена";
-        if (_side != _turn || _moveSnap is not { } s || !_drove)
+        if (_side != _mt.Turn || _moveSnap is not { } s || !_mt.Drove)
             return "отменять нечего — хода ещё не было";
         if (_fate != Fate.Alive)
             return "юнит подбит — ход не отменить";
@@ -72,7 +72,7 @@ public sealed partial class Tank3DBench
             return "ход передаётся";
         if (MatchBusy)
             return "дождись конца приказа";
-        if (_fired != s.Fired || _bonus != s.Bonus)
+        if (_mt.Fired != s.Fired || _mt.Bonus != s.Bonus)
             return "после хода было действие — ход не отменить";
         if (_razed.Count != s.Razed)
             return "лес снесён — ход не отменить";
@@ -103,7 +103,7 @@ public sealed partial class Tank3DBench
         Park();
         // the trail stops here: no rut drawn from where it stood to where it was
         _ruts?.Lift();
-        _drove = false;
+        _mt.Drove = false;
         _moveSnap = null;
         _matchNote = "ход отменён";
         Choose(true);

@@ -184,7 +184,7 @@ public sealed partial class Tank3DBench
             // a set of its own: the search keeps it
             _reachBarred = new HashSet<Vector2I>(_barredNow);
             _reachVersion++;
-            Steps.Mover mover = Steps.Mover.Of(_profile, _amphibious, _reachBarred);
+            Steps.Mover mover = Steps.Mover.Of(_profile, RigSnorkel, _reachBarred);
             // the zone gives no mine away (Steps.Mover.MinesUnseen); the hull finds it
             mover.MinesUnseen = true;
             _reach = Steps.Plan(_field!, new Steps.Pose(here, side), mover);
@@ -690,7 +690,7 @@ public sealed partial class Tank3DBench
             // a mine is no stop sign (2026-10-29, the author's note): it is
             // driven on to and goes off - the ghost on it shows that
             // (Tank3DBench.Ghost, GhostMined), the mine is seen on the board
-            if (Steps.Stops(_field!, cell) || (_field!.IsDeep(cell) && !_amphibious))
+            if (Steps.Stops(_field!, cell) || (_field!.IsDeep(cell) && !RigSnorkel))
             {
                 Vector2 at = Screen(cell) + new Vector2(hex * 0.42f, -hex * 0.30f);
                 ink.DrawCircle(at, r * 0.8f, StopInk);

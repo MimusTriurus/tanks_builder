@@ -264,8 +264,8 @@ public sealed partial class Tank3DBench
     /// unit stands. Never 0, which is «nothing in reach».</summary>
     private int ReachStamp()
     {
-        int h = HashCode.Combine(ReachFrom, MayMoveFirst, _reachVersion, _turn, _side, _fired, _passIn is null, MatchOver);
-        h = HashCode.Combine(h, _bonus);
+        int h = HashCode.Combine(ReachFrom, MayMoveFirst, _reachVersion, _mt.Turn, _side, _mt.Fired, _passIn is null, MatchOver);
+        h = HashCode.Combine(h, _mt.Bonus);
         h = HashCode.Combine(h, _parked.Count);
         for (int i = 0; i < _parked.Count; i++)
             h = HashCode.Combine(h, _parked[i].Cell, _parked[i].Fate);

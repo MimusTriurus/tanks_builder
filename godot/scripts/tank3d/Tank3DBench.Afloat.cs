@@ -74,7 +74,7 @@ public sealed partial class Tank3DBench
         for (int i = 0; i < _parked.Count; i++)
         {
             Parked p = _parked[i];
-            if (p.Fate != Fate.Alive || AfloatY(p.Cell, p.Model, ClassFor(p.Tag)) is not float rest)
+            if (p.Fate != Fate.Alive || AfloatY(p.Cell, p.Model, ClassFor(p.Tag), Snorkel(p.Id)) is not float rest)
                 continue;
             Vector3 at = p.Rig.Position;
             p.Rig.Position = new Vector3(at.X, Bobbed(p.Model, rest, dt), at.Z);
@@ -84,8 +84,8 @@ public sealed partial class Tank3DBench
     /// <summary>Where a hull of <paramref name="model"/> floats on
     /// <paramref name="cell"/>, world Y - or null when it does not: dry land, a
     /// ramp's face, no wading gear.</summary>
-    private float? AfloatY(Vector2I cell, TankModel model, MovementProfile profile) =>
-        _amphibious ? SwimY(cell, model, profile) : null;
+    private float? AfloatY(Vector2I cell, TankModel model, MovementProfile profile, bool snorkel) =>
+        snorkel ? SwimY(cell, model, profile) : null;
 
     /// <summary>Where a hull of <paramref name="model"/> would float on
     /// <paramref name="cell"/> with the gear, world Y, the gear asked or not -

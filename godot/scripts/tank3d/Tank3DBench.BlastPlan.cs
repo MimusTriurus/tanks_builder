@@ -160,7 +160,7 @@ public sealed partial class Tank3DBench
                 {
                     // as Ignite has it: no fire in water, none twice
                     BlastHit hit = _field!.IsWater(n) ? BlastHit.Wet
-                        : Burning(u.Side, u.Tag) ? BlastHit.Alight : BlastHit.Fire;
+                        : Burning(u.Id) ? BlastHit.Alight : BlastHit.Fire;
                     _blastMarks.Add(new BlastMark(n, wave, hit, u.Side, u.Tag, u.Model));
                 }
             }

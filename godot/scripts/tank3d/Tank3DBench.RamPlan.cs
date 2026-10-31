@@ -110,7 +110,7 @@ public sealed partial class Tank3DBench
         ShowRam(plan);
         _judgedNote = plan.Allowed
             ? $"таран {MapAt(plan.Target)} → {MapAt(plan.Push.Legs[^1])}"
-              + (RamIntoDeep(plan) ? RamFloats ? " — поплывёт (ОПВТ)" : _amphibious ? " — утонет (подбит)" : " — утонет (нет ОПВТ)" : "")
+              + (RamIntoDeep(plan) ? RamFloats ? " — поплывёт (ОПВТ)" : Snorkel(_other?.Id ?? -1) ? " — утонет (подбит)" : " — утонет (нет ОПВТ)" : "")
               + (_ramWaiting is not null ? "" : plan.From != CellHere ? $" с {MapAt(plan.From)}: {plan.Steps} из {_reach?.Budget}" : plan.Steps > 0 ? $": разворот {plan.Steps}" : "")
               + (_ramWaiting is null ? "; ПКМ — таранить" : "")
             : $"таран нельзя: {plan.Why}";
@@ -127,7 +127,7 @@ public sealed partial class Tank3DBench
         bool beside = SideTo(CellHere, target) is not null;
         if (!beside && !_ramMode)
             return null;
-        string key = $"{_reachVersion}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}|{_amphibious}";
+        string key = $"{_reachVersion}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_mt.Drove}|{_modelTag}|{_ramMode}|{RigSnorkel}|{_other?.Id}";
         if (key != _ramKey)
         {
             _ramKey = key;
@@ -250,7 +250,7 @@ public sealed partial class Tank3DBench
             MatchMoved();
             _turnGoal = HeadingFor(CellHere, plan.Side);
         }
-        _ramBefore = (_bonus, _drove);
+        _ramBefore = (_mt.Bonus, _mt.Drove);
         _ramWaiting = plan;
         _ramPlan = null;
         _ramLock = false;
@@ -258,9 +258,9 @@ public sealed partial class Tank3DBench
         // the bonus act of the turn, the shot stays (U-22). The rammer takes
         // the target's hex, so the move goes with it - but for LT's ram from
         // where it stands: it may ram first and move after (classes.md, LT)
-        _bonus = true;
+        _mt.Bonus = true;
         if (!(_profile.FreeOrder && plan.From == CellHere && plan.Steps == 0))
-            _drove = true;
+            _mt.Drove = true;
         _orderNote = $"таран {MapAt(cell)}";
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {MapAt(cell)} from {MapAt(plan.From)} along {plan.Side}");
         return true;
@@ -288,7 +288,7 @@ public sealed partial class Tank3DBench
     {
         // called off before the hull went in: the action was not taken
         if (_ramWaiting is not null)
-            (_bonus, _drove) = _ramBefore;
+            (_mt.Bonus, _mt.Drove) = _ramBefore;
         _ramWaiting = null;
         _ramPlan = null;
         HideRamGhosts();
@@ -394,7 +394,7 @@ public sealed partial class Tank3DBench
     /// the target alive - a knocked-out hull in deep water is drowned, gear
     /// or none (GDD states.md «Утоплен»), and the shove did that already
     /// (<c>OtherTick</c>); the forecast said «поплывёт» over it (2026-10-29).</summary>
-    private bool RamFloats => _amphibious && _other is { Fate: Fate.Alive };
+    private bool RamFloats => _other is { Fate: Fate.Alive } o && Snorkel(o.Id);
 
     /// <summary>The water the drowned ghost dims into - light enough to read
     /// on the dark pond.</summary>

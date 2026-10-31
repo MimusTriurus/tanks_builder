@@ -42,6 +42,9 @@ public sealed partial class Tank3DBench
         public required string Tag;
         public required Vector2I Cell;
         public float Heading;
+        /// <summary>Which unit of the match it is - its place in <c>_lineup</c>,
+        /// for the whole match whatever model it wears; -1 off a match.</summary>
+        public int Id = -1;
         /// <summary>Its side and its fate in a match (Tank3DBench.Match).</summary>
         public Side Side;
         public Fate Fate = Fate.Alive;
@@ -111,7 +114,7 @@ public sealed partial class Tank3DBench
     /// <paramref name="heading"/>, upright on its cell's ground - in a match,
     /// of <paramref name="side"/> and in its paint.</summary>
     private void Stand(string tag, Vector2I cell, float heading, Side side = Side.Green,
-                       float yaw = 0.0f, float elevation = 0.0f)
+                       float yaw = 0.0f, float elevation = 0.0f, int id = -1)
     {
         TankModel model;
         try
@@ -123,13 +126,13 @@ public sealed partial class Tank3DBench
             Log.Print($"tank3d: parked {tag} on {MapAt(cell)}: {e.Message}");
             return;
         }
-        Stand(model, tag, cell, heading, side, yaw, elevation);
+        Stand(model, tag, cell, heading, side, yaw, elevation, id);
     }
 
     /// <summary>A model already loaded, standing: the rig's, handed back by a
     /// hand-over (<see cref="TakeOver"/>).</summary>
     private void Stand(TankModel model, string tag, Vector2I cell, float heading, Side side,
-                       float yaw, float elevation)
+                       float yaw, float elevation, int id)
     {
         model.ScaleTo(PixelsFor(model, ClassFor(tag)));
         SidePaint(model, side);
@@ -141,7 +144,7 @@ public sealed partial class Tank3DBench
         model.Apply();
         rig.Position = CellMiddle(cell);
         // in the pond, afloat (Tank3DBench.Afloat)
-        if (AfloatY(cell, model, ClassFor(tag)) is float afloat)
+        if (AfloatY(cell, model, ClassFor(tag), Snorkel(id)) is float afloat)
             rig.Position = new Vector3(rig.Position.X, afloat, rig.Position.Z);
         // a new rig: none of the bob it rode before is on it
         FloatOf(model).Applied = 0.0f;
@@ -153,7 +156,7 @@ public sealed partial class Tank3DBench
         _parked.Add(new Parked
         {
             Model = model, Rig = rig, Tag = tag.ToUpperInvariant(), Cell = cell, Heading = heading, Side = side,
-            Yaw = yaw, Elevation = elevation,
+            Yaw = yaw, Elevation = elevation, Id = id,
         });
     }
 
@@ -199,12 +202,14 @@ public sealed partial class Tank3DBench
         Vector2I wasCell = CellHere;
         float wasHeading = _heading;
         Side wasSide = _side;
+        int wasId = _unitId;
         // and its fate: a unit knocked out on the rig stands knocked out
         Fate wasFate = _fate;
         // the turret and the gun stay where the last shot left them, both ways
         float wasYaw = _model.Yaw, wasElevation = _model.Elevation;
         _parked.Remove(next);
         _side = next.Side;
+        _unitId = next.Id;
         // The models change hands: the standing one goes on to the rig and the
         // rig's on to a parking, both wiped as loaded - the rig's state does
         // not travel, as it did not when each was loaded again. Loading them
@@ -234,7 +239,8 @@ public sealed partial class Tank3DBench
             {
                 Log.Print($"tank3d: {next.Tag}: {e.Message}");
                 _side = wasSide;
-                Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation);
+                _unitId = wasId;
+                Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation, next.Id);
                 return;
             }
         // the ram is the unit's own to switch on (Tank3DBench.RamPlan)
@@ -248,9 +254,9 @@ public sealed partial class Tank3DBench
             Park();
         using (Prof.Measure("takeover.stand"))
             if (kept is not null)
-                Stand(kept, was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
+                Stand(kept, was, wasCell, wasHeading, wasSide, wasYaw, wasElevation, wasId);
             else
-                Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
+                Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation, wasId);
         if (wasFate != Fate.Alive && _parked.Count > 0 && _parked[^1].Cell == wasCell)
             StandKnocked(_parked[^1], wasFate);
         using (Prof.Measure("takeover.choose"))

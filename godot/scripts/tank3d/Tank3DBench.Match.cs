@@ -74,16 +74,31 @@ public sealed partial class Tank3DBench
 
     /// <summary>The side of the unit on the rig.</summary>
     private Side _side = Side.Green;
-    private Side _turn = Side.Green;
-    private int _round = 1;
-    /// <summary>What the unit on the rig has done this turn: the move, the
-    /// attack (the shot) and the bonus act (the ram, putting a fire out) -
-    /// match.md «Структура хода», п. 5а and 5б, one of each (U-22).</summary>
-    private bool _drove, _fired, _bonus;
+
+    /// <summary>
+    /// Where the match stands by the rules, apart from the board and the units
+    /// (docs/battle-core-plan.md, Д1): whose turn, the round, what the unit on
+    /// the rig has spent, the result. One object, so the rules core (Д3) takes
+    /// it whole into its state - the bench's pacing (<see cref="_passIn"/>,
+    /// the banner, the notes) stays out of it.
+    /// </summary>
+    private sealed class MatchTurn
+    {
+        public Side Turn = Side.Green;
+        public int Round = 1;
+        /// <summary>Turns played, the first nought: a fire's clock (Tank3DBench.Blast).</summary>
+        public int TurnNo;
+        /// <summary>What the unit on the rig has done this turn: the move, the
+        /// attack (the shot) and the bonus act (the ram, putting a fire out) -
+        /// match.md «Структура хода», п. 5а and 5б, one of each (U-22).</summary>
+        public bool Drove, Fired, Bonus;
+        public Side? Won;
+        public bool Drawn;
+    }
+
+    private readonly MatchTurn _mt = new();
     /// <summary>Seconds to the turn passing by itself; null while it waits.</summary>
     private float? _passIn;
-    private Side? _won;
-    private bool _drawn;
     private string _matchNote = "";
     /// <summary><c>--map</c> was given: the match plays it, not its own board.</summary>
     private bool _mapNamed;
@@ -121,6 +136,26 @@ public sealed partial class Tank3DBench
     /// <summary>The unit on the rig at the start, an index into <see cref="_lineup"/>.</summary>
     private int _rigUnit = -1;
 
+    /// <summary>
+    /// The unit on the rig now - its place in <see cref="_lineup"/>, which is
+    /// its name for the whole match (docs/battle-core-plan.md, Д1). The side
+    /// and the class were the name before, and two of one class on a side
+    /// shared a fire. -1 off a match. Standing units and the target carry
+    /// theirs (<c>Parked.Id</c>, <c>Other.Id</c>); a hand-over swaps them.
+    /// </summary>
+    private int _unitId = -1;
+
+    /// <summary>Each unit's kit, by its id (<see cref="Kits.Starter"/>).</summary>
+    private Kit[] _kits = Array.Empty<Kit>();
+
+    /// <summary>Whether unit <paramref name="id"/> has the wading gear - off
+    /// a match, the bench's own switch for every tank (<c>--no-amphibious</c>).</summary>
+    private bool Snorkel(int id) =>
+        !Match ? _amphibious : id >= 0 && id < _kits.Length && (_kits[id] & Kit.Snorkel) != 0;
+
+    /// <summary>The unit on the rig has the wading gear.</summary>
+    private bool RigSnorkel => Snorkel(_unitId);
+
     private static Side SideOf(Lineup.Unit u) => u.Side == Parking.Brown ? Side.Brown : Side.Green;
 
     /// <summary>
@@ -130,10 +165,14 @@ public sealed partial class Tank3DBench
     private void LineUpSides()
     {
         _lineup = new List<Lineup.Unit>();
-        _rigUnit = -1;
+        _rigUnit = _unitId = -1;
+        _kits = Array.Empty<Kit>();
         if (!Match)
             return;
         _lineup = Lineup.Of(_parkings);
+        _kits = _lineup.Select(u => Kits.Starter(ClassFor(u.Model))).ToArray();
+        Log.Print("tank3d: match: kits "
+                 + string.Join(", ", _lineup.Select((u, i) => $"{SideName(SideOf(u))} {u.Model}#{i} {Kits.Names(_kits[i])}")));
         int green = _lineup.Count(u => u.Side == Parking.Green), brown = _lineup.Count - green;
         Log.Print($"tank3d: match: the board fields {green} green and {brown} brown");
         // a side with no homes has nothing to move, and the match is won before it starts
@@ -142,9 +181,10 @@ public sealed partial class Tank3DBench
         if (_lineup.Count == 0)
             return;
         _rigUnit = Math.Max(0, _lineup.FindIndex(u => u.Side == Parking.Green));
+        _unitId = _rigUnit;
         Lineup.Unit rig = _lineup[_rigUnit];
         _modelTag = rig.Model;
-        _side = _turn = SideOf(rig);
+        _side = _mt.Turn = SideOf(rig);
         if (_startCell is null)
             _home = rig.Cell;
     }
@@ -167,11 +207,11 @@ public sealed partial class Tank3DBench
             if (!_field.InBounds(u.Cell))
                 continue;
             await TankStage(u.Model, i, _lineup.Count);
-            Stand(u.Model, u.Cell, HeadingFor(u.Cell, u.Facing), SideOf(u));
+            Stand(u.Model, u.Cell, HeadingFor(u.Cell, u.Facing), SideOf(u), id: i);
         }
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
-        Banner($"Раунд 1 · ходят {SideName(_turn)}", SideInk(_turn));
+        Banner($"Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
     }
 
     /// <summary>The side's paint on a model: brown or the model's own.</summary>
@@ -183,13 +223,13 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>Every unit on the board, the rig's first.</summary>
-    private IEnumerable<(string Tag, Side Side, Fate Fate, bool Riding)> Units()
+    private IEnumerable<(int Id, string Tag, Side Side, Fate Fate, bool Riding)> Units()
     {
-        yield return (_modelTag, _side, _fate, true);
+        yield return (_unitId, _modelTag, _side, _fate, true);
         foreach (Parked p in _parked)
-            yield return (p.Tag, p.Side, p.Fate, false);
+            yield return (p.Id, p.Tag, p.Side, p.Fate, false);
         if (_other is { Unit: true } o)
-            yield return (o.Tag, o.Side, o.Fate, false);
+            yield return (o.Id, o.Tag, o.Side, o.Fate, false);
     }
 
     // --- the turn ----------------------------------------------------------------
@@ -200,7 +240,7 @@ public sealed partial class Tank3DBench
         RouteMoving || _turnGoal is not null || _aim is not null || _shotWaiting is not null
         || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning || _ramWaiting is not null || _chain.Count > 0;
 
-    private bool MatchOver => _won is not null || _drawn;
+    private bool MatchOver => _mt.Won is not null || _mt.Drawn;
 
     /// <summary>Why the unit on the rig may not move now, or empty.</summary>
     private string MatchMoveWhy()
@@ -209,13 +249,13 @@ public sealed partial class Tank3DBench
             return "";
         if (MatchOver)
             return "партия окончена";
-        if (_side != _turn)
-            return $"ходят {SideName(_turn)}";
+        if (_side != _mt.Turn)
+            return $"ходят {SideName(_mt.Turn)}";
         if (_passIn is not null)
             return "ход передаётся";
-        if (_drove)
+        if (_mt.Drove)
             return $"{_modelTag} уже ходил в этом ходу";
-        if ((_fired || _bonus) && !_profile.FreeOrder)
+        if ((_mt.Fired || _mt.Bonus) && !_profile.FreeOrder)
             return "после действия не ездят — действует до хода только LT";
         return "";
     }
@@ -224,13 +264,13 @@ public sealed partial class Tank3DBench
 
     /// <summary>The shot of this turn is spent - fired, or the turn going over:
     /// no line of fire nor firing post is drawn for a shot there is not.</summary>
-    private bool MatchShotSpent => Match && (_fired || _passIn is not null || MatchOver);
+    private bool MatchShotSpent => Match && (_mt.Fired || _passIn is not null || MatchOver);
 
     /// <summary>The bonus act of this turn is spent - the ram or the fire put
     /// out, or the turn going over.</summary>
     private const string BonusWaits = "атака сделана — осталось доп. действие или «Конец хода»";
 
-    private bool MatchBonusSpent => Match && (_bonus || _passIn is not null || MatchOver);
+    private bool MatchBonusSpent => Match && (_mt.Bonus || _passIn is not null || MatchOver);
 
     /// <summary>Whether a bonus act is still to be had once the move is over:
     /// a fire to put out, or a unit beside to ram - the move being spent, the
@@ -238,9 +278,9 @@ public sealed partial class Tank3DBench
     /// frame.</summary>
     private bool BonusLeft()
     {
-        if (_bonus)
+        if (_mt.Bonus)
             return false;
-        if (Burning(_side, _modelTag))
+        if (Burning(_unitId))
             return true;
         for (int i = 0; i < _parked.Count; i++)
             if (_parked[i].Fate != Fate.Destroyed && SideTo(CellHere, _parked[i].Cell) is not null)
@@ -256,11 +296,11 @@ public sealed partial class Tank3DBench
             return "";
         if (MatchOver)
             return "партия окончена";
-        if (_side != _turn)
-            return $"ходят {SideName(_turn)}";
+        if (_side != _mt.Turn)
+            return $"ходят {SideName(_mt.Turn)}";
         if (_passIn is not null)
             return "ход передаётся";
-        if (_fired)
+        if (_mt.Fired)
             return $"{_modelTag} уже стрелял в этом ходу";
         return "";
     }
@@ -268,9 +308,9 @@ public sealed partial class Tank3DBench
     /// <summary>A route or a turn on the spot was given: the move of the turn.</summary>
     private void MatchMoved()
     {
-        if (!Match || _drove)
+        if (!Match || _mt.Drove)
             return;
-        _drove = true;
+        _mt.Drove = true;
         // the unit as it set out, for the move taken back (Tank3DBench.Undo)
         UndoSnap();
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} moves");
@@ -281,7 +321,7 @@ public sealed partial class Tank3DBench
     {
         if (!Match)
             return;
-        _fired = true;
+        _mt.Fired = true;
         Unlock();
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} fires");
     }
@@ -302,18 +342,18 @@ public sealed partial class Tank3DBench
     private string TakeWhy(Parked p) =>
         Takeable(p) ? ""
             : MatchOver ? "партия окончена"
-            : p.Side != _turn ? $"{p.Tag} — {SideName(p.Side)}, ходят {SideName(_turn)}"
+            : p.Side != _mt.Turn ? $"{p.Tag} — {SideName(p.Side)}, ходят {SideName(_mt.Turn)}"
             : p.Fate != Fate.Alive ? $"{p.Tag} {(p.Fate == Fate.Knocked ? "подбит" : "уничтожен")}"
             : _passIn is not null ? "ход передаётся"
-            : _side == _turn && (_drove || _fired || _bonus) ? $"в этом ходу уже действует {_modelTag}"
+            : _side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus) ? $"в этом ходу уже действует {_modelTag}"
             : "дождись конца приказа";
 
     /// <summary>The same without the words - the roster asks it every frame
     /// for its dimmed icons, and the words allocate.</summary>
     private bool Takeable(Parked p) =>
         !Match
-        || (!MatchOver && p.Side == _turn && p.Fate == Fate.Alive && _passIn is null
-            && !(_side == _turn && (_drove || _fired || _bonus)) && !MatchBusy);
+        || (!MatchOver && p.Side == _mt.Turn && p.Fate == Fate.Alive && _passIn is null
+            && !(_side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus)) && !MatchBusy);
 
     /// <summary>Ctrl+Enter and the button: the turn handed over now - with
     /// nothing done, a pass (match.md, «Пас разрешён»).</summary>
@@ -326,8 +366,8 @@ public sealed partial class Tank3DBench
             _matchNote = "дождись конца приказа";
             return;
         }
-        Log.Print($"tank3d: match: {SideName(_turn)} end the turn"
-                 + (_side == _turn && !_drove && !_fired && !_bonus ? " - a pass" : ""));
+        Log.Print($"tank3d: match: {SideName(_mt.Turn)} end the turn"
+                 + (_side == _mt.Turn && !_mt.Drove && !_mt.Fired && !_mt.Bonus ? " - a pass" : ""));
         PassTurn();
     }
 
@@ -336,8 +376,8 @@ public sealed partial class Tank3DBench
     /// that burns out stands, as every other, rather than rides.</summary>
     private void PassTurn()
     {
-        Side ending = _turn;
-        int turn = _turnNo++;
+        Side ending = _mt.Turn;
+        int turn = _mt.TurnNo++;
         HandOver();
         if (!MatchOver)
             BurnOut(ending, turn);
@@ -352,31 +392,31 @@ public sealed partial class Tank3DBench
         _matchNote = "";
         CancelOrder();
         DropTarget();
-        _drove = _fired = _bonus = false;
+        _mt.Drove = _mt.Fired = _mt.Bonus = false;
         _moveSnap = null;
         for (int tries = 0; tries < 2; tries++)
         {
-            _turn = Across(_turn);
-            if (_turn == Side.Green)
-                _round++;
+            _mt.Turn = Across(_mt.Turn);
+            if (_mt.Turn == Side.Green)
+                _mt.Round++;
             if (MatchCheckEnd())
                 return;
-            if (FirstReady(_turn) is { } next)
+            if (FirstReady(_mt.Turn) is { } next)
             {
                 TakeOver(next);
-                Banner($"Раунд {_round} · ходят {SideName(_turn)}", SideInk(_turn));
-                Log.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {MapAt(CellHere)}");
+                Banner($"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+                Log.Print($"tank3d: match: round {_mt.Round}, {SideName(_mt.Turn)} to move, {_modelTag} on {MapAt(CellHere)}");
                 return;
             }
-            if (_side == _turn && _fate == Fate.Alive)
+            if (_side == _mt.Turn && _fate == Fate.Alive)
             {
-                Banner($"Раунд {_round} · ходят {SideName(_turn)}", SideInk(_turn));
+                Banner($"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
                 return;
             }
-            Log.Print($"tank3d: match: {SideName(_turn)} have nothing able to act - a pass");
-            _matchNote = $"у {SideName(_turn)} ходить некому — пас";
+            Log.Print($"tank3d: match: {SideName(_mt.Turn)} have nothing able to act - a pass");
+            _matchNote = $"у {SideName(_mt.Turn)} ходить некому — пас";
         }
-        _drawn = true;
+        _mt.Drawn = true;
         Banner("Ничья: ходить некому", Colors.White, stay: true);
     }
 
@@ -424,10 +464,10 @@ public sealed partial class Tank3DBench
         {
             if (!all.Where(u => u.Side == s).All(u => u.Fate == Fate.Destroyed))
                 continue;
-            _won = Across(s);
+            _mt.Won = Across(s);
             _passIn = null;
-            Banner($"Победа: {SideName(_won.Value)} · раунд {_round}", SideInk(_won.Value), stay: true);
-            Log.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_won.Value)} win in round {_round}");
+            Banner($"Победа: {SideName(_mt.Won.Value)} · раунд {_mt.Round}", SideInk(_mt.Won.Value), stay: true);
+            Log.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_mt.Won.Value)} win in round {_mt.Round}");
             return true;
         }
         return false;
@@ -462,17 +502,17 @@ public sealed partial class Tank3DBench
         // the turn goes by itself once there is nothing left in it: the shot
         // fired, the move done (or barred), and no bonus act to be had - one
         // still open waits for it or for the end of the turn (U-22)
-        if (_passIn is null && !busy && _side == _turn && _fired && (_drove || !_profile.FreeOrder) && !BonusLeft())
+        if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || !_profile.FreeOrder) && !BonusLeft())
         {
             _passIn = PassDelay;
             _matchNote = "ход сделан";
         }
-        else if (_passIn is null && !busy && _side == _turn && _fired && (_drove || !_profile.FreeOrder))
+        else if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || !_profile.FreeOrder))
             _matchNote = BonusWaits;
         // Knocked out on its own move - a mine under it (Tank3DBench.Mines):
         // it can do no more, so the turn goes on, once the hull has rolled to
         // a stop. It waited for a shot that could not come (2026-10-29).
-        if (_passIn is null && !busy && _side == _turn && _fate != Fate.Alive && _coastTo is null)
+        if (_passIn is null && !busy && _side == _mt.Turn && _fate != Fate.Alive && _coastTo is null)
         {
             _passIn = PassDelay;
             _matchNote = $"{_modelTag} подбит";
@@ -525,6 +565,7 @@ public sealed partial class Tank3DBench
         _parked.Remove(p);
         _other = WrapOther(p.Model, p.Rig, ClassFor(p.Tag), p.Tag, hits);
         _other.Unit = true;
+        _other.Id = p.Id;
         _other.Side = p.Side;
         _other.Fate = p.Fate;
         _other.Cell = p.Cell;
@@ -547,7 +588,7 @@ public sealed partial class Tank3DBench
         _parked.Add(new Parked
         {
             Model = o.Model, Rig = o.Rig, Tag = o.Tag, Cell = OtherCell(o), Heading = o.Heading,
-            Side = o.Side, Fate = o.Fate, Yaw = o.Model.Yaw, Elevation = o.Model.Elevation,
+            Side = o.Side, Fate = o.Fate, Yaw = o.Model.Yaw, Elevation = o.Model.Elevation, Id = o.Id,
         });
         _other = null;
         _otherCell = null;
@@ -562,7 +603,7 @@ public sealed partial class Tank3DBench
     {
         if (!Match || !o.Unit)
             return;
-        o.Fate = Fall(o.Fate, pierced, o.Model, o.Tag, OtherCell(o), o.Side);
+        o.Fate = Fall(o.Fate, pierced, o.Model, o.Id, o.Tag, OtherCell(o), o.Side);
         MatchCheckEnd();
     }
 
@@ -572,13 +613,13 @@ public sealed partial class Tank3DBench
     {
         if (!Match)
             return;
-        p.Fate = Fall(p.Fate, pierced, p.Model, p.Tag, p.Cell, p.Side);
+        p.Fate = Fall(p.Fate, pierced, p.Model, p.Id, p.Tag, p.Cell, p.Side);
         MatchCheckEnd();
     }
 
     /// <summary>What a round does to a unit's fate, and the picture of it: a
     /// pierce knocks it out, any round on a knocked one destroys it.</summary>
-    private Fate Fall(Fate was, bool pierced, TankModel model, string tag, Vector2I cell, Side side)
+    private Fate Fall(Fate was, bool pierced, TankModel model, int id, string tag, Vector2I cell, Side side)
     {
         if (was == Fate.Destroyed || (was == Fate.Alive && !pierced))
             return was;
@@ -598,23 +639,23 @@ public sealed partial class Tank3DBench
             else
                 Kindle(model);
             // knocked out, it burns no more as a unit: the pyre is its fire now
-            Quench(side, tag, steam: false);
+            Quench(id, steam: false);
             Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
             _matchNote = $"{SideName(side)} {tag} подбит";
             Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} knocked out");
             return Fate.Knocked;
         }
-        return Explode(model, tag, cell, side);
+        return Explode(model, id, tag, cell, side);
     }
 
     /// <summary>Destroyed - always a blast (GDD states.md, «Уничтожен»), whether
     /// a round found a knocked hull or a fire was left to burn: the picture,
     /// then the six hexes round it (<see cref="Blast"/>).</summary>
-    private Fate Explode(TankModel model, string tag, Vector2I cell, Side side)
+    private Fate Explode(TankModel model, int id, string tag, Vector2I cell, Side side)
     {
         Vector3 at = model.Tank.ToGlobal(model.BlastAt);
         float hull = model.HullLength * model.PixelsPerUnit;
-        Quench(side, tag, steam: false);
+        Quench(id, steam: false);
         // The ammunition: the turret off on to the deck where the sidecar lays
         // it, the hull charred over.
         if (model.Turret is not null)
@@ -870,11 +911,11 @@ public sealed partial class Tank3DBench
         foreach (Side s in new[] { Side.Green, Side.Brown })
         {
             text.Append(s == Side.Green ? "" : "   ·   ")
-                .Append(s == _turn && !MatchOver ? "» " : "").Append(SideName(s)).Append(':');
+                .Append(s == _mt.Turn && !MatchOver ? "» " : "").Append(SideName(s)).Append(':');
             foreach (var u in all.Where(u => u.Side == s).OrderBy(u => Array.IndexOf(Roster, u.Tag)))
                 text.Append(' ').Append(u.Riding ? "▶" : "").Append(u.Tag[..2])
                     .Append(u.Fate switch { Fate.Alive => "", Fate.Knocked => "◐", _ => "✕" })
-                    .Append(u.Fate == Fate.Alive && Burning(u.Side, u.Tag) ? "▲" : "");
+                    .Append(u.Fate == Fate.Alive && Burning(u.Id) ? "▲" : "");
         }
         return text.Append("      ▲ горит  ◐ подбит  ✕ уничтожен").ToString();
     }
@@ -885,33 +926,36 @@ public sealed partial class Tank3DBench
     private void MatchHudStamp(ref HashCode h)
     {
         h.Add(MatchOver);
-        h.Add(_drawn);
-        h.Add(_won);
-        h.Add(_round);
-        h.Add(_turn);
-        h.Add(_drove);
-        h.Add(_fired);
-        h.Add(_bonus);
+        h.Add(_mt.Drawn);
+        h.Add(_mt.Won);
+        h.Add(_mt.Round);
+        h.Add(_mt.Turn);
+        h.Add(_mt.Drove);
+        h.Add(_mt.Fired);
+        h.Add(_mt.Bonus);
         h.Add(_side);
         // the countdown as it is printed, to a tenth
         h.Add(_passIn is float t ? Mathf.RoundToInt(Mathf.Max(t, 0.0f) * 10.0f) : -1);
         h.Add(_matchNote);
         h.Add(_hints);
         h.Add(_fate);
-        h.Add(Burning(_side, _modelTag));
+        h.Add(_unitId);
+        h.Add(Burning(_unitId));
         foreach (Parked p in _parked)
         {
+            h.Add(p.Id);
             h.Add(p.Tag);
             h.Add(p.Side);
             h.Add(p.Fate);
-            h.Add(Burning(p.Side, p.Tag));
+            h.Add(Burning(p.Id));
         }
         if (_other is { Unit: true } o)
         {
+            h.Add(o.Id);
             h.Add(o.Tag);
             h.Add(o.Side);
             h.Add(o.Fate);
-            h.Add(Burning(o.Side, o.Tag));
+            h.Add(Burning(o.Id));
         }
     }
 
@@ -925,10 +969,10 @@ public sealed partial class Tank3DBench
     private string MatchHud(string status) =>
         status + "\n"
         + (MatchOver
-            ? (_drawn ? "Ничья" : $"Победа: {SideName(_won!.Value)}") + $" · раунд {_round}"
-            : $"Раунд {_round} · ходят {SideName(_turn)} · {_modelTag}: ход {(_drove ? "сделан" : "есть")}, "
-              + $"атака {(_fired ? "сделана" : "есть")}, доп. действие {(_bonus ? "сделано" : "есть")}"
-              + (Burning(_side, _modelTag) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
+            ? (_mt.Drawn ? "Ничья" : $"Победа: {SideName(_mt.Won!.Value)}") + $" · раунд {_mt.Round}"
+            : $"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
+              + $"атака {(_mt.Fired ? "сделана" : "есть")}, доп. действие {(_mt.Bonus ? "сделано" : "есть")}"
+              + (Burning(_unitId) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "")
         + (!_hints ? "   F1 — подсказки"

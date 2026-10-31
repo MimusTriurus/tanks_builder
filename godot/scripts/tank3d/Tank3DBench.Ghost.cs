@@ -250,7 +250,7 @@ void fragment() {
         // water first - it ends the way, and puts a fire out - then a mine, then fire.
         Steps.Risk risk = _ghostRiskCell == cell ? _ghostRisk : Steps.Risk.None;
         if (GhostAfloat(cell, ref at, ref roll, ref tint, ref fade) is var (_, line))
-            _ghostSign = (_amphibious ? Badge.Afloat : Badge.Drowned, line);
+            _ghostSign = (RigSnorkel ? Badge.Afloat : Badge.Drowned, line);
         else if (risk.HasFlag(Steps.Risk.Mine))
         {
             knocked = GhostMined(at, ref at, ref pitch, ref tint, ref fade);
@@ -344,7 +344,7 @@ void fragment() {
         if (_ghost is null || SwimY(cell, _ghost, _profile) is not float line)
             return null;
         Vector3 surface = new(at.X, line, at.Z);
-        if (_amphibious)
+        if (RigSnorkel)
         {
             // the real hull's swell (Buoy.Idle), a little larger: a ghost is
             // faint, and a heave of a pixel or two read as standing still

@@ -148,7 +148,7 @@ public sealed partial class Tank3DBench
     {
         if (_acts is null)
             return;
-        bool ours = _chosen && _fate == Fate.Alive && Match && !MatchOver && _side == _turn;
+        bool ours = _chosen && _fate == Fate.Alive && Match && !MatchOver && _side == _mt.Turn;
         _acts.Visible = ours;
         if (!ours)
             return;
@@ -161,7 +161,7 @@ public sealed partial class Tank3DBench
             SlotStyle(_slotBonus!, _slotBonusText!, bonus, SlotBonus, SlotBonusSpent);
         }
         _actRam!.Visible = bonus;
-        _actDouse!.Visible = bonus && Burning(_side, _modelTag);
+        _actDouse!.Visible = bonus && Burning(_unitId);
         _actRam.SetPressedNoSignal(_ramMode);
     }
 }

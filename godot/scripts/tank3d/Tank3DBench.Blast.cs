@@ -36,10 +36,13 @@ public sealed partial class Tank3DBench
 
     private sealed class Blaze
     {
+        /// <summary>The unit alight (<c>_unitId</c>, <c>Parked.Id</c>) - its
+        /// name; the side and the tag only for the log.</summary>
+        public int Id = -1;
         public Side Side;
         public string Tag = "";
         public CelBurn Burn = null!;
-        /// <summary>The turn it caught fire in (<see cref="_turnNo"/>).</summary>
+        /// <summary>The turn it caught fire in (<see cref="MatchTurn.TurnNo"/>).</summary>
         public int Since;
         /// <summary>Put out: the fire falls and the steam rises, then it goes.</summary>
         public bool Out;
@@ -51,8 +54,6 @@ public sealed partial class Tank3DBench
     /// reached, or (<c>Burnt</c>) a burning unit whose turn is over.</summary>
     private readonly List<(Vector2I Cell, float In, bool Burnt)> _chain = new();
     private readonly List<Vector3> _blazePorts = new();
-    /// <summary>Turns played, the first nought: a fire's clock.</summary>
-    private int _turnNo;
 
     /// <summary>The blasts' own pictures beside the bench's one: a chain blows
     /// while the last link's fire ball is still up.</summary>
@@ -61,23 +62,27 @@ public sealed partial class Tank3DBench
 
     // Loops, not Exists/Find with a lambda: both are asked every frame, per
     // unit, and a lambda over side and tag is a closure each call (BOT-3).
-    private bool Burning(Side side, string tag)
+    private bool Burning(int id)
     {
+        if (id < 0)
+            return false;
         foreach (Blaze b in _blazes)
-            if (!b.Out && b.Side == side && b.Tag == tag)
+            if (!b.Out && b.Id == id)
                 return true;
         return false;
     }
 
     /// <summary>The model the unit wears now: on the rig, standing or the target.</summary>
-    private TankModel? ModelOf(Side side, string tag)
+    private TankModel? ModelOf(int id)
     {
-        if (_side == side && _modelTag == tag)
+        if (id < 0)
+            return null;
+        if (_unitId == id)
             return _model;
-        if (_other is { Unit: true } o && o.Side == side && o.Tag == tag)
+        if (_other is { Unit: true } o && o.Id == id)
             return o.Model;
         foreach (Parked p in _parked)
-            if (p.Side == side && p.Tag == tag)
+            if (p.Id == id)
                 return p.Model;
         return null;
     }
@@ -93,7 +98,7 @@ public sealed partial class Tank3DBench
         {
             Vector2I n = HexField.Step(at, side);
             if (BlastTouches(at, n) && UnitOn(n) is { } u)
-                Struck(u.Side, u.Tag, u.Fate, n);
+                Struck(u.Id, u.Side, u.Tag, u.Fate, n);
         }
     }
 
@@ -106,23 +111,23 @@ public sealed partial class Tank3DBench
     /// <summary>A unit a blast can do something to on <paramref name="cell"/>:
     /// the own tank still fighting, the target, or a standing one not yet
     /// destroyed.</summary>
-    private (Side Side, string Tag, Fate Fate, TankModel Model)? UnitOn(Vector2I cell)
+    private (int Id, Side Side, string Tag, Fate Fate, TankModel Model)? UnitOn(Vector2I cell)
     {
         if (CellHere == cell && _fate == Fate.Alive)
-            return (_side, _modelTag, _fate, _model);
+            return (_unitId, _side, _modelTag, _fate, _model);
         if (_other is { Unit: true } o && OtherCell(o) == cell)
-            return (o.Side, o.Tag, o.Fate, o.Model);
+            return (o.Id, o.Side, o.Tag, o.Fate, o.Model);
         // a loop, not Find with a lambda: the preview asks it every frame (BOT-3)
         foreach (Parked p in _parked)
             if (p.Cell == cell && p.Fate != Fate.Destroyed)
-                return (p.Side, p.Tag, p.Fate, p.Model);
+                return (p.Id, p.Side, p.Tag, p.Fate, p.Model);
         return null;
     }
 
-    private void Struck(Side side, string tag, Fate fate, Vector2I cell)
+    private void Struck(int id, Side side, string tag, Fate fate, Vector2I cell)
     {
         if (fate == Fate.Alive)
-            Ignite(side, tag, cell);
+            Ignite(id, side, tag, cell);
         else if (fate == Fate.Knocked && !_chain.Exists(c => c.Cell == cell))
         {
             _chain.Add((cell, ChainBeat, false));
@@ -138,36 +143,36 @@ public sealed partial class Tank3DBench
         if (!Match)
             return;
         if (CellHere == cell && _fate == Fate.Alive)
-            Ignite(_side, _modelTag, cell);
+            Ignite(_unitId, _side, _modelTag, cell);
         else if (_other is { Unit: true, Fate: Fate.Alive } o && OtherCell(o) == cell)
-            Ignite(o.Side, o.Tag, cell);
+            Ignite(o.Id, o.Side, o.Tag, cell);
         else if (_parked.Find(p => p.Cell == cell && p.Fate == Fate.Alive) is { } p)
-            Ignite(p.Side, p.Tag, cell);
+            Ignite(p.Id, p.Side, p.Tag, cell);
         else
             Log.Print($"tank3d: --do ignite={cell.X - _moat.X},{cell.Y - _moat.Y}: no unit fighting there");
     }
 
     /// <summary>A unit set alight.</summary>
-    private void Ignite(Side side, string tag, Vector2I cell)
+    private void Ignite(int id, Side side, string tag, Vector2I cell)
     {
         // a hull in water catches and goes out at once (GDD states.md «Уничтожен»)
         if (_field is not null && _field.IsWater(cell))
             return;
-        if (Burning(side, tag) || ModelOf(side, tag) is not { } model)
+        if (Burning(id) || ModelOf(id) is not { } model)
             return;
-        var burn = new CelBurn { Name = $"Blaze_{side}_{tag}" };
+        var burn = new CelBurn { Name = $"Blaze_{id}_{tag}" };
         AddChild(burn);
         burn.Build(model.HullLength * model.PixelsPerUnit);
-        _blazes.Add(new Blaze { Side = side, Tag = tag, Burn = burn, Since = _turnNo });
+        _blazes.Add(new Blaze { Id = id, Side = side, Tag = tag, Burn = burn, Since = _mt.TurnNo });
         _matchNote = $"{SideName(side)} {tag} горит";
-        Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} catches fire (turn {_turnNo})");
+        Log.Print($"tank3d: match: {SideName(side)} {tag}#{id} on {MapAt(cell)} catches fire (turn {_mt.TurnNo})");
     }
 
     /// <summary>A unit's fire gone: put out (the steam), or the unit knocked
     /// out or destroyed under it (at once).</summary>
-    private void Quench(Side side, string tag, bool steam)
+    private void Quench(int id, bool steam)
     {
-        foreach (Blaze b in _blazes.Where(b => !b.Out && b.Side == side && b.Tag == tag).ToList())
+        foreach (Blaze b in _blazes.Where(b => !b.Out && b.Id == id).ToList())
         {
             if (steam)
             {
@@ -209,8 +214,8 @@ public sealed partial class Tank3DBench
         float beat = 0.0f;
         foreach (Blaze b in _blazes.Where(b => !b.Out && b.Side == side && b.Since < turn).ToList())
         {
-            Vector2I? at = _other is { Unit: true } o && o.Side == side && o.Tag == b.Tag ? OtherCell(o)
-                : _parked.Find(p => p.Side == side && p.Tag == b.Tag)?.Cell;
+            Vector2I? at = _other is { Unit: true } o && o.Id == b.Id ? OtherCell(o)
+                : _parked.Find(p => p.Id == b.Id)?.Cell;
             if (at is not Vector2I cell)
             {
                 // still on the rig: nobody of the other side was there to take it
@@ -227,10 +232,10 @@ public sealed partial class Tank3DBench
     /// still there and still alight.</summary>
     private void BurnsOut(Vector2I cell)
     {
-        if (_other is { Unit: true, Fate: Fate.Alive } o && OtherCell(o) == cell && Burning(o.Side, o.Tag))
-            o.Fate = Explode(o.Model, o.Tag, cell, o.Side);
-        else if (_parked.Find(p => p.Cell == cell && p.Fate == Fate.Alive) is { } p && Burning(p.Side, p.Tag))
-            p.Fate = Explode(p.Model, p.Tag, cell, p.Side);
+        if (_other is { Unit: true, Fate: Fate.Alive } o && OtherCell(o) == cell && Burning(o.Id))
+            o.Fate = Explode(o.Model, o.Id, o.Tag, cell, o.Side);
+        else if (_parked.Find(p => p.Cell == cell && p.Fate == Fate.Alive) is { } p && Burning(p.Id))
+            p.Fate = Explode(p.Model, p.Id, p.Tag, cell, p.Side);
         else
             return;
         Log.Print($"tank3d: match: the unit on {MapAt(cell)} burnt out at the end of its side's turn");
@@ -243,9 +248,9 @@ public sealed partial class Tank3DBench
     {
         if (!Match)
             return;
-        string why = !Burning(_side, _modelTag) ? $"{_modelTag} не горит"
-            : _side != _turn ? $"ходят {SideName(_turn)}"
-            : _bonus ? "доп. действие этого хода уже сделано"
+        string why = !Burning(_unitId) ? $"{_modelTag} не горит"
+            : _side != _mt.Turn ? $"ходят {SideName(_mt.Turn)}"
+            : _mt.Bonus ? "доп. действие этого хода уже сделано"
             : _passIn is not null ? "ход передаётся"
             : MatchBusy ? "дождись конца приказа"
             : "";
@@ -254,8 +259,8 @@ public sealed partial class Tank3DBench
             _orderNote = why;
             return;
         }
-        Quench(_side, _modelTag, steam: true);
-        _bonus = true;
+        Quench(_unitId, steam: true);
+        _mt.Bonus = true;
         _ramMode = false;
         Unlock();
         _orderNote = $"{_modelTag} потушен";
@@ -305,7 +310,7 @@ public sealed partial class Tank3DBench
         for (int i = _blazes.Count - 1; i >= 0; i--)
         {
             Blaze b = _blazes[i];
-            TankModel? m = ModelOf(b.Side, b.Tag);
+            TankModel? m = ModelOf(b.Id);
             if (m is null || !IsInstanceValid(m))
                 continue;
             if (b.Out)

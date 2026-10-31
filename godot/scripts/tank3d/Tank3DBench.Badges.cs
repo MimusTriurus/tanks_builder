@@ -42,19 +42,19 @@ public sealed partial class Tank3DBench
         _badgeClock += (float)GetProcessDeltaTime();
         float r = Mathf.Max(8.0f, HexScreen() * 0.11f);
         if (_fate != Fate.Destroyed)
-            BadgeOn(ink, _model, _rig, _side, _modelTag, _fate, CellHere, r);
+            BadgeOn(ink, _model, _rig, _unitId, _side, _fate, CellHere, r);
         if (_other is { Unit: true } o)
-            BadgeOn(ink, o.Model, o.Rig, o.Side, o.Tag, o.Fate, o.Cell, r);
+            BadgeOn(ink, o.Model, o.Rig, o.Id, o.Side, o.Fate, o.Cell, r);
         for (int i = 0; i < _parked.Count; i++)
         {
             Parked p = _parked[i];
-            BadgeOn(ink, p.Model, p.Rig, p.Side, p.Tag, p.Fate, p.Cell, r);
+            BadgeOn(ink, p.Model, p.Rig, p.Id, p.Side, p.Fate, p.Cell, r);
         }
     }
 
-    private void BadgeOn(Control ink, TankModel model, Node3D rig, Side side, string tag, Fate fate, Vector2I cell, float r)
+    private void BadgeOn(Control ink, TankModel model, Node3D rig, int id, Side side, Fate fate, Vector2I cell, float r)
     {
-        Badge badge = BadgeOf(side, tag, fate, cell);
+        Badge badge = BadgeOf(id, fate, cell);
         if (badge == Badge.None || BlastMarked(model) || ShotMarked(model))
             return;
         Vector2 at = Over(model, rig);
@@ -69,7 +69,7 @@ public sealed partial class Tank3DBench
         // A fire beats on its owner's turn - it is the owner's to answer; with
         // the end of the turn under the pointer it is crossed out: it burns
         // as the turn is passed (GDD states.md «Горит»).
-        bool mine = badge == Badge.Burning && side == _turn;
+        bool mine = badge == Badge.Burning && side == _mt.Turn;
         float beat = mine ? 0.5f - 0.5f * Mathf.Cos(Mathf.Tau * _badgeClock / BadgeBeat) : 0.0f;
         Sign(ink, badge, at, r, beat);
         if (mine && PassUnder)
@@ -121,13 +121,13 @@ public sealed partial class Tank3DBench
 
     private static readonly bool[] Both = { true, false };
 
-    private Badge BadgeOf(Side side, string tag, Fate fate, Vector2I cell)
+    private Badge BadgeOf(int id, Fate fate, Vector2I cell)
     {
         bool deep = _field!.InBounds(cell) && _field.IsDeep(cell) && _field.RampHeading(cell) < 0;
         return fate switch
         {
             Fate.Knocked => deep ? Badge.Drowned : Badge.Knocked,
-            Fate.Alive when Burning(side, tag) => Badge.Burning,
+            Fate.Alive when Burning(id) => Badge.Burning,
             Fate.Alive when deep => Badge.Afloat,
             _ => Badge.None,
         };

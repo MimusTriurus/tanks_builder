@@ -308,7 +308,7 @@ public sealed partial class Tank3DBench
         c.DrawString(font, new Vector2(x, y + 4.0f), "ход", HorizontalAlignment.Left, -1, 13, CardDim);
         bool live = CourseShown && _reach is not null;
         int budget = live ? _reach!.Budget : _profile.Steps;
-        int left = Match && _drove ? 0 : budget;
+        int left = Match && _mt.Drove ? 0 : budget;
         int spend = live ? Math.Min(_wayCost, left) : 0;
         // the lit ones are the last of the whole ones, as the old dots were
         PeekSlots(c, slots, y, left - spend, Math.Max(PeekSteps, budget), PeekMark.Dot, CardPale, CardDim);
