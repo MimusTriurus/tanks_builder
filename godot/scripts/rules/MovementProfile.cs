@@ -306,6 +306,13 @@ public sealed class MovementProfile
 	public bool FreeOrder => Might <= 1;
 
 	/// <summary>
+	/// MT's verb, «Секторная засада» (classes.md): the one class that watches
+	/// two neighbouring axes in ambush, where every other watches one. Read off
+	/// <see cref="Might"/> for <see cref="Lobs"/>'s reason: a II is the medium's.
+	/// </summary>
+	public bool WatchesSector => Might == 2;
+
+	/// <summary>
 	/// Whether the gun sits in a ring or in the hull.
 	///
 	/// <b>False is most of what a destroyer and a mortar are.</b> Both carry the

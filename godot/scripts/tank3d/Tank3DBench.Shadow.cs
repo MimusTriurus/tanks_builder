@@ -91,6 +91,8 @@ public sealed partial class Tank3DBench
                 Id = id, Tag = tag, Class = cls, Side = CampOf(side), Cell = cell, Heading = heading,
                 Fate = FateOf(fate, cell), Burning = fate == Fate.Alive && Burning(id), BurnSince = BurnSinceOf(id),
                 Kit = id < _kits.Length ? _kits[id] : Kit.None,
+                Watch = _ambush.TryGetValue(id, out var w) ? w.A : -1,
+                Watch2 = _ambush.TryGetValue(id, out var w2) ? w2.B : -1,
             });
         }
         Add(_unitId, _modelTag, _profile, _side, CellHere, HullSide(), _fate);
@@ -107,8 +109,11 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>One action of the turn, given on the bench, applied to the core.</summary>
-    private void ShadowAct(string what, System.Func<BattleState, string?> act)
+    private void ShadowAct(string what, System.Func<BattleState, string?> act, bool order = true)
     {
+        // an order to the unit lifts its ambush (Tank3DBench.Ambush); taking it does not
+        if (order)
+            AmbushLift(_unitId, what);
         if (!Match || _field is null || _lineup.Count == 0)
             return;
         if (_shadow is null)
@@ -197,6 +202,8 @@ public sealed partial class Tank3DBench
                 _shadowSaid.Add($"#{c.Id} {c.Tag} facing core {c.Heading} bench {b.Heading}");
             if (c.Burning != b.Burning)
                 _shadowSaid.Add($"#{c.Id} {c.Tag} burning core {c.Burning} bench {b.Burning}");
+            if (c.Watch != b.Watch || c.Watch2 != b.Watch2)
+                _shadowSaid.Add($"#{c.Id} {c.Tag} watching core {c.Watch}/{c.Watch2} bench {b.Watch}/{b.Watch2}");
         }
         for (int r = 0; r < core.Board.Rows; r++)
             for (int q = 0; q < core.Board.Columns; q++)

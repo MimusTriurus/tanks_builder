@@ -268,7 +268,7 @@ public sealed partial class Tank3DBench
         if (_shadow is not null)
         {
             int id = next.Id;
-            ShadowAct($"take #{id}", s => Battle.Take(s, id));
+            ShadowAct($"take #{id}", s => Battle.Take(s, id), order: false);
         }
         // No log line: a print in a frame costs up to 100 ms (docs/perf.md, BOT-7).
         _orderNote = $"ведёшь {next.Tag}";

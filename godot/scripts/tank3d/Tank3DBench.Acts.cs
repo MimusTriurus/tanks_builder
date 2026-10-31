@@ -12,6 +12,8 @@ namespace TankSpriteTest;
 /// <item><b>Two plates, the slots</b>: lit while the slot is to be had, dimmed
 /// once spent. They are not buttons - the move and the shot stay the mouse's,
 /// as they were: the left button on a cell, the right one on a tank.</item>
+/// <item><b>Засада</b> by the attack's plate (Д7): a mode - the left button on
+/// a hex then picks the axis (Tank3DBench.Ambush).</item>
 /// <item><b>Buttons only for the bonus acts</b>, which the mouse cannot say on
 /// its own: <b>Таран</b> - a mode (Tab too), the left button on a tank then
 /// rams it as the right one does (<c>AimAt</c>); <b>Тушить</b> - at once
@@ -51,6 +53,8 @@ public sealed partial class Tank3DBench
         };
         _acts.AddThemeConstantOverride("separation", 6);
         (_slotAttack, _slotAttackText) = Slot(SlotAttack);
+        // the attack held back (Д7, Tank3DBench.Ambush): a mode, no key - none is free
+        _actAmbush = ActButton(AmbushText, toggle: true, AmbushToggle);
         _acts.AddChild(new Control { CustomMinimumSize = new Vector2(18.0f, 0.0f), MouseFilter = Control.MouseFilterEnum.Ignore });
         (_slotBonus, _slotBonusText) = Slot(SlotBonus);
         _actRam = ActButton("Таран   Tab", toggle: true, RamToggle);
@@ -135,6 +139,8 @@ public sealed partial class Tank3DBench
     /// off - the click is an order, as always.</summary>
     private bool ActClick(Vector2 screen)
     {
+        if (Match && AmbushClick(screen))
+            return true;
         if (!Match || !_ramMode)
             return false;
         if (_overTarget || _overParked is not null)
@@ -162,6 +168,8 @@ public sealed partial class Tank3DBench
             SlotStyle(_slotAttack!, _slotAttackText!, attack, SlotAttack, SlotAttackSpent);
             SlotStyle(_slotBonus!, _slotBonusText!, bonus, SlotBonus, SlotBonusSpent);
         }
+        _actAmbush!.Visible = attack;
+        _actAmbush.SetPressedNoSignal(_ambushMode);
         _actRam!.Visible = bonus;
         _actDouse!.Visible = bonus && Burning(_unitId);
         _actRamWall!.Visible = bonus && WallAhead;

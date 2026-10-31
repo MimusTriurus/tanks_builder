@@ -29,13 +29,18 @@ public sealed class BattleUnit
     /// <summary>The turn it caught fire in (<see cref="BattleState.TurnNo"/>).</summary>
     public int BurnSince;
     public Kit Kit;
+    /// <summary>The ambush's axis and, for the medium's sector, the second one
+    /// beside it (units.md, «Режим засады»; classes.md, «MT»); -1 for none.</summary>
+    public int Watch = -1, Watch2 = -1;
 
     public bool Out => Fate is UnitFate.Knocked or UnitFate.Drowned;
     public bool Standing => Fate != UnitFate.Destroyed;
+    public bool Ambushing => Watch >= 0;
 
     public BattleUnit Clone() => (BattleUnit)MemberwiseClone();
 
-    public override string ToString() => $"{Side} {Tag}#{Id} ({Cell.X},{Cell.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}";
+    public override string ToString() => $"{Side} {Tag}#{Id} ({Cell.X},{Cell.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
+                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}" : "");
 }
 
 public enum BattleEventKind
@@ -44,6 +49,7 @@ public enum BattleEventKind
     Knocked, Drowned, Exploded, Ignited, Doused, Afloat,
     WoodAlight, WoodBurnt, WoodCleared, WallDown, Shoved, RamRefused,
     TurnEnded, FieldTick, Won, Drawn,
+    AmbushSet, AmbushFired, AmbushLifted,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench

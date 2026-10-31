@@ -306,6 +306,8 @@ public sealed partial class Tank3DBench
         }
         _ramMode = !_ramMode;
         _ramKey = "";
+        if (_ramMode)
+            _ambushMode = false;
         _orderNote = _ramMode ? "таран: наведи на танк, свой тоже" : "таран выключен";
     }
 

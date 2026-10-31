@@ -812,6 +812,13 @@ public sealed partial class Tank3DBench
             return;
         yawIn = elevIn = turnIn = 0.0f;
         _aim = null;
+        // laid along an ambush's axis (Tank3DBench.Ambush): held, not fired
+        if (_aimHold)
+        {
+            _aimHold = false;
+            Log.Print("tank3d: laid along the ambush's axis");
+            return;
+        }
         if (_profile.Lobs)
             _chargeFor = at;
         string charge = _profile.Lobs && Charge(muzzle, bore, at, fall) is float v ? $", charge {v:F0}/s" : "";

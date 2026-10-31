@@ -43,8 +43,13 @@ public sealed partial class Tank3DBench
         }
         if (_hexWas != here)
         {
-            if (_hexWas is not null && _fate == Fate.Alive)
+            if (_hexWas is Vector2I came && _fate == Fate.Alive)
+            {
                 HexEffects(_unitId, _side, _modelTag, here);
+                // then the enemy's ambushes (match.md п. 4; Tank3DBench.Ambush)
+                if (_fate == Fate.Alive)
+                    AmbushWatch(_unitId, here, came, rig: true);
+            }
             _hexWas = here;
         }
         if (_other is { Unit: true } o)
@@ -59,6 +64,9 @@ public sealed partial class Tank3DBench
             {
                 if (_otherHexWas is not null && o.Fate == Fate.Alive)
                     HexEffects(o.Id, o.Side, o.Tag, there);
+                // a hull shoved on to an axis crosses it, one out of the fight too
+                if (_otherHexWas is Vector2I came && o.Fate != Fate.Destroyed)
+                    AmbushWatch(o.Id, there, came, rig: false);
                 _otherHexWas = there;
             }
         }

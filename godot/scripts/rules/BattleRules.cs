@@ -18,10 +18,11 @@ namespace TankSpriteTest;
 /// on the axis), the ram with what the pushed lands on, the wall rammed and the
 /// heavy's bulldozing, fire on a unit, putting it out, burning out at the end
 /// of its side's turn, the blast of a destroyed unit and its chain, the wood's
-/// fire by rounds, the win by destruction.
+/// fire by rounds, the win by destruction, the stalemate (Д6), the ambush and
+/// the medium's sector (Д7).
 ///
-/// <b>Not yet</b> (stages Д6-Д9): ambush, smoke, the upgrades past the wading
-/// gear and the trawl, the quiet-rounds draw, the control point, placement.
+/// <b>Not yet</b> (stages Д8-Д9): smoke, the upgrades past the wading gear and
+/// the trawl, the control point, placement.
 /// </summary>
 public static class Battle
 {
@@ -73,6 +74,7 @@ public static class Battle
         if ((s.Fired || s.Bonus) && !u.Class.FreeOrder)
             return "only LT moves after acting";
         s.Drove = true;
+        Lift(s, u, "moved");
         foreach (Vector2I next in path)
         {
             if (next == u.Cell)
@@ -91,7 +93,7 @@ public static class Battle
                 u.Heading = way;
             u.Cell = next;
             s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, next, way));
-            Arrive(s, u, way, forward: !back);
+            Entered(s, u, way, forward: !back);
             if (u.Fate != UnitFate.Alive)
                 return null;
         }
@@ -175,6 +177,7 @@ public static class Battle
                 {
                     u.Fate = UnitFate.Drowned;
                     s.Events.Add(new BattleEvent(BattleEventKind.Drowned, u.Id, c));
+                    Lift(s, u, "drowned");
                 }
             }
             return;
@@ -215,6 +218,7 @@ public static class Battle
             case Gunnery.Distance.PointBlank: return "a tank point-blank";
         }
         s.Fired = true;
+        Lift(s, u, "fired");
         if (u.Class.Lobs)
             Lob(s, aim);
         else
@@ -397,6 +401,9 @@ public static class Battle
         s.Bonus = true;
         if (!(u.Class.FreeOrder && !s.Drove))
             s.Drove = true;
+        // an order to the rammer, a ram to the rammed: both ambushes off
+        Lift(s, u, "rammed");
+        Lift(s, victim, "was rammed");
         u.Heading = way;
         Vector2I landing = push.Legs[^1];
         if (u.Class.Bulldozes)
@@ -406,13 +413,20 @@ public static class Battle
         u.Cell = target;
         s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, target, way));
         if (victim.Fate == UnitFate.Alive)
-            Arrive(s, victim, way, forward: way == victim.Heading);
-        else if (s.Board.IsDeep(landing) && victim.Fate == UnitFate.Knocked)
+            Entered(s, victim, way, forward: way == victim.Heading);
+        else
         {
-            victim.Fate = UnitFate.Drowned;
-            s.Events.Add(new BattleEvent(BattleEventKind.Drowned, victim.Id, landing));
+            if (s.Board.IsDeep(landing) && victim.Fate == UnitFate.Knocked)
+            {
+                victim.Fate = UnitFate.Drowned;
+                s.Events.Add(new BattleEvent(BattleEventKind.Drowned, victim.Id, landing));
+            }
+            // a hull out of the fight shoved on to an axis is crossing it too
+            // (units.md: «Отброшенный тараном вражеский танк»; states.md: the
+            // ambush's round on it is the one that destroys it)
+            Ambushes(s, victim);
         }
-        Arrive(s, u, way, forward: true);
+        Entered(s, u, way, forward: true);
         Over(s);
         return null;
     }
@@ -431,11 +445,13 @@ public static class Battle
         if (!s.Board.Passable(u.Cell, heading) || s.At(past) is not null)
             return "nowhere to go through to";
         s.Bonus = true;
+        Lift(s, u, "rammed a wall");
         WallDown(s, u.Cell, heading);
         u.Heading = heading;
         u.Cell = past;
         s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, past, heading));
-        Arrive(s, u, heading, forward: true);
+        Entered(s, u, heading, forward: true);
+        Over(s);
         return null;
     }
 
@@ -451,8 +467,133 @@ public static class Battle
         if (s.Board.CoverAt(u.Cell) == Cover.Forest && s.Board.CoverStateAt(u.Cell) == CoverState.Burning)
             return "on a burning hex";
         s.Bonus = true;
+        Lift(s, u, "doused");
         Douse(s, u);
         return null;
+    }
+
+    // --- the ambush ---------------------------------------------------------------------
+
+    /// <summary>
+    /// The ambush (units.md, «Режим засады»; п. 5а): the attack of the turn
+    /// held back on <paramref name="axis"/> - for the medium (classes.md,
+    /// «Секторная засада») and its <paramref name="second"/> beside it too. Set
+    /// last: the turn is spent with it, the move and the bonus act as well, for
+    /// any act of the unit after it would lift it. A casemate watches along its
+    /// hull - turned to the axis first, out of the move's steps.
+    /// </summary>
+    public static string? Ambush(BattleState s, int axis, int second = -1)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if (s.Fired)
+            return "the attack is spent";
+        if (Array.IndexOf(HexField.EdgeHeadings, axis) < 0)
+            return $"{axis} is not an axis";
+        if (second >= 0)
+        {
+            if (!u.Class.WatchesSector)
+                return "only the medium watches two axes";
+            int apart = ((second - axis) % 360 + 360) % 360;
+            if (apart != 60 && apart != 300)
+                return "the two axes must be neighbours";
+        }
+        if (!u.Class.Turreted && axis != u.Heading)
+            return "a casemate watches along its hull";
+        s.Fired = s.Drove = s.Bonus = true;
+        u.Watch = axis;
+        u.Watch2 = second;
+        s.Events.Add(new BattleEvent(BattleEventKind.AmbushSet, u.Id, u.Cell, axis, second >= 0 ? $"and {second}" : ""));
+        return null;
+    }
+
+    /// <summary>A cell's effects on a hull that came on to it (<see cref="Arrive"/>),
+    /// then the enemy's ambushes on it - in that order (match.md п. 4). An
+    /// effect of the hex that knocks it out ends the hex: the ambush answers
+    /// the hull as it came in.</summary>
+    private static void Entered(BattleState s, BattleUnit u, int way, bool forward)
+    {
+        UnitFate was = u.Fate;
+        Arrive(s, u, way, forward);
+        if (u.Fate == was)
+            Ambushes(s, u);
+    }
+
+    /// <summary>
+    /// Unit <paramref name="entered"/> has come on to its hex - driven, shoved
+    /// or through a wall: every ambush of the other side whose axis sees it
+    /// there now (<see cref="Sees"/>) fires, by the rules of a shot, and is
+    /// spent. They fire in turn while the hull is as it came in: the first that
+    /// knocks it out ends it. Public for the bench, which plays it on its own
+    /// hull's entering (Tank3DBench.Ambush).
+    /// </summary>
+    public static void Ambushes(BattleState s, BattleUnit entered)
+    {
+        UnitFate was = entered.Fate;
+        foreach (BattleUnit w in s.Units)
+        {
+            if (entered.Fate != was || s.Over)
+                return;
+            if (w.Side == entered.Side || w.Fate != UnitFate.Alive || !w.Ambushing)
+                continue;
+            int axis = Sees(s, w, entered);
+            if (axis < 0)
+                continue;
+            w.Watch = w.Watch2 = -1;
+            s.Events.Add(new BattleEvent(BattleEventKind.AmbushFired, w.Id, entered.Cell, axis, $"at #{entered.Id}"));
+            if (w.Class.Lobs)
+                Lob(s, entered.Cell);
+            else
+                Fly(s, w.Cell, axis, w.Class.Might, Level(s, w),
+                    passes: w.Class.Might >= 4 && !w.Class.Turreted ? 1 : 0, glance: true, aim: entered.Cell);
+            Over(s);
+        }
+    }
+
+    /// <summary>
+    /// Which of <paramref name="w"/>'s axes sees <paramref name="target"/>
+    /// now, -1 for none - read at the moment it fires, not when it was set
+    /// (units.md): on the axis, a clear hex between (the mortar's 3 to 5), and
+    /// nothing before it a round would stop at - a wall across an edge, a hull,
+    /// the ground rising, a wood; a hull of its own side cuts it too. The
+    /// mortar's axis is cut the same: it watches, and watching wants the sight.
+    /// </summary>
+    public static int Sees(BattleState s, BattleUnit w, BattleUnit target)
+    {
+        (int heading, int range) = s.Board.LaneTo(w.Cell, target.Cell);
+        if (heading < 0 || (heading != w.Watch && heading != w.Watch2))
+            return -1;
+        if (Gunnery.MayTarget(w.Class.Lobs, range, true) != Gunnery.Distance.Fits)
+            return -1;
+        int fromLevel = Level(s, w), ontoLevel = Level(s, target);
+        int floor = Math.Min(fromLevel, ontoLevel);
+        Vector2I at = w.Cell;
+        for (int k = 0; k < range; k++)
+        {
+            if (s.Board.Walled(at, heading))
+                return -1;
+            Vector2I c = HexField.Step(at, heading);
+            if (c == target.Cell)
+                return heading;
+            if (s.At(c) is { } hit && Level(s, hit) >= floor)
+                return -1;
+            if (Gunnery.Overtops(s.Board, c, fromLevel, ontoLevel))
+                return -1;
+            if (s.Board.LevelAt(c) >= floor && s.Board.Screened(c))
+                return -1;
+            at = c;
+        }
+        return -1;
+    }
+
+    /// <summary>The ambush off (units.md, «Длится»): any order to the unit,
+    /// a ram into it, its knocking out or destruction.</summary>
+    private static void Lift(BattleState s, BattleUnit u, string why)
+    {
+        if (!u.Ambushing)
+            return;
+        u.Watch = u.Watch2 = -1;
+        s.Events.Add(new BattleEvent(BattleEventKind.AmbushLifted, u.Id, u.Cell, 0, why));
     }
 
     // --- the end of the turn ----------------------------------------------------------
@@ -546,6 +687,7 @@ public static class Battle
         bool deep = s.Board.IsDeep(u.Cell) && s.Board.RampHeading(u.Cell) < 0;
         u.Fate = deep ? UnitFate.Drowned : UnitFate.Knocked;
         s.Events.Add(new BattleEvent(deep ? BattleEventKind.Drowned : BattleEventKind.Knocked, u.Id, u.Cell));
+        Lift(s, u, "out of the fight");
         Over(s);
     }
 
@@ -562,6 +704,7 @@ public static class Battle
         u.Fate = UnitFate.Destroyed;
         u.Burning = false;
         s.Events.Add(new BattleEvent(BattleEventKind.Exploded, u.Id, u.Cell));
+        Lift(s, u, "destroyed");
         WallDownAll(s, u.Cell);
         if (s.Board.CoverAt(u.Cell) == Cover.Forest)
             WoodAlight(s, u.Cell);

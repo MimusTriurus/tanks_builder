@@ -169,7 +169,12 @@ public sealed partial class Tank3DBench
         var cells = new List<Vector2I>(path);
         int face = _routeGoal?.Side ?? -1;
         if (ram)
+        {
+            // the rammed one's ambush is off with the ram (units.md, «Длится»)
+            if (_other is { Unit: true } rammed)
+                AmbushLift(rammed.Id, "rammed");
             ShadowAct($"ram {MapAt(cells[^1])}", s => Battle.Ram(s, cells[^1]));
+        }
         else
             ShadowAct($"move to {MapAt(cells[^1])} facing {face}", s => Battle.Move(s, cells, face));
     }

@@ -1682,11 +1682,13 @@ public sealed partial class Tank3DBench : Node3D
                     _spinHeld = (int)F(what[11..], 90);
                 else if (what.StartsWith("spin-to=", StringComparison.Ordinal))
                     SpinTo((int)F(what[8..], 90));
-                // act=ram|off: the action panel's ram (Tank3DBench.Acts)
+                // act=ram|ambush|off: the action panel's ram or ambush (Tank3DBench.Acts)
                 else if (what.StartsWith("act=", StringComparison.Ordinal))
                 {
                     if ((what[4..] == "ram") != _ramMode)
                         RamToggle();
+                    if ((what[4..] == "ambush") != _ambushMode)
+                        AmbushToggle();
                 }
                 // cmd=KIND[:Q,R][:SIDE]: a command, as the AI will give it (Tank3DBench.Commands)
                 else if (what.StartsWith("cmd=", StringComparison.Ordinal))
@@ -2392,6 +2394,7 @@ public sealed partial class Tank3DBench : Node3D
                 // Ctrl+Enter in a match: the turn handed over (Tank3DBench.Match)
                 case Key.Enter or Key.KpEnter:
                     if (Match && order.CtrlPressed) Execute(new Command(CommandKind.Pass));
+                    else if (AmbushConfirm()) { }
                     else if (_spinOpen && _spinPick is int pick) SpinTo(pick);
                     else Confirm();
                     return;
@@ -2400,6 +2403,7 @@ public sealed partial class Tank3DBench : Node3D
                 case Key.Escape:
                     // the ram (Tank3DBench.RamPlan) off first
                     if (_spinPick is not null || _spinPinned) SpinLetGo();
+                    else if (_ambushMode) AmbushToggle();
                     else if (_ramMode && _ramWaiting is null) RamToggle();
                     else if (_lockCell is not null && !_ramLock) Unlock();
                     else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null || _ramWaiting is not null) CancelOrder();

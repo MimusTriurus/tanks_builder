@@ -235,6 +235,89 @@ public static partial class SelfTest
                   + $"struck in round {strikeRound}, held {held}, then {struck.Drawn}: {Said(struck)}");
         }
 
+        // Д7, units.md «Режим засады»: a green medium at (4,8) watching up (90).
+        {
+            var mid = new Vector2I(4, 5);
+            BattleState Watched(int axis2 = -1, bool ownBetween = false, bool wall = false)
+            {
+                BattleState s = Probe(9, 10, walls: wall ? new[] { (new Vector2I(4, 6), 90) } : null);
+                Put(s, 0, "MTR", Camp.Green, 4, 8, 90);
+                s.Unit(0)!.Watch = 90;
+                s.Unit(0)!.Watch2 = axis2;
+                if (ownBetween)
+                    Put(s, 2, "LTR", Camp.Green, 4, 6, 90);
+                return s;
+            }
+            // across the axis, three out: the round on its side, knocked, the path ends there
+            Vector2I[] Across(Vector2I c) => new[] { HexField.Step(c, 30), c, HexField.Step(c, 210) };
+            BattleState crossed = Watched();
+            Put(crossed, 1, "LTR", Camp.Brown, Across(mid)[0].X, Across(mid)[0].Y, 210);
+            Act(crossed, 1, st => Battle.Move(st, Across(mid), -1));
+            check("an enemy crossing the axis is fired on as it comes in, and a knocked one stops there",
+                  crossed.Unit(1)!.Fate == UnitFate.Knocked && crossed.Unit(1)!.Cell == mid
+                  && !crossed.Unit(0)!.Ambushing && crossed.Events.Any(e => e.Kind == BattleEventKind.AmbushFired),
+                  Said(crossed));
+            // beside it: no clear hex between; behind a hull of its own; behind a wall
+            Vector2I near = new(4, 7);
+            BattleState close = Watched();
+            Put(close, 1, "LTR", Camp.Brown, Across(near)[0].X, Across(near)[0].Y, 210);
+            Act(close, 1, st => Battle.Move(st, Across(near), -1));
+            BattleState screened = Watched(ownBetween: true);
+            Put(screened, 1, "LTR", Camp.Brown, Across(mid)[0].X, Across(mid)[0].Y, 210);
+            Act(screened, 1, st => Battle.Move(st, Across(mid), -1));
+            BattleState walled = Watched(wall: true);
+            Put(walled, 1, "LTR", Camp.Brown, Across(mid)[0].X, Across(mid)[0].Y, 210);
+            Act(walled, 1, st => Battle.Move(st, Across(mid), -1));
+            check("the axis wants a clear hex between, and stops at its own hull and at a wall",
+                  close.Unit(0)!.Ambushing && close.Unit(1)!.Fate == UnitFate.Alive
+                  && screened.Unit(0)!.Ambushing && screened.Unit(1)!.Fate == UnitFate.Alive
+                  && walled.Unit(0)!.Ambushing && walled.Unit(1)!.Fate == UnitFate.Alive,
+                  $"beside: {Said(close)}; own: {Said(screened)}; wall: {Said(walled)}");
+            // shoved on to the axis by a green heavy's ram: crossing all the same
+            BattleState shoved = Watched();
+            Vector2I from = HexField.Step(mid, 30), rammer = HexField.Step(from, 30);
+            Put(shoved, 1, "LTR", Camp.Brown, from.X, from.Y, 90);
+            Put(shoved, 3, "HTR", Camp.Green, rammer.X, rammer.Y, 210);
+            Act(shoved, 3, st => Battle.Ram(st, from));
+            check("an enemy shoved on to the axis by a ram is fired on",
+                  shoved.Unit(1)!.Cell == mid && shoved.Unit(1)!.Fate == UnitFate.Knocked && !shoved.Unit(0)!.Ambushing,
+                  Said(shoved));
+            // the medium's sector: one round - an HT taking it on the front
+            // drives on, and the next hex of an axis has nothing to answer it
+            BattleState sector = Watched(axis2: 30);
+            Vector2I top = HexField.Step(mid, 90);
+            Put(sector, 1, "HTR", Camp.Brown, top.X, top.Y, 270);
+            Act(sector, 1, st => Battle.Move(st, new[] { top, mid, new Vector2I(4, 6) }, -1));
+            Vector2I side = HexField.Step(HexField.Step(new Vector2I(4, 8), 30), 30);
+            BattleState second = Watched(axis2: 30);
+            Put(second, 1, "LTR", Camp.Brown, HexField.Step(side, 90).X, HexField.Step(side, 90).Y, 270);
+            Act(second, 1, st => Battle.Move(st, new[] { HexField.Step(side, 90), side }, -1));
+            check("the medium watches two axes beside each other with one round",
+                  sector.Events.Count(e => e.Kind == BattleEventKind.AmbushFired) == 1
+                  && sector.Unit(1)!.Fate == UnitFate.Alive && sector.Unit(1)!.Cell == new Vector2I(4, 6)
+                  && second.Events.Any(e => e.Kind == BattleEventKind.AmbushFired && e.Value == 30),
+                  $"sector: {Said(sector)}; second axis: {Said(second)}");
+            // set: the attack of the turn, the turn spent; any order lifts it
+            BattleState set = Probe(9, 10);
+            Put(set, 0, "MTR", Camp.Green, 4, 8, 90);
+            Put(set, 1, "TDR", Camp.Green, 2, 8, 90);
+            Put(set, 2, "LTR", Camp.Brown, 0, 0, 90);
+            string? sectorSet = null, apart = null, hull = null, after = null;
+            Act(set, 0, st => sectorSet = Battle.Ambush(st, 90, 30));
+            bool spent = set.Fired && set.Drove && set.Bonus;
+            set.Fired = set.Drove = set.Bonus = false;
+            Act(set, 1, st => hull = Battle.Ambush(st, 30));
+            set.Fired = false;
+            Act(set, 0, st => apart = Battle.Ambush(st, 90, 210));
+            Act(set, 0, st => Battle.Turn(st, 30));
+            bool lifted = !set.Unit(0)!.Ambushing && set.Events.Any(e => e.Kind == BattleEventKind.AmbushLifted);
+            set.Fired = true;
+            Act(set, 0, st => after = Battle.Ambush(st, 90));
+            check("an ambush is the turn's attack, the casemate's along its hull, the sector's of neighbours; an order lifts it",
+                  sectorSet is null && spent && hull is not null && apart is not null && lifted && after is not null,
+                  $"MT 90+30 {sectorSet ?? "ok"}, spent {spent}; TD across {hull}; MT 90+210 {apart}; lifted {lifted}; after the shot {after}");
+        }
+
         // A copy is a copy.
         {
             BattleState s = Probe(9, 10);

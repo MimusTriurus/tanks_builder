@@ -50,6 +50,8 @@ public sealed partial class Tank3DBench
             Parked p = _parked[i];
             BadgeOn(ink, p.Model, p.Rig, p.Id, p.Side, p.Fate, p.Cell, r);
         }
+        // who watches which axis (Tank3DBench.Ambush)
+        DrawAmbushes(ink, r);
     }
 
     private void BadgeOn(Control ink, TankModel model, Node3D rig, int id, Side side, Fate fate, Vector2I cell, float r)

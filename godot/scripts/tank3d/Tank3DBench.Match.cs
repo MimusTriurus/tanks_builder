@@ -402,6 +402,8 @@ public sealed partial class Tank3DBench
     {
         _passIn = null;
         _ramMode = false;
+        _ambushMode = false;
+        _ambushPick = null;
         _matchNote = "";
         CancelOrder();
         DropTarget();
@@ -515,6 +517,8 @@ public sealed partial class Tank3DBench
         StalemateTick(busy);
         // the rules core takes the turn off the bench (Tank3DBench.Shadow)
         ShadowTick(busy);
+        // the watchers out of the fight out of ambush (Tank3DBench.Ambush)
+        AmbushTick();
         // what a hex does to a hull coming on to it (Tank3DBench.Rules)
         HexEffectsTick();
         // --commands, one at a time (Tank3DBench.Commands)
@@ -962,6 +966,8 @@ public sealed partial class Tank3DBench
         h.Add(_mt.Won);
         h.Add(_mt.Round);
         h.Add(_mt.LastStrike);
+        h.Add(_ambush.Count);
+        h.Add(_ambush.ContainsKey(_unitId));
         h.Add(_mt.Turn);
         h.Add(_mt.Drove);
         h.Add(_mt.Fired);
@@ -1009,10 +1015,12 @@ public sealed partial class Tank3DBench
               + $" · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
               + $"атака {(_mt.Fired ? "сделана" : "есть")}, доп. действие {(_mt.Bonus ? "сделано" : "есть")}"
               + (Burning(_unitId) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
+              // its ambush (Tank3DBench.Ambush): any order lifts it
+              + (_ambush.ContainsKey(_unitId) ? $" · {_modelTag} в засаде: любой приказ её снимет" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "")
         + (!_hints ? "   F1 — подсказки"
             : "\n" + Roll() + "\n"
-              + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран   1–5 — танк ростера\n"
+              + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран   «Засада» — ЛКМ по гексу оси (MT: и по соседней)   1–5 — танк ростера\n"
               + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Ctrl+Z — отменить ход   Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F1 — скрыть");
 }

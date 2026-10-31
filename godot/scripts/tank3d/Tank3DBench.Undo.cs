@@ -29,7 +29,9 @@ public sealed partial class Tank3DBench
         public Vector2I Cell;
         public float Heading, Yaw, Elevation, MudCoat, MudDry;
         public bool Fired, Bonus;
-        public int Razed, MinesSpent;
+        public int Razed, MinesSpent, AmbushShots;
+        /// <summary>Its ambush before the move lifted it (Tank3DBench.Ambush).</summary>
+        public (int A, int B)? Watch;
     }
 
     private MoveSnap? _moveSnap;
@@ -45,7 +47,8 @@ public sealed partial class Tank3DBench
         {
             Cell = CellHere, Heading = _heading, Yaw = _model.Yaw, Elevation = _model.Elevation,
             MudCoat = _mudCoat, MudDry = _mudDry, Fired = _mt.Fired, Bonus = _mt.Bonus,
-            Razed = _razed.Count, MinesSpent = MinesSpent(),
+            Razed = _razed.Count, MinesSpent = MinesSpent(), AmbushShots = _ambushShots,
+            Watch = _ambush.TryGetValue(_unitId, out var watch) ? watch : null,
         };
     }
 
@@ -78,6 +81,9 @@ public sealed partial class Tank3DBench
             return "лес снесён — ход не отменить";
         if (MinesSpent() != s.MinesSpent)
             return "сработала мина — ход не отменить";
+        // a round was fired at it on the way: the enemy's ambush is spent (Д7)
+        if (_ambushShots != s.AmbushShots)
+            return "сработала засада — ход не отменить";
         return "";
     }
 
@@ -103,6 +109,11 @@ public sealed partial class Tank3DBench
         _mudCoat = s.MudCoat;
         _mudDry = s.MudDry;
         Park();
+        // put back, it has not come on to anything (Tank3DBench.Rules, Ambush)
+        _hexWas = CellHere;
+        // the ambush the move lifted is back with it: the move never was
+        if (s.Watch is { } watch)
+            _ambush[_unitId] = watch;
         // the trail stops here: no rut drawn from where it stood to where it was
         _ruts?.Lift();
         _mt.Drove = false;
