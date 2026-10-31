@@ -989,7 +989,7 @@ public sealed partial class Tank3DBench
         h.Add(_mt.Round);
         h.Add(_mt.LastStrike);
         h.Add(_ambush.Count);
-        h.Add(_ambush.ContainsKey(_unitId));
+        h.Add(_ambush.TryGetValue(_unitId, out var watching) ? watching.Shots : 0);
         h.Add(_mt.Turn);
         h.Add(_mt.Drove);
         h.Add(_mt.Fired);
@@ -1040,7 +1040,7 @@ public sealed partial class Tank3DBench
               + (KitOf(_unitId) != Kit.None ? $" · апгрейды: {Kits.Names(KitOf(_unitId))}" : "")
               + (Burning(_unitId) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               // its ambush (Tank3DBench.Ambush): any order lifts it
-              + (_ambush.ContainsKey(_unitId) ? $" · {_modelTag} в засаде: любой приказ её снимет" : "")
+              + (_ambush.TryGetValue(_unitId, out var watch) ? $" · {_modelTag} в засаде{(watch.Shots > 1 ? $" (выстрелов: {watch.Shots})" : "")}: любой приказ её снимет" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "")
         + (!_hints ? "   F1 — подсказки"

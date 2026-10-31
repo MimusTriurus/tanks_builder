@@ -172,8 +172,9 @@ public sealed partial class Tank3DBench
         bool back = _routeBack;
         if (ram)
         {
-            // the rammed one's ambush is off with the ram (units.md, «Длится»)
-            if (_other is { Unit: true } rammed)
+            // the rammed one's ambush is off with the ram (units.md, «Длится») -
+            // but not the stabilizer's (upgrades.md, Д8)
+            if (_other is { Unit: true } rammed && (KitOf(rammed.Id) & Kit.AmbushStabilizer) == 0)
                 AmbushLift(rammed.Id, "rammed");
             ShadowAct($"ram {MapAt(cells[^1])}", s => Battle.Ram(s, cells[^1]));
         }

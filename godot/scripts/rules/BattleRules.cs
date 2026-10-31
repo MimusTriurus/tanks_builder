@@ -22,10 +22,10 @@ namespace TankSpriteTest;
 /// the medium's sector (Д7), the smoke grenade and its smoke, the incendiary
 /// round, the drive's upgrades (in <see cref="Steps"/>), the spall liner, the
 /// auto-extinguisher, the thermal imager, the mine layer, the repair kit, the
-/// winch (Д8).
+/// winch, the ambush stabilizer (Д8).
 ///
-/// <b>Not yet</b> (stages Д8-Д9): the ambush stabilizer; an ambush that holds
-/// an incendiary round back - it fires a plain one; the control point, placement.
+/// <b>Not yet</b> (stage Д9): an ambush that holds an incendiary round back -
+/// it fires a plain one; the control point, placement.
 /// </summary>
 public static class Battle
 {
@@ -430,7 +430,9 @@ public static class Battle
             s.Drove = true;
         // an order to the rammer, a ram to the rammed: both ambushes off
         Lift(s, u, "rammed");
-        Lift(s, victim, "was rammed");
+        // the stabilizer holds it through a ram (upgrades.md)
+        if ((victim.Kit & Kit.AmbushStabilizer) == 0)
+            Lift(s, victim, "was rammed");
         u.Heading = way;
         Vector2I landing = push.Legs[^1];
         if (u.Class.Bulldozes)
@@ -531,6 +533,8 @@ public static class Battle
         s.Fired = s.Drove = s.Bonus = true;
         u.Watch = axis;
         u.Watch2 = second;
+        // the stabilizer watches on past the first round (upgrades.md)
+        u.WatchShots = (u.Kit & Kit.AmbushStabilizer) != 0 ? 2 : 1;
         s.Events.Add(new BattleEvent(BattleEventKind.AmbushSet, u.Id, u.Cell, axis, second >= 0 ? $"and {second}" : ""));
         return null;
     }
@@ -661,7 +665,8 @@ public static class Battle
     /// with no standing wall across either edge it crosses. What the hex does
     /// is done to it as on any entering (a mine, a fire, water, smoke), and an
     /// enemy ambush's axis it lands on answers it. Its own ambush is off - it
-    /// was moved, as a ram moves it (a call of this build; the GDD is silent).
+    /// was moved, as a ram moves it (a call of this build; the GDD is silent) -
+    /// unless it has the stabilizer, which a ram does not lift either.
     /// </summary>
     public static string? Winch(BattleState s, Vector2I cell)
     {
@@ -688,7 +693,8 @@ public static class Battle
             return "a wall across the way";
         s.Bonus = true;
         Lift(s, u, "winched");
-        Lift(s, hull, "was winched");
+        if ((hull.Kit & Kit.AmbushStabilizer) == 0)
+            Lift(s, hull, "was winched");
         int way = HexField.Reverse(heading);
         hull.Cell = mid;
         s.Events.Add(new BattleEvent(BattleEventKind.Winched, hull.Id, mid, way, $"by #{u.Id}"));
@@ -731,8 +737,11 @@ public static class Battle
             int axis = Sees(s, w, entered);
             if (axis < 0)
                 continue;
-            w.Watch = w.Watch2 = -1;
-            s.Events.Add(new BattleEvent(BattleEventKind.AmbushFired, w.Id, entered.Cell, axis, $"at #{entered.Id}"));
+            // spent - with the stabilizer, at the second round (upgrades.md)
+            if (--w.WatchShots <= 0)
+                w.Watch = w.Watch2 = -1;
+            s.Events.Add(new BattleEvent(BattleEventKind.AmbushFired, w.Id, entered.Cell, axis,
+                                         $"at #{entered.Id}" + (w.Ambushing ? ", watching on" : "")));
             if (w.Class.Lobs)
                 Lob(s, entered.Cell);
             else

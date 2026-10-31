@@ -673,6 +673,36 @@ public static partial class SelfTest
                   $"{Said(s)}; heavy {tooHeavy}; 3 out {tooFar}; past a hull {past}");
         }
 
+        // Д8, upgrades.md «Стабилизатор засады»: the medium at (4,8) watches up
+        // the column; a heavy crosses (4,5) and holds the round on its side,
+        // the watch goes on; a light crosses next and takes the second, and the
+        // watch is spent. Rammed, the stabilizer's watch stays.
+        {
+            var mid = new Vector2I(4, 5);
+            BattleState s = Probe(9, 10);
+            Put(s, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.AmbushStabilizer);
+            Put(s, 1, "HTR", Camp.Brown, HexField.Step(mid, 30).X, HexField.Step(mid, 30).Y, 210);
+            Put(s, 2, "LTR", Camp.Brown, 0, 0, 330);
+            Act(s, 0, st => Battle.Ambush(st, 90));
+            s.Drove = s.Fired = s.Bonus = false;
+            Act(s, 1, st => Battle.Move(st, new[] { mid, HexField.Step(mid, 210) }, -1));
+            bool after1 = s.Unit(0)!.Ambushing;
+            s.Drove = s.Fired = s.Bonus = false;
+            s.Unit(2)!.Cell = HexField.Step(mid, 150);
+            Act(s, 2, st => Battle.Move(st, new[] { mid, HexField.Step(mid, 330) }, -1));
+            BattleState rammed = Probe(9, 10);
+            Put(rammed, 0, "MTR", Camp.Green, 4, 5, 90, kit: Kit.AmbushStabilizer);
+            Put(rammed, 1, "HTR", Camp.Brown, 4, 6, 90);
+            rammed.Unit(0)!.Watch = 90;
+            rammed.Unit(0)!.WatchShots = 2;
+            Act(rammed, 1, st => Battle.Ram(st, new Vector2I(4, 5)));
+            check("the ambush stabilizer watches on past the first round, spent at the second, and holds through a ram",
+                  after1 && s.Unit(1)!.Fate == UnitFate.Alive && s.Unit(2)!.Fate == UnitFate.Knocked
+                  && !s.Unit(0)!.Ambushing && s.Events.Count(e => e.Kind == BattleEventKind.AmbushFired) == 2
+                  && rammed.Unit(0)!.Cell == new Vector2I(4, 4) && rammed.Unit(0)!.Ambushing,
+                  $"after the heavy {after1}: {Said(s)}; rammed: {Said(rammed)}");
+        }
+
         // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
         // list is nothing, a name no upgrade has is refused; written back as read.
         {

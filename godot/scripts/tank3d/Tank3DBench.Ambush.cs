@@ -29,8 +29,9 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    /// <summary>Who watches: unit id to its axis and the sector's second (-1 for none).</summary>
-    private readonly Dictionary<int, (int A, int B)> _ambush = new();
+    /// <summary>Who watches: unit id to its axis, the sector's second (-1 for none)
+    /// and the rounds it has left - two with the stabilizer (Д8).</summary>
+    private readonly Dictionary<int, (int A, int B, int Shots)> _ambush = new();
     /// <summary>Ambush rounds fired in the match: a move one was fired on is
     /// not taken back (Tank3DBench.Undo).</summary>
     private int _ambushShots;
@@ -43,6 +44,10 @@ public sealed partial class Tank3DBench
     private Button? _actAmbush;
 
     private const string AmbushText = "Засада";
+
+    /// <summary>The ambush stabilizer (upgrades.md, Д8): the watch goes on past
+    /// the first round, and a ram does not lift it.</summary>
+    private bool RigHasStabilizer => (KitOf(_unitId) & Kit.AmbushStabilizer) != 0;
 
     /// <summary>Why the unit on the rig may not watch <paramref name="axis"/>
     /// (and <paramref name="second"/>) now, or empty.</summary>
@@ -74,7 +79,7 @@ public sealed partial class Tank3DBench
     private void AmbushSet(int axis, int second)
     {
         ShadowAct($"ambush {axis}{(second >= 0 ? $"+{second}" : "")}", s => Battle.Ambush(s, axis, second));
-        _ambush[_unitId] = (axis, second);
+        _ambush[_unitId] = (axis, second, RigHasStabilizer ? 2 : 1);
         _mt.Fired = _mt.Drove = _mt.Bonus = true;
         _ambushMode = false;
         _ambushPick = null;
@@ -135,7 +140,7 @@ public sealed partial class Tank3DBench
         if (SideOfUnit(id) is not Side side)
             return;
         bool any = false;
-        foreach (KeyValuePair<int, (int A, int B)> w in _ambush)
+        foreach (KeyValuePair<int, (int A, int B, int Shots)> w in _ambush)
             any |= SideOfUnit(w.Key) is Side ws && ws != side;
         if (!any)
             return;
@@ -193,7 +198,11 @@ public sealed partial class Tank3DBench
             {
                 case BattleEventKind.AmbushFired:
                     Fly();
-                    _ambush.Remove(e.Unit);
+                    // spent - the stabilizer's at its second round (Д8)
+                    if (_ambush.TryGetValue(e.Unit, out var left) && left.Shots > 1)
+                        _ambush[e.Unit] = (left.A, left.B, left.Shots - 1);
+                    else
+                        _ambush.Remove(e.Unit);
                     _ambushShots++;
                     path = new List<Vector3> { MuzzleOf(e.Unit) };
                     break;
@@ -336,7 +345,7 @@ public sealed partial class Tank3DBench
     /// Allocates nothing.</summary>
     private void DrawAmbushes(Control ink, float r)
     {
-        foreach (KeyValuePair<int, (int A, int B)> w in _ambush)
+        foreach (KeyValuePair<int, (int A, int B, int Shots)> w in _ambush)
         {
             int id = w.Key;
             TankModel? model = ModelOf(id);

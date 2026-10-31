@@ -32,6 +32,9 @@ public sealed class BattleUnit
     /// <summary>The ambush's axis and, for the medium's sector, the second one
     /// beside it (units.md, «Режим засады»; classes.md, «MT»); -1 for none.</summary>
     public int Watch = -1, Watch2 = -1;
+    /// <summary>Rounds the ambush has left: one, two with the stabilizer
+    /// (upgrades.md, «Стабилизатор засады»); nought reads as one.</summary>
+    public int WatchShots;
 
     public bool Out => Fate is UnitFate.Knocked or UnitFate.Drowned;
     public bool Standing => Fate != UnitFate.Destroyed;
@@ -40,7 +43,7 @@ public sealed class BattleUnit
     public BattleUnit Clone() => (BattleUnit)MemberwiseClone();
 
     public override string ToString() => $"{Side} {Tag}#{Id} ({Cell.X},{Cell.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
-                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}" : "");
+                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "");
 }
 
 public enum BattleEventKind
