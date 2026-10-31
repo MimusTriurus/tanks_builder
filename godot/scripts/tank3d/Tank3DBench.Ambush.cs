@@ -178,15 +178,129 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>An ambush the core has fired, its round waiting for the hull
-    /// it took to come on to the axis.</summary>
-    private sealed class AmbushDue(BattleState st, int from, int unit, Vector2I cell)
+    /// it took to come on to the axis - or, on the hull's own move, to take
+    /// the pose the core picked for it (<see cref="ShadowMove"/>).</summary>
+    private sealed class AmbushDue(BattleState st, int from, int unit, Vector2I cell, int to = int.MaxValue)
     {
         public readonly BattleState St = st;
-        public readonly int From = from, Unit = unit;
+        public readonly int From = from, To = to, Unit = unit;
         public readonly Vector2I Cell = cell;
+        /// <summary>The pose's heading on the own move, -1 for none: the round
+        /// waits on the hex till the hull points it (or its mirror on the axis,
+        /// the same plate), and a hull it knocks out stops in it.</summary>
+        public int Facing = -1, Axis = -1;
+        public bool Knocks;
         /// <summary>The hull's distance from the hex's middle last frame.</summary>
         public float Near = float.MaxValue;
-        public float Waited;
+        /// <summary>Time on the hex, and since it was given.</summary>
+        public float Waited, Age;
+    }
+
+    /// <summary>The longest a posed round waits for its move to get there, s:
+    /// a hull that went another way does not hold the match up.</summary>
+    private const float AmbushPoseMost = 10.0f;
+
+    /// <summary>The longest a posed round waits on its hex for the hull to
+    /// turn to the pose, s: a turn about takes longer than a hull coming in.</summary>
+    private const float AmbushPoseWait = 4.0f;
+
+    /// <summary>
+    /// The own unit's move or turn on the spot applied to the core, and the
+    /// enemy's ambushes on it queued as the core picked their moments
+    /// (<c>Battle.AmbushPicks</c>, units.md «Режим засады»): each round waits
+    /// until the hull is on its hex and points the way it was caught.
+    /// </summary>
+    private void ShadowMove(string what, System.Func<BattleState, string?> act)
+    {
+        _movePlanned = true;
+        int from = ShadowAct(what, act);
+        if (from < 0 || _shadow is not { } st)
+            return;
+        string at = $"at #{_unitId} facing ";
+        for (int i = from; i < st.Events.Count; i++)
+        {
+            BattleEvent e = st.Events[i];
+            if (e.Kind != BattleEventKind.AmbushFired || !e.Note.StartsWith(at))
+                continue;
+            int to = i + 1;
+            bool knocks = false;
+            while (to < st.Events.Count && st.Events[to].Kind is not (BattleEventKind.AmbushFired
+                       or BattleEventKind.Moved or BattleEventKind.Turned))
+            {
+                knocks |= st.Events[to].Kind == BattleEventKind.Knocked && st.Events[to].Unit == _unitId;
+                to++;
+            }
+            string tail = e.Note.Substring(at.Length);
+            int cut = tail.IndexOf(',');
+            _ambushDue.Add(new AmbushDue(st, i, _unitId, e.Cell, to)
+            {
+                Facing = int.Parse(cut < 0 ? tail : tail[..cut]),
+                Axis = e.Value,
+                Knocks = knocks,
+            });
+        }
+    }
+
+    /// <summary>The own unit's move is the core's to time (<see
+    /// cref="ShadowMove"/>): its hexes do not ask the ambushes again; a ram's
+    /// do (<c>HexEffectsTick</c>).</summary>
+    private bool _movePlanned;
+
+    private Steps.Route? _forecastWay;
+    private int _forecastFace = -2;
+    private Vector2I _forecastFrom;
+    private string _forecast = "";
+
+    /// <summary>
+    /// What the enemy's ambushes will do to the hull on the way shown, turned
+    /// to <paramref name="face"/> at its end - or on the spot, with no way -
+    /// for the path's line (units.md, «Режим засады»: the one moving sees
+    /// where and with which plate the ambush will meet it): the core's own
+    /// move played on a copy of the bench. Worked out when the way or the
+    /// face changes, not every frame.
+    /// </summary>
+    private string AmbushForecast(Steps.Route? way, int face)
+    {
+        if (ReferenceEquals(way, _forecastWay) && face == _forecastFace && CellHere == _forecastFrom)
+            return _forecast;
+        _forecastWay = way;
+        _forecastFace = face;
+        _forecastFrom = CellHere;
+        _forecast = "";
+        if (!Match || _ambush.Count == 0 || _field is null || _lineup.Count == 0 || (way is null && face < 0))
+            return _forecast;
+        BattleState st = ShadowOfBench();
+        int from = st.Events.Count;
+        if (Battle.Move(st, way?.Cells() ?? new List<Vector2I> { CellHere }, face, way?.Back) is not null)
+            return _forecast;
+        var said = new System.Text.StringBuilder();
+        string at = $"at #{_unitId} facing ";
+        for (int i = from; i < st.Events.Count; i++)
+        {
+            BattleEvent e = st.Events[i];
+            if (e.Kind != BattleEventKind.AmbushFired || !e.Note.StartsWith(at))
+                continue;
+            string plate = "", outcome = "мимо";
+            for (int j = i + 1; j < st.Events.Count && st.Events[j].Kind is not (BattleEventKind.AmbushFired
+                     or BattleEventKind.Moved or BattleEventKind.Turned); j++)
+            {
+                BattleEvent h = st.Events[j];
+                if (h.Unit != _unitId || h.Kind is not (BattleEventKind.Hit or BattleEventKind.Glanced))
+                    continue;
+                plate = h.Note;
+                outcome = h.Kind == BattleEventKind.Hit ? "подобьёт" : "не пробьёт";
+                break;
+            }
+            string side = plate switch
+            {
+                "Front" => " лбом", "Side" => " бортом", "Rear" => " кормой", "Roof" => " сверху", _ => "",
+            };
+            said.Append($" · засада {st.Unit(e.Unit)?.Tag}: {MapAt(e.Cell)}{side} — {outcome}");
+        }
+        _forecast = said.ToString();
+        if (_forecast.Length > 0)
+            Log.Print($"tank3d: forecast to {(way is null ? MapAt(CellHere) : MapAt(way.End.Cell))} facing {face}:{_forecast}");
+        return _forecast;
     }
 
     private readonly List<AmbushDue> _ambushDue = new();
@@ -214,9 +328,19 @@ public sealed partial class Tank3DBench
         if (_ambushDue.Count == 0)
             return;
         float dt = (float)GetProcessDeltaTime();
-        for (int i = _ambushDue.Count - 1; i >= 0; i--)
+        for (int i = 0; i < _ambushDue.Count; i++)
         {
             AmbushDue due = _ambushDue[i];
+            due.Age += dt;
+            // one hull's posed rounds in the order of its move
+            bool before = false;
+            for (int j = 0; j < i && !before; j++)
+                before = _ambushDue[j].Unit == due.Unit && _ambushDue[j].Facing >= 0;
+            if (before && due.Facing >= 0)
+                continue;
+            bool posed = due.Facing >= 0;
+            if (posed && due.Unit == _unitId && CellHere != due.Cell && due.Age < AmbushPoseMost)
+                continue;
             due.Waited += dt;
             float near = 0.0f;
             if (RigOf(due.Unit) is { } rig)
@@ -225,12 +349,29 @@ public sealed partial class Tank3DBench
                 off.Y = 0.0f;
                 near = off.Length();
             }
-            bool on = near < CellStep * 0.08f || near >= due.Near - 0.01f || due.Waited >= AmbushWaitMost;
+            float most = posed ? AmbushPoseWait : AmbushWaitMost;
+            bool on = near < CellStep * 0.08f || near >= due.Near - 0.01f || due.Waited >= most;
             due.Near = near;
+            // the pose: pointing the way it was caught, or its mirror on the
+            // axis, which shows the round the same plate
+            if (posed && on && due.Waited < most && due.Age < AmbushPoseMost)
+            {
+                int side = HullSide();
+                on = side == due.Facing
+                     || Battle.PlateOf(due.Axis, side, false) == Battle.PlateOf(due.Axis, due.Facing, false);
+            }
             if (!on)
                 continue;
-            _ambushDue.RemoveAt(i);
-            AmbushPlay(due.St, due.From);
+            _ambushDue.RemoveAt(i--);
+            // a hull it knocks out stops in that pose and rolls to the middle
+            if (posed && due.Knocks && due.Unit == _unitId && _fate == Fate.Alive)
+            {
+                CancelOrder();
+                _coastTo = CellWorld(due.Cell);
+                _speed = (_speed < 0.0f ? -1.0f : 1.0f) * Mathf.Max(Mathf.Abs(_speed), 0.2f * MaxSpeed);
+                _driveScripted = 0.0f;
+            }
+            AmbushPlay(due.St, due.From, due.To);
         }
     }
 
@@ -245,7 +386,7 @@ public sealed partial class Tank3DBench
     /// on: each flown from its watcher's muzzle along the legs the core gave it
     /// - the hull it took, a glance on, a pass through - and on landing what
     /// they did: holes, glances, fates.</summary>
-    private void AmbushPlay(BattleState st, int from)
+    private void AmbushPlay(BattleState st, int from, int to = int.MaxValue)
     {
         List<Vector3>? path = null;
         var struck = new List<(int Unit, bool Pierced, string Plate)>();
@@ -261,7 +402,7 @@ public sealed partial class Tank3DBench
             path = null;
             struck.Clear();
         }
-        for (int i = from; i < st.Events.Count; i++)
+        for (int i = from; i < st.Events.Count && i < to; i++)
         {
             BattleEvent e = st.Events[i];
             switch (e.Kind)

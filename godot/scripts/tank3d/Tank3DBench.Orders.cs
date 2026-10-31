@@ -176,10 +176,12 @@ public sealed partial class Tank3DBench
             // but not the stabilizer's (upgrades.md, Д8)
             if (_other is { Unit: true } rammed && (KitOf(rammed.Id) & Kit.AmbushStabilizer) == 0)
                 AmbushLift(rammed.Id, "rammed");
+            // the rammer comes on to the hex in one pose: asked as it enters (AmbushWatch)
+            _movePlanned = false;
             ShadowAct($"ram {MapAt(cells[^1])}", s => Battle.Ram(s, cells[^1]));
         }
         else
-            ShadowAct($"move to {MapAt(cells[^1])} facing {face}{(back ? " astern" : "")}", s => Battle.Move(s, cells, face, back));
+            ShadowMove($"move to {MapAt(cells[^1])} facing {face}{(back ? " astern" : "")}", s => Battle.Move(s, cells, face, back));
     }
 
     /// <summary>The flat side the hull points at - the nearest of the six to
@@ -244,7 +246,7 @@ public sealed partial class Tank3DBench
         float from = _turnGoal ?? Mathf.Round(_heading / 60.0f) * 60.0f;
         _turnGoal = from + (left ? 60.0f : -60.0f);
         int side = HexSideOf(CellHere, _turnGoal.Value);
-        ShadowAct($"turn to {side}", s => Battle.Turn(s, side));
+        ShadowMove($"turn to {side}", s => Battle.Turn(s, side));
     }
 
     /// <summary>The fastest the tank may go on the leg from

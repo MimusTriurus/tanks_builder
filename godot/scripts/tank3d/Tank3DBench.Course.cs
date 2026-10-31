@@ -265,6 +265,11 @@ public sealed partial class Tank3DBench
         }
         else
             _courseNote = $"{_reach!.Budget} шагов, клеток в досягаемости {_reach.Cells.Count}";
+        // where and with which plate the enemy's ambushes meet it (Tank3DBench.Ambush)
+        string forecast = shown is not null ? AmbushForecast(shown, GhostFace(shown))
+            : SpinShown() is int about && about != HullSide() ? AmbushForecast(null, about) : "";
+        if (forecast.Length > 0)
+            _courseNote += forecast;
         _courseInk?.QueueRedraw();
     }
 

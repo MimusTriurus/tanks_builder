@@ -114,14 +114,15 @@ public sealed partial class Tank3DBench
         return s;
     }
 
-    /// <summary>One action of the turn, given on the bench, applied to the core.</summary>
-    private void ShadowAct(string what, System.Func<BattleState, string?> act, bool order = true)
+    /// <summary>One action of the turn, given on the bench, applied to the
+    /// core; the index of its first event in the core's, -1 if not applied.</summary>
+    private int ShadowAct(string what, System.Func<BattleState, string?> act, bool order = true)
     {
         // an order to the unit lifts its ambush (Tank3DBench.Ambush); taking it does not
         if (order)
             AmbushLift(_unitId, what);
         if (!Match || _field is null || _lineup.Count == 0)
-            return;
+            return -1;
         if (_shadow is null)
         {
             // later than the turn's first quiet frame (ShadowTick): the bench
@@ -131,9 +132,13 @@ public sealed partial class Tank3DBench
         }
         int from = _shadow!.Events.Count;
         if (act(_shadow) is { } refused)
+        {
             Log.Print($"tank3d: battle: turn {_mt.TurnNo}: the core refuses {what}: {refused}");
-        else if (_shadow.Events.Count > from)
+            return -1;
+        }
+        if (_shadow.Events.Count > from)
             Log.Print($"tank3d: battle: {what}: " + string.Join(", ", _shadow.Events.Skip(from)));
+        return from;
     }
 
     /// <summary>The turn's state off the bench, and the last turn's end read against it.</summary>

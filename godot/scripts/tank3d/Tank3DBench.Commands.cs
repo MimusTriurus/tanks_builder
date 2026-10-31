@@ -251,7 +251,7 @@ public sealed partial class Tank3DBench
         MatchMoved();
         _route = null;
         _turnGoal = HeadingFor(CellHere, side);
-        ShadowAct($"turn to {side}", s => Battle.Turn(s, side));
+        ShadowMove($"turn to {side}", s => Battle.Turn(s, side));
         return true;
     }
 

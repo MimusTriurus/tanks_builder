@@ -72,6 +72,8 @@ public static partial class Battle
     /// the move is astern (<see cref="Steps.Route.Back"/>), each cell entered
     /// tail first - the reverse gear's bend between two of them a turn; null
     /// reads each step against the hull, the one cell back as before.
+    /// The enemy's ambushes fire each at its own moment of the move
+    /// (<see cref="AmbushPicks"/>), not as each hex is entered.
     /// </summary>
     public static string? Move(BattleState s, IReadOnlyList<Vector2I> path, int face, bool? back = null)
     {
@@ -83,19 +85,29 @@ public static partial class Battle
             return "only LT moves after acting";
         s.Drove = true;
         Lift(s, u, "moved");
-        // a hull an enemy's axis already sees, setting out - off its hex or
-        // turning on it - is seen going: the ambush fires at it where it
-        // stands, and one that knocks it out ends the move before it begins
-        // (the author, 2026-10-31)
+        Dictionary<int, Queue<int>>? picks = AmbushPicks(s, u, path, face, back);
+        return Walk(s, u, path, face, back, pose => picks is null || AmbushesAt(s, u, pose, picks));
+    }
+
+    /// <summary>
+    /// The move itself, pose by pose: <paramref name="at"/> is told each pose
+    /// of the hull while it goes, numbered from 0 - the one it stands in as it
+    /// sets out, each 60 degrees of a turn on a hex (the reverse gear's bend,
+    /// the turn to <paramref name="face"/> at the end), each hex as it is
+    /// entered - and a false from it stops the move in that pose. A move that
+    /// neither leaves the hex nor turns has no poses.
+    /// </summary>
+    private static string? Walk(BattleState s, BattleUnit u, IReadOnlyList<Vector2I> path, int face, bool? back,
+                                Func<int, bool> at)
+    {
         bool goes = face >= 0 && face != u.Heading;
         foreach (Vector2I next in path)
             goes |= next != u.Cell;
-        if (goes)
-        {
-            Ambushes(s, u);
-            if (u.Fate != UnitFate.Alive)
-                return null;
-        }
+        if (!goes)
+            return null;
+        int pose = 0;
+        if (!at(pose++))
+            return null;
         foreach (Vector2I next in path)
         {
             if (next == u.Cell)
@@ -110,19 +122,143 @@ public static partial class Battle
                     return $"a wall across ({u.Cell.X},{u.Cell.Y})>{way}";
                 WallDown(s, u.Cell, way);
             }
-            u.Heading = astern ? HexField.Reverse(way) : way;
+            // turned on the hex to set off, sixty degrees at a time
+            int want = astern ? HexField.Reverse(way) : way;
+            while (u.Heading != want)
+            {
+                u.Heading = TurnStep(u.Heading, want);
+                if (!at(pose++))
+                    return Stopped(s, u);
+            }
             u.Cell = next;
             s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, next, way));
-            Entered(s, u, way, forward: !astern);
+            // what the hex does first: a mine or the deep stops it there
+            Entered(s, u, way, forward: !astern, ambushes: false);
             if (u.Fate != UnitFate.Alive)
+                return null;
+            if (!at(pose++))
                 return null;
         }
         if (face >= 0 && face != u.Heading)
         {
-            u.Heading = face;
+            while (u.Heading != face)
+            {
+                u.Heading = TurnStep(u.Heading, face);
+                if (u.Heading != face && !at(pose++))
+                    return Stopped(s, u);
+            }
             s.Events.Add(new BattleEvent(BattleEventKind.Turned, u.Id, u.Cell, face));
+            at(pose++);
         }
         return null;
+    }
+
+    /// <summary>Stopped in the middle of a turn: the heading it was caught in.</summary>
+    private static string? Stopped(BattleState s, BattleUnit u)
+    {
+        s.Events.Add(new BattleEvent(BattleEventKind.Turned, u.Id, u.Cell, u.Heading));
+        return null;
+    }
+
+    /// <summary>Sixty degrees from <paramref name="from"/> towards
+    /// <paramref name="to"/>, the short way; about, clockwise.</summary>
+    public static int TurnStep(int from, int to)
+    {
+        int diff = ((to - from) % 360 + 360) % 360;
+        if (diff == 0)
+            return from;
+        return ((from + (diff <= 180 ? 60 : -60)) % 360 + 360) % 360;
+    }
+
+    /// <summary>
+    /// When each enemy ambush fires at the moving hull (units.md, «Режим
+    /// засады», 2026-10-31): the move is walked once on a copy, the ambushes
+    /// held, and at each pose an ambush sees the hull in, its round is tried on
+    /// a copy of that. It fires at the first pose where the round knocks the
+    /// hull out; where none does, at the first it sees it in - the
+    /// stabilizer's second round the same among the poses after its first.
+    /// Poses past where the move stops on its own (a mine, the deep) are not
+    /// had: the walk on the copy stops there too. Null with no ambush to fire.
+    /// </summary>
+    public static Dictionary<int, Queue<int>>? AmbushPicks(BattleState s, BattleUnit u, IReadOnlyList<Vector2I> path,
+                                                          int face, bool? back)
+    {
+        bool any = false;
+        foreach (BattleUnit w in s.Units)
+            any |= w.Side != u.Side && w.Fate == UnitFate.Alive && w.Ambushing;
+        if (!any)
+            return null;
+        BattleState t = s.Clone();
+        BattleUnit tu = t.Unit(u.Id)!;
+        var seen = new Dictionary<int, List<(int Pose, bool Knocks)>>();
+        Walk(t, tu, path, face, back, pose =>
+        {
+            foreach (BattleUnit w in t.Units)
+            {
+                if (w.Side == tu.Side || w.Fate != UnitFate.Alive || !w.Ambushing)
+                    continue;
+                int axis = Sees(t, w, tu);
+                if (axis < 0)
+                    continue;
+                BattleState tried = t.Clone();
+                BattleUnit target = tried.Unit(tu.Id)!;
+                Shoot(tried, tried.Unit(w.Id)!, target, axis);
+                if (!seen.TryGetValue(w.Id, out var poses))
+                    seen[w.Id] = poses = new List<(int, bool)>();
+                poses.Add((pose, target.Fate != UnitFate.Alive));
+            }
+            return true;
+        });
+        if (seen.Count == 0)
+            return null;
+        var picks = new Dictionary<int, Queue<int>>();
+        foreach (var (id, poses) in seen)
+        {
+            var queue = new Queue<int>();
+            int after = -1;
+            for (int shot = 0; shot < s.Unit(id)!.WatchShots; shot++)
+            {
+                int pick = -1;
+                foreach ((int pose, bool knocks) in poses)
+                {
+                    if (pose <= after)
+                        continue;
+                    if (pick < 0)
+                        pick = pose;
+                    if (knocks)
+                    {
+                        pick = pose;
+                        break;
+                    }
+                }
+                if (pick < 0)
+                    break;
+                queue.Enqueue(pick);
+                after = pick;
+            }
+            picks[id] = queue;
+        }
+        return picks;
+    }
+
+    /// <summary>The ambushes whose moment <paramref name="pose"/> is (<see
+    /// cref="AmbushPicks"/>) fire at <paramref name="u"/>, in the units'
+    /// order; false once it is knocked out or the match is over.</summary>
+    private static bool AmbushesAt(BattleState s, BattleUnit u, int pose, Dictionary<int, Queue<int>> picks)
+    {
+        foreach (BattleUnit w in s.Units)
+        {
+            if (!picks.TryGetValue(w.Id, out Queue<int>? queue) || queue.Count == 0 || queue.Peek() != pose)
+                continue;
+            queue.Dequeue();
+            if (w.Fate != UnitFate.Alive || !w.Ambushing || Sees(s, w, u) is not (>= 0 and int axis))
+                continue;
+            Shoot(s, w, u, axis);
+            Over(s);
+            if (u.Fate != UnitFate.Alive || s.Over)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>A turn on the spot: the move of the turn spent on it.</summary>
@@ -558,12 +694,12 @@ public static partial class Battle
     /// then the enemy's ambushes on it - in that order (match.md п. 4). An
     /// effect of the hex that knocks it out ends the hex: the ambush answers
     /// the hull as it came in.</summary>
-    private static void Entered(BattleState s, BattleUnit u, int way, bool forward)
+    private static void Entered(BattleState s, BattleUnit u, int way, bool forward, bool ambushes = true)
     {
         UnitFate was = u.Fate;
         Disperse(s, u);
         Arrive(s, u, way, forward);
-        if (u.Fate == was)
+        if (ambushes && u.Fate == was)
             Ambushes(s, u);
     }
 
@@ -733,12 +869,13 @@ public static partial class Battle
     public const int WinchReach = 2;
 
     /// <summary>
-    /// Unit <paramref name="entered"/> has come on to its hex - driven, shoved
-    /// or through a wall: every ambush of the other side whose axis sees it
-    /// there now (<see cref="Sees"/>) fires, by the rules of a shot, and is
-    /// spent. They fire in turn while the hull is as it came in: the first that
-    /// knocks it out ends it. Public for the bench, which plays it on its own
-    /// hull's entering (Tank3DBench.Ambush).
+    /// Unit <paramref name="entered"/> has come on to its hex not under its
+    /// own move - shoved by a ram, winched, or the rammer itself - so in one
+    /// pose: every ambush of the other side whose axis sees it there now
+    /// (<see cref="Sees"/>) fires, by the rules of a shot, and is spent. They
+    /// fire in turn while the hull is as it came in: the first that knocks it
+    /// out ends it. A move picks its moments instead (<see cref="AmbushPicks"/>).
+    /// Public for the bench, which plays it on a hull shoved (Tank3DBench.Ambush).
     /// </summary>
     public static void Ambushes(BattleState s, BattleUnit entered)
     {
@@ -752,19 +889,27 @@ public static partial class Battle
             int axis = Sees(s, w, entered);
             if (axis < 0)
                 continue;
-            // spent - with the stabilizer, at the second round (upgrades.md)
-            if (--w.WatchShots <= 0)
-                w.Watch = w.Watch2 = -1;
-            s.Events.Add(new BattleEvent(BattleEventKind.AmbushFired, w.Id, entered.Cell, axis,
-                                         $"at #{entered.Id}" + (w.Ambushing ? ", watching on" : "")));
-            if (w.Class.Lobs)
-                Lob(s, entered.Cell);
-            else
-                Fly(s, w.Cell, axis, w.Class.Might, Level(s, w),
-                    passes: w.Class.Might >= 4 && !w.Class.Turreted ? 1 : 0, glance: true, aim: entered.Cell,
-                    thermal: (w.Kit & Kit.Thermal) != 0);
+            Shoot(s, w, entered, axis);
             Over(s);
         }
+    }
+
+    /// <summary>Ambush <paramref name="w"/> fires along <paramref name="axis"/>
+    /// at <paramref name="target"/> as it stands, and is spent - with the
+    /// stabilizer, at its second round (upgrades.md).</summary>
+    private static void Shoot(BattleState s, BattleUnit w, BattleUnit target, int axis)
+    {
+        if (--w.WatchShots <= 0)
+            w.Watch = w.Watch2 = -1;
+        // the hull's heading as it was caught, for the bench to fire as it takes it
+        s.Events.Add(new BattleEvent(BattleEventKind.AmbushFired, w.Id, target.Cell, axis,
+                                     $"at #{target.Id} facing {target.Heading}" + (w.Ambushing ? ", watching on" : "")));
+        if (w.Class.Lobs)
+            Lob(s, target.Cell);
+        else
+            Fly(s, w.Cell, axis, w.Class.Might, Level(s, w),
+                passes: w.Class.Might >= 4 && !w.Class.Turreted ? 1 : 0, glance: true, aim: target.Cell,
+                thermal: (w.Kit & Kit.Thermal) != 0);
     }
 
     /// <summary>
