@@ -28,7 +28,7 @@ public sealed partial class Tank3DBench
     private HBoxContainer? _acts;
     private PanelContainer? _slotAttack, _slotBonus;
     private Label? _slotAttackText, _slotBonusText;
-    private Button? _actRam, _actDouse;
+    private Button? _actRam, _actDouse, _actRamWall;
     /// <summary>The slots as last drawn: the plates are restyled when they change, not every frame.</summary>
     private int _slotsShown = -1;
 
@@ -54,7 +54,9 @@ public sealed partial class Tank3DBench
         _acts.AddChild(new Control { CustomMinimumSize = new Vector2(18.0f, 0.0f), MouseFilter = Control.MouseFilterEnum.Ignore });
         (_slotBonus, _slotBonusText) = Slot(SlotBonus);
         _actRam = ActButton("Таран   Tab", toggle: true, RamToggle);
-        _actDouse = ActButton("Тушить   J", toggle: false, Douse);
+        _actDouse = ActButton("Тушить   J", toggle: false, () => Execute(new Command(CommandKind.Douse)));
+        // the wall ahead rammed through (Д5): no key of its own - none is free
+        _actRamWall = ActButton("Таран стены", toggle: false, () => Execute(new Command(CommandKind.RamWall, Side: HullSide())));
         layer.AddChild(_acts);
     }
 
@@ -162,6 +164,7 @@ public sealed partial class Tank3DBench
         }
         _actRam!.Visible = bonus;
         _actDouse!.Visible = bonus && Burning(_unitId);
+        _actRamWall!.Visible = bonus && WallAhead;
         _actRam.SetPressedNoSignal(_ramMode);
     }
 }

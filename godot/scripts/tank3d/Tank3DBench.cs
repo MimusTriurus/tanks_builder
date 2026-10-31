@@ -1480,6 +1480,11 @@ public sealed partial class Tank3DBench : Node3D
                 string[] parts = args[++i].Split('@');
                 _script.Add((parts.Length > 1 ? (int)F(parts[1], 0) : 0, parts[0]));
             }
+            // --commands "go:3,5;fire:5,3;pass": a match by commands alone, each
+            // given when the last is done (Tank3DBench.Commands, CommandsTick)
+            else if (a == "--commands" && more)
+                foreach (string one in args[++i].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    _commands.Enqueue(one);
         }
         TakeSession();
         MatchSetup();
@@ -1682,6 +1687,14 @@ public sealed partial class Tank3DBench : Node3D
                 {
                     if ((what[4..] == "ram") != _ramMode)
                         RamToggle();
+                }
+                // cmd=KIND[:Q,R][:SIDE]: a command, as the AI will give it (Tank3DBench.Commands)
+                else if (what.StartsWith("cmd=", StringComparison.Ordinal))
+                {
+                    if (ParseCommand(what[4..]) is { } command)
+                        Execute(command);
+                    else
+                        Log.Print($"tank3d: --do {what}: not a command");
                 }
                 else if (what.StartsWith("go=", StringComparison.Ordinal))
                 {
@@ -2378,7 +2391,7 @@ public sealed partial class Tank3DBench : Node3D
                 case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen && (_spinOpen || SpinMay)) SpinStep(left: false); else if (_chosen) OrderTurn(left: false); return;
                 // Ctrl+Enter in a match: the turn handed over (Tank3DBench.Match)
                 case Key.Enter or Key.KpEnter:
-                    if (Match && order.CtrlPressed) EndTurn();
+                    if (Match && order.CtrlPressed) Execute(new Command(CommandKind.Pass));
                     else if (_spinOpen && _spinPick is int pick) SpinTo(pick);
                     else Confirm();
                     return;
@@ -2417,7 +2430,7 @@ public sealed partial class Tank3DBench : Node3D
         // Ctrl+Z in a match: the move taken back (Tank3DBench.Undo)
         if (Match && key.Keycode == Key.Z && key.CtrlPressed)
         {
-            UndoMove();
+            Execute(new Command(CommandKind.Undo));
             return;
         }
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
@@ -2431,7 +2444,7 @@ public sealed partial class Tank3DBench : Node3D
                 Restart();
             // J, the bench's fire, puts the unit's fire out (Tank3DBench.Blast)
             else if (key.Keycode == Key.J)
-                Douse();
+                Execute(new Command(CommandKind.Douse));
             // 1 to 5, the bench's hits, take the roster's units (Tank3DBench.Acts)
             else
                 ActKey(key.Keycode);

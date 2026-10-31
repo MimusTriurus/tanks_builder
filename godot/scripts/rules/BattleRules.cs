@@ -104,8 +104,47 @@ public static class Battle
     }
 
     /// <summary>A turn on the spot: the move of the turn spent on it.</summary>
-    public static string? Turn(BattleState s, int face) =>
-        Acting(s, out string? why) is { } u ? Move(s, new[] { u.Cell }, face) : why;
+    public static string? Turn(BattleState s, int face)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        int cost = Steps.Turning(u.Heading, face);
+        if (cost > Steps.BudgetAt(s.Board, u.Cell, MoverOf(s, u)))
+            return $"no steps to turn {cost}";
+        return Move(s, new[] { u.Cell }, face);
+    }
+
+    /// <summary>
+    /// The move as a command gives it (Д5) - to <paramref name="cell"/>, turned
+    /// to <paramref name="face"/> at the end if the budget has it, -1 to stay
+    /// as it arrives: the route is the planner's (<see cref="Steps.Plan"/>, the
+    /// straightest of the cheapest, past the standing units), the budget its,
+    /// then <see cref="Move"/> along it. What the AI orders.
+    /// </summary>
+    public static string? Go(BattleState s, Vector2I cell, int face = -1)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        Steps.Reach reach = Steps.Plan(s.Board, new Steps.Pose(u.Cell, u.Heading), MoverOf(s, u));
+        if (reach.RouteTo(cell) is not { } route)
+            return $"({cell.X},{cell.Y}) is out of reach";
+        if (face >= 0 && face != route.End.Heading && reach.TurnTo(route, face) is null)
+            return $"no steps left to turn to {face}";
+        return Move(s, route.Cells(), face >= 0 ? face : route.End.Heading);
+    }
+
+    /// <summary>How unit <paramref name="u"/> moves on this state: its class,
+    /// its kit, the standing units in its way.</summary>
+    public static Steps.Mover MoverOf(BattleState s, BattleUnit u)
+    {
+        var barred = new HashSet<Vector2I>();
+        foreach (BattleUnit o in s.Units)
+            if (o.Standing && o.Id != u.Id)
+                barred.Add(o.Cell);
+        Steps.Mover mover = Steps.Mover.Of(u.Class, (u.Kit & Kit.Snorkel) != 0, barred);
+        mover.Trawl = (u.Kit & Kit.Trawl) != 0;
+        return mover;
+    }
 
     /// <summary>What a cell does to a hull that comes on to it, driven or pushed
     /// (field.md, «мины», «вода», «огонь\пожар»; states.md, «Горит»).</summary>

@@ -179,6 +179,27 @@ public static partial class SelfTest
                   s.Unit(0)!.Fate == UnitFate.Alive && s.Unit(1)!.Fate == UnitFate.Drowned, Said(s));
         }
 
+        // Д5: the move as a command gives it - the planner's route, the class's
+        // budget (classes.md: LT 5, MT 4), the side at the end out of the same.
+        {
+            BattleState s = Probe(9, 10);
+            Put(s, 0, "LTR", Camp.Green, 2, 8, 90);
+            Put(s, 1, "MTR", Camp.Green, 6, 8, 90);
+            Put(s, 2, "LTR", Camp.Brown, 0, 0, 90);
+            string? light = null, medium = null, late = null;
+            Act(s, 0, st => light = Battle.Go(st, new Vector2I(2, 3)));
+            s.Drove = false;
+            Act(s, 1, st => medium = Battle.Go(st, new Vector2I(6, 3)));
+            BattleState t = Probe(9, 10);
+            Put(t, 0, "MTR", Camp.Green, 6, 8, 90);
+            Put(t, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(t, 0, st => late = Battle.Go(st, new Vector2I(6, 4), face: 270));
+            check("a command's move goes by the budget: LT five up, MT not, nor four and a half-turn",
+                  light is null && s.Unit(0)!.Cell == new Vector2I(2, 3)
+                  && medium is not null && s.Unit(1)!.Cell == new Vector2I(6, 8) && late is not null,
+                  $"LT {light ?? "ok"}; MT {medium}; MT turned {late}");
+        }
+
         // A copy is a copy.
         {
             BattleState s = Probe(9, 10);

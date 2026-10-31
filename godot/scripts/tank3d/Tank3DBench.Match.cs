@@ -238,7 +238,10 @@ public sealed partial class Tank3DBench
     /// the spot, the gun laying, a round in the air.</summary>
     private bool MatchBusy =>
         RouteMoving || _turnGoal is not null || _aim is not null || _shotWaiting is not null
-        || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning || _ramWaiting is not null || _chain.Count > 0;
+        || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning || _ramWaiting is not null || _chain.Count > 0
+        // the hull rolling on after a mine, a wall being rammed (Д5: a command
+        // given then went in under them)
+        || _coastTo is not null || _wallRam;
 
     private bool MatchOver => _mt.Won is not null || _mt.Drawn;
 
@@ -506,6 +509,8 @@ public sealed partial class Tank3DBench
         ShadowTick(busy);
         // what a hex does to a hull coming on to it (Tank3DBench.Rules)
         HexEffectsTick();
+        // --commands, one at a time (Tank3DBench.Commands)
+        CommandsTick(busy);
         if (_other is { Unit: true, Fate: Fate.Destroyed } && !busy)
             DropTarget();
         if (MatchOver)
