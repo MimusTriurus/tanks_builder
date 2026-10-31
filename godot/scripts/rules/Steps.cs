@@ -136,7 +136,7 @@ public static class Steps
         internal readonly Dictionary<State, int> Cost = new();
         internal readonly Dictionary<State, List<State>> Pred = new();
         internal readonly Dictionary<State, Risk> Risks = new();
-        internal HexField Field = null!;
+        internal IHexBoard Field = null!;
         private Dictionary<Vector2I, int>? _cells;
 
         /// <summary>Every cell a move may end on, with the fewest steps that
@@ -279,7 +279,7 @@ public static class Steps
 
     /// <summary>The steps a turn begun on <paramref name="cell"/> has: the
     /// speed, or one in mud or a wood.</summary>
-    public static int BudgetAt(HexField field, Vector2I cell, Mover mover) =>
+    public static int BudgetAt(IHexBoard field, Vector2I cell, Mover mover) =>
         Stops(field, cell) ? Math.Min(1, mover.Speed) : mover.Speed;
 
     /// <summary>
@@ -292,7 +292,7 @@ public static class Steps
 
     /// <summary>Whether entering <paramref name="cell"/> ends the move by the
     /// floor or the cover alone: mud, a wood in any state.</summary>
-    public static bool Stops(HexField field, Vector2I cell) =>
+    public static bool Stops(IHexBoard field, Vector2I cell) =>
         field.FoundationAt(cell) == Foundation.Mud || field.CoverAt(cell) == Cover.Forest;
 
     /// <summary>60° turns between two flat sides, the short way round.</summary>
@@ -306,7 +306,7 @@ public static class Steps
     /// Search the turn from <paramref name="start"/>: every pose within the
     /// budget, the fewest steps to each and all its equal predecessors.
     /// </summary>
-    public static Reach Plan(HexField field, Pose start, Mover mover)
+    public static Reach Plan(IHexBoard field, Pose start, Mover mover)
     {
         int plain = BudgetAt(field, start.Cell, mover);
         bool road = field.FoundationAt(start.Cell) == Foundation.Road;
@@ -368,7 +368,7 @@ public static class Steps
     /// <paramref name="way"/>: where it lands, its price, whether the move
     /// ends there and what it risks - or null when it may not be taken.</summary>
     private static (Vector2I To, int Price, bool Ends, Risk Risk)? Enter(
-        HexField field, Mover mover, Vector2I cell, int way, bool forward)
+        IHexBoard field, Mover mover, Vector2I cell, int way, bool forward)
     {
         Vector2I to = HexField.Step(cell, way);
         if (to == cell || !field.InBounds(to) || mover.Barred?.Contains(to) == true)

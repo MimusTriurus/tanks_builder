@@ -117,14 +117,14 @@ public static class Gunnery
     /// screen that level and does screen the one below. Its drawn top is half a
     /// level up, and the picture agrees - see <c>TankTick.Clearance</c>.
     /// </summary>
-    public static bool Overtops(HexField field, Vector2I cell, Vector2I from,
+    public static bool Overtops(IHexBoard field, Vector2I cell, Vector2I from,
                                 Vector2I onto) =>
         Overtops(field, cell, field.LevelAt(from), field.LevelAt(onto));
 
     /// <summary>The same, with the two ends' levels given: a hull afloat
     /// stands on its water's surface, the bank's level, not on the bed's
     /// (GDD field.md, «Уровни и линия огня»; <see cref="Solve(HexField, Vector2I, Vector2I, bool, Func{Vector2I, bool}, bool, Func{Vector2I, int})"/>).</summary>
-    public static bool Overtops(HexField field, Vector2I cell, int fromLevel, int ontoLevel) =>
+    public static bool Overtops(IHexBoard field, Vector2I cell, int fromLevel, int ontoLevel) =>
         field.LevelAt(cell) > Math.Min(fromLevel, ontoLevel);
 
     /// <summary>
@@ -211,7 +211,7 @@ public static class Gunnery
     /// surface of its water, level with the bank (GDD field.md, «Уровни и
     /// линия огня», 2026-10-29). Without it both ends are their cells'.
     /// </summary>
-    public static Shot Solve(HexField field, Vector2I from, Vector2I onto, bool lobs,
+    public static Shot Solve(IHexBoard field, Vector2I from, Vector2I onto, bool lobs,
                              Func<Vector2I, bool> occupied, bool masonry = true,
                              Func<Vector2I, int>? standing = null)
     {
@@ -284,6 +284,15 @@ public static class Gunnery
             }
             // the bomb goes over whatever stands on the way (above)
             if (lobs)
+                continue;
+            // A hull or a cover stops the round on its own level only (GDD
+            // field.md, «Юниты и покрытия ... перекрывают огонь только на своём
+            // уровне»): a wood in the valley under two tops, a tank in the
+            // ravine under the shot across it, are below the floor. Above it the
+            // ground has stopped the round already (Overtops). Silent until the
+            // wood began to screen (2026-10-31, Д2): the valley the tops shoot
+            // across was wooded on the harness's board.
+            if ((standing?.Invoke(lane[i]) ?? field.LevelAt(lane[i])) < Math.Min(fromLevel, ontoLevel))
                 continue;
             bool tank = occupied(lane[i]);
             if (!tank && !field.Screened(lane[i]))
@@ -727,6 +736,28 @@ public static class Gunnery
     /// <summary>The shortest throw, and the steepest - see <see cref="LobTable"/>.
     /// </summary>
     public const int LobShortest = 3;
+
+    /// <summary>A gun's nearest tank target, cells: one empty hex between
+    /// (GDD units.md, «хотя бы один пустой гекс»). A wall or a wood may be
+    /// shot point-blank; only a tank wants the gap.</summary>
+    public const int DirectNearest = 2;
+
+    /// <summary>What the distance alone says of a shot <paramref name="cells"/>
+    /// along an axis - before the lane is walked (<see cref="Solve"/>).</summary>
+    public enum Distance { Fits, Own, MortarBand, PointBlank }
+
+    /// <summary>
+    /// The distance gates of a shot (docs/battle-core-plan.md, Д2; they lived
+    /// in the bench's <c>ShotWhy</c>): not one's own hex; a mortar 3 to 5 cells
+    /// along its axis, at anything; a gun at a tank no nearer than
+    /// <see cref="DirectNearest"/>. <paramref name="tank"/> - a tank stands on
+    /// the hex aimed at.
+    /// </summary>
+    public static Distance MayTarget(bool lobs, int cells, bool tank) =>
+        cells <= 0 ? Distance.Own
+        : lobs && (cells < LobShortest || cells > LobReach) ? Distance.MortarBand
+        : !lobs && tank && cells < DirectNearest ? Distance.PointBlank
+        : Distance.Fits;
 
     /// <summary>
     /// What a mortar's tube stands at for each cell of its range band, in

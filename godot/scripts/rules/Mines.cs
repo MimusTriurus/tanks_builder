@@ -111,7 +111,7 @@ public static class Mines
     /// off the screen - GDD field.md, "мина израсходована", which is
     /// <see cref="CoverState.Cleared"/> here.
     /// </summary>
-    public static List<Vector2I> Marked(HexField field)
+    public static List<Vector2I> Marked(IHexBoard field)
     {
         var due = new List<Vector2I>();
         for (int r = 0; r < field.Rows; r++)

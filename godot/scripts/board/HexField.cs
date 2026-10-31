@@ -26,7 +26,7 @@ namespace TankSpriteTest;
 /// needs real hex arithmetic - rounding a click to a cell, walking a path -
 /// converts to axial first, because offset coordinates do not add.
 /// </summary>
-public sealed partial class HexField : Node2D
+public sealed partial class HexField : Node2D, IHexBoard
 {
     /// <summary>World headings of the six edge directions of a flat-top hex.</summary>
     public static readonly int[] EdgeHeadings = { 30, 90, 150, 210, 270, 330 };
@@ -455,57 +455,34 @@ public sealed partial class HexField : Node2D
     /// neighbour at one point and stands above or below it everywhere else -
     /// there is no continuous surface to drive over, and the two ends of a tank
     /// crossing there would sit at heights nothing on the board explains.
+    ///
+    /// <b>How, step by step</b> - in <see cref="BoardRules.Passable"/>, shared
+    /// with <see cref="BattleBoard"/> (docs/battle-core-plan.md, Д2):
+    /// <list type="bullet">
+    /// <item>The floor first, before any of the height arithmetic. Rock is a
+    /// refusal of the same kind as the board's edge, and off-board cells come
+    /// through here too, which is where Plot reaches the pathing. A board that
+    /// flattens its relief does not quietly open its cliffs.</item>
+    /// <item>Off a ramp: along its axis, and the level it reaches is the one
+    /// that end of the ramp is at. Onto a ramp: the shared edge seen from the
+    /// ramp's side.</item>
+    /// <item>Level to level - or one level down on to a floor that takes a
+    /// drop, which is deep water (<see cref="TerrainRules.Plunges"/>): a tank
+    /// drives off the bank into the pond with no ramp, the way it falls in when
+    /// rammed. The way in only: from the pond the bank is a level up, a level up
+    /// wants a ramp, so "out by the ramp alone" is not a second rule but the
+    /// first one, read from the water.</item>
+    /// </list>
     /// </summary>
-    public bool Passable(Vector2I cell, int heading)
-    {
-        Vector2I next = Step(cell, heading);
-        if (!InBounds(cell) || !InBounds(next))
-            return false;
-        // The floor, before any of the height arithmetic. Rock is a refusal of
-        // the same kind as the board's edge - nothing about the step across it
-        // makes it drivable - and off-board cells come through here too, which
-        // is where Plot finally reaches the pathing. Rock was already
-        // unreachable by standing two levels up; saying it here as well costs
-        // nothing and means a board that flattens its relief does not quietly
-        // open its cliffs. Deep water used to be refused here too; it is driven
-        // into now, and how - a drop off the bank - is the last line of this
-        // method.
-        if (!TerrainRules.Drivable(FoundationAt(next)))
-            return false;
-        if (_levels is null)
-            return true;
-        if (_ramps is null)
-            return Math.Abs(LevelAt(next) - LevelAt(cell)) <= MaxClimb;
+    public bool Passable(Vector2I cell, int heading) => BoardRules.Passable(this, cell, heading);
 
-        int here = RampHeading(cell), there = RampHeading(next);
-        int back = Reverse(heading);
-        // Off a ramp: along its axis, and the level it reaches is the one that
-        // end of the ramp is at.
-        if (here >= 0)
-        {
-            if (heading != here && heading != Reverse(here))
-                return false;
-            if (there >= 0)
-                return false;
-            return LevelAt(next) == LevelAt(cell) + (heading == here ? 1 : 0);
-        }
-        // Onto a ramp: the shared edge seen from the ramp's side.
-        if (there >= 0)
-        {
-            if (back != there && back != Reverse(there))
-                return false;
-            return LevelAt(cell) == LevelAt(next) + (back == there ? 1 : 0);
-        }
-        // Level to level - or one level down on to a floor that takes a drop,
-        // which is deep water (TerrainRules.Plunges): a tank drives off the bank
-        // into the pond with no ramp, the way it falls in when rammed. The way in
-        // only. From the pond the bank is a level up, a level up wants a ramp, and
-        // that is the line this one falls through to; so "out by the ramp alone"
-        // is not a second rule but the first one, read from the water.
-        return LevelAt(next) == LevelAt(cell)
-               || (TerrainRules.Plunges(FoundationAt(next))
-                   && LevelAt(next) == LevelAt(cell) - 1);
-    }
+    // IHexBoard (Д2): the layers' presence, and the public fields as properties
+    int IHexBoard.Columns => Columns;
+    int IHexBoard.Rows => Rows;
+    bool IHexBoard.Slopes => Slopes;
+    int IHexBoard.MaxClimb => MaxClimb;
+    bool IHexBoard.Leveled => HasRelief;
+    bool IHexBoard.Ramped => HasRamps;
 
     /// <summary>
     /// Whether the step from one cell to the next is a fall rather than a drive:
@@ -519,12 +496,7 @@ public sealed partial class HexField : Node2D
     /// question, so they are one method: what the hull does on the way down is
     /// the same shape whether there is water at the bottom of it.
     /// </summary>
-    public bool Drops(Vector2I from, Vector2I onto) =>
-        Slopes
-            ? LevelAt(onto) < LevelAt(from) - MaxClimb
-              || (TerrainRules.Plunges(FoundationAt(onto)) && LevelAt(onto) < LevelAt(from))
-            : RampHeading(from) < 0 && RampHeading(onto) < 0
-              && LevelAt(onto) < LevelAt(from);
+    public bool Drops(Vector2I from, Vector2I onto) => BoardRules.Drops(this, from, onto);
 
     /// <summary>
     /// The levels are joined by slopes, not by ramps (BOT-11, <c>--relief</c>):
@@ -1370,23 +1342,8 @@ public sealed partial class HexField : Node2D
     /// the board - most likely on the odd columns, where it would be wrong
     /// every other file and right in a screenshot.
     /// </summary>
-    public List<Vector2I> Lane(Vector2I cell, int heading, int limit = int.MaxValue)
-    {
-        var lane = new List<Vector2I>();
-        Vector2I at = cell;
-        while (lane.Count < limit)
-        {
-            Vector2I next = Step(at, heading);
-            // Step hands back the cell unchanged for a heading that points at a
-            // corner rather than an edge, so this is what stops a bogus heading
-            // spinning here forever.
-            if (next == at || !InBounds(next))
-                break;
-            lane.Add(next);
-            at = next;
-        }
-        return lane;
-    }
+    public List<Vector2I> Lane(Vector2I cell, int heading, int limit = int.MaxValue) =>
+        BoardRules.Lane(this, cell, heading, limit);
 
     /// <summary>
     /// The lane <paramref name="to"/> stands on as seen from
@@ -1397,19 +1354,7 @@ public sealed partial class HexField : Node2D
     /// wherever the heading is: the cells in between are what a shot has to
     /// pass through.
     /// </summary>
-    public (int Heading, int Range) LaneTo(Vector2I from, Vector2I to)
-    {
-        if (from == to)
-            return (-1, 0);
-        foreach (int heading in EdgeHeadings)
-        {
-            List<Vector2I> lane = Lane(from, heading);
-            int at = lane.IndexOf(to);
-            if (at >= 0)
-                return (heading, at + 1);
-        }
-        return (-1, 0);
-    }
+    public (int Heading, int Range) LaneTo(Vector2I from, Vector2I to) => BoardRules.LaneTo(this, from, to);
 
     /// <summary>Shortest path between two cells, excluding the start.
     ///
@@ -1900,8 +1845,7 @@ public sealed partial class HexField : Node2D
 
     /// <summary>Whether this cell carries masonry on this side of itself. The
     /// half-question; <see cref="Walled"/> is the one worth asking.</summary>
-    public bool SideStands(Vector2I cell, int heading) =>
-        (SidesAt(cell) & (1 << EdgeIndex(heading))) != 0;
+    public bool SideStands(Vector2I cell, int heading) => BoardRules.SideStands(this, cell, heading);
 
     /// <summary>
     /// Whether standing masonry lies across the edge between a cell and its
@@ -1911,9 +1855,7 @@ public sealed partial class HexField : Node2D
     /// and two cells may each have laid one. Nothing crosses an edge either of
     /// them walled, and it does not matter which.
     /// </summary>
-    public bool Walled(Vector2I from, int heading) =>
-        SideStands(from, heading)
-        || SideStands(Step(from, heading), Reverse(heading));
+    public bool Walled(Vector2I from, int heading) => BoardRules.Walled(this, from, heading);
 
     /// <summary>
     /// Lay the masonry on one cell: which of its edges stand, as a mask.
@@ -1968,8 +1910,7 @@ public sealed partial class HexField : Node2D
     /// <see cref="Gunnery.Solve"/> exactly where it asks whether a tank is in
     /// the way, because from the shell's point of view those are the same
     /// question.</summary>
-    public bool Screened(Vector2I cell) =>
-        TerrainRules.Screens(CoverAt(cell), CoverStateAt(cell));
+    public bool Screened(Vector2I cell) => BoardRules.Screened(this, cell);
 
     /// <summary>
     /// Whether a step from a cell in a heading is refused by what stands on the
@@ -1984,8 +1925,7 @@ public sealed partial class HexField : Node2D
     /// it as a flag, and the wall bench - whose whole subject is driving into
     /// masonry - leaves it off on purpose.
     /// </summary>
-    public bool Blocked(Vector2I from, int heading) =>
-        TerrainRules.Of(Cover.Walls).Blocks && Walled(from, heading);
+    public bool Blocked(Vector2I from, int heading) => BoardRules.Blocked(this, from, heading);
 
     /// <summary>
     /// Every cell, furthest from the camera first.

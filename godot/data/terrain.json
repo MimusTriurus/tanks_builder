@@ -75,7 +75,7 @@
 
   "cover": {
     "forest": {
-      "blocks": false, "screens": false, "speed": 1.0, "burns": true,
+      "blocks": false, "screens": true, "speed": 1.0, "burns": true,
       "states": ["intact", "burning", "burnt", "cleared"]
     },
     "trench": {

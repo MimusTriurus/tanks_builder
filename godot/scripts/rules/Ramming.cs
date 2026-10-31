@@ -130,7 +130,7 @@ public static class Ramming
     /// beside the methods that call them. A rule nobody can put a board in front
     /// of is a rule that gets read rather than checked.
     /// </summary>
-    public static Shove Of(HexField field, Func<Vector2I, bool> occupied,
+    public static Shove Of(IHexBoard field, Func<Vector2I, bool> occupied,
                            MovementProfile rammer, MovementProfile victim,
                            Vector2I from, int heading)
     {
@@ -185,7 +185,7 @@ public static class Ramming
     /// classes or the masonry. Shared by the hex behind the target and by the
     /// foot of the ramp it may slide down, because the rules ask the same three
     /// things of both.</summary>
-    private static Bar Takes(HexField field, Func<Vector2I, bool> occupied,
+    private static Bar Takes(IHexBoard field, Func<Vector2I, bool> occupied,
                              Vector2I cell, Vector2I from)
     {
         if (!field.InBounds(cell))

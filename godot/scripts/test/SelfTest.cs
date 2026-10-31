@@ -16,7 +16,7 @@ namespace TankSpriteTest;
 /// anchor and the hexagon centre are different points, and treating them as one
 /// selects the neighbouring cell along every slanted edge.
 /// </summary>
-public static class SelfTest
+public static partial class SelfTest
 {
     /// <summary>
     /// Every check, against the tank that is loaded.
@@ -12280,8 +12280,14 @@ public static class SelfTest
             Vehicle? wasTarget = shooter.Target;
 
             // Put them on a lane rather than trusting where they are parked -
-            // which the check above has just established they are not.
+            // which the check above has just established they are not. A lane
+            // with nothing on its middle cell: the harness sows its woods by
+            // hash, and a wood stops the round since 2026-10-31 (Д2): the one
+            // on (4, 2) is cleared for these three checks and given back.
             shooter.Cell = new Vector2I(4, 3);
+            Vector2I middle = HexField.Step(shooter.Cell, 90);
+            CoverState middleWas = field.CoverStateAt(middle);
+            bool middleCleared = field.Screened(middle) && field.SetCoverState(middle, CoverState.Cleared);
             foe.Cell = HexField.Step(HexField.Step(shooter.Cell, 90), 90);
             Shot clear = Gunnery.Solve(field, vehicles, shooter, foe);
             Check("a target two cells up a lane is a clear shot",
@@ -12312,6 +12318,9 @@ public static class SelfTest
                 third.Wreck.Reset();
                 third.Cell = wasThird;
             }
+
+            if (middleCleared)
+                field.SetCoverState(middle, middleWas);
 
             // Off the lane by one cell. The turret still tracks, which is the
             // half of the rule that is about the picture: a tank that parked its
@@ -20138,13 +20147,15 @@ public static class SelfTest
             "the states a cover may be in are declared per cover");
 
         // Spent is not gone: the cover is still what it was and on the map it
-        // still reads as woods, and what it stops is nothing. Both halves,
-        // because a burning wood standing is the one that is easy to get wrong -
-        // it is still trees, and on fire.
-        Check("a burning wood still stands and a burnt one does not",
+        // still reads as woods, and what it stops is nothing. A burning wood is
+        // still trees, and on fire; a burnt one is still a wood to drive and to
+        // see through (GDD field.md, «сгоревший лес — тот же лес для движения
+        // и обзора»; it was spent here until 2026-10-31, Д2). Cleared is gone.
+        Check("a burning wood and a burnt one still stand, a cleared one does not",
             TerrainRules.Standing(Cover.Forest, CoverState.Burning)
-            && !TerrainRules.Standing(Cover.Forest, CoverState.Burnt),
-            "burning is a state of a cover that is there");
+            && TerrainRules.Standing(Cover.Forest, CoverState.Burnt)
+            && !TerrainRules.Standing(Cover.Forest, CoverState.Cleared),
+            "burning and burnt are states of a cover that is there");
 
         var slots = new HexField { Columns = 8, Rows = 6 };
         var floors = new Foundation[8 * 6];
@@ -20525,10 +20536,13 @@ public static class SelfTest
         // written against, asked here rather than a second judgement about when
         // a wood is finished.
         fire.Tick(fire.BurnFor + fire.CatchWithin + 0.1);
+        // Burnt, and still a wood: GDD field.md, «сгоревший лес — тот же лес
+        // для движения и обзора» (it was a hole in the line until 2026-10-31,
+        // docs/battle-core-plan.md, Д2).
         Check("and that it is finished when the last tree on it is",
             burning.CoverStateAt(lit) == CoverState.Burnt
-            && !burning.FaceAt(lit).Standing,
-            $"{burning.CoverStateAt(lit)} - a burnt wood is a hole in the line");
+            && burning.FaceAt(lit).Standing,
+            $"{burning.CoverStateAt(lit)} - a burnt wood still stands in the line");
 
         // The fire spreads, so its neighbours are burning by now and the board
         // has to have been told about them too - the half that a check on one
@@ -22544,6 +22558,9 @@ public static class SelfTest
         // no scene in this session opened is still checked, which is the point:
         // --map-report is the authoring tool and is run by hand, and an edit made
         // three months from now will be judged by this instead.
+        // The same boards as plain arrays, against the bench's (SelfTest.Battle).
+        BattleBoardTwins(Check);
+
         Theme("the authored boards");
         foreach (string name in BoardMap.Names)
         {

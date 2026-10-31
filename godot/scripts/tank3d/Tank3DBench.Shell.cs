@@ -697,17 +697,21 @@ public sealed partial class Tank3DBench
             return "по своему гексу не стреляют";
         if (axis < 0)
             return "гекс не на оси огня";
-        if (_profile.Lobs && (cells < Gunnery.LobShortest || cells > Gunnery.LobReach))
-            return $"миномёт бьёт на {Gunnery.LobShortest}–{Gunnery.LobReach} клетки, до цели {cells}";
-        if (!_profile.Lobs && tank && cells < DirectNearest)
-            return "по танку вплотную нельзя: нужен пустой гекс между";
+        // the distance's gates are the rules' (Gunnery.MayTarget, Д2)
+        switch (Gunnery.MayTarget(_profile.Lobs, cells, tank))
+        {
+            case Gunnery.Distance.MortarBand:
+                return $"миномёт бьёт на {Gunnery.LobShortest}–{Gunnery.LobReach} клетки, до цели {cells}";
+            case Gunnery.Distance.PointBlank:
+                return "по танку вплотную нельзя: нужен пустой гекс между";
+        }
         // Under the rules the 2D gate as well: the wood, the smoke, the rise or
         // a hull on the lane (Tank3DBench.Orders, LaneShut).
         return _rules ? LaneShut(own, cell, out stop) : "";
     }
 
-    /// <summary>A gun's nearest tank target, cells: one empty hex between.</summary>
-    private const int DirectNearest = 2;
+    /// <summary>A gun's nearest tank target, cells (<see cref="Gunnery.DirectNearest"/>).</summary>
+    private const int DirectNearest = Gunnery.DirectNearest;
 
     /// <summary>Which of the six axes out of <paramref name="from"/>
     /// <paramref name="to"/> lies on, and how many cells along it; -1 and the

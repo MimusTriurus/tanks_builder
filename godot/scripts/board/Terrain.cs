@@ -337,6 +337,11 @@ public static class TerrainRules
         [Cover.Forest] = new CoverRule
         {
             Burns = true,
+            // Trees stop a gun's round (GDD field.md, «деревья»: «танки
+            // стрелять сквозь гексы с деревьями не могут»); the mortar's lob
+            // goes over them, as over everything (Gunnery.Solve). Off until
+            // 2026-10-31, the author's Р-2 (docs/battle-core-plan.md, П-9).
+            Screens = true,
             // <b>Cleared is the heavy's doing and nobody else's</b> - GDD
             // classes.md, "Бульдозер HT": a wood the heavy drove into becomes
             // ground. It is the minefield's word rather than a fourth one
@@ -376,10 +381,15 @@ public static class TerrainRules
 
     /// <summary>The states that mean the cover is no longer there. One list
     /// rather than a flag on each state, because "is it still standing" is the
-    /// question every reader asks and these are the answer to it.</summary>
+    /// question every reader asks and these are the answer to it.
+    ///
+    /// <b>A burnt wood is not among them</b> (2026-10-31, Д2): GDD field.md,
+    /// «сгоревший лес — тот же лес для движения и обзора: останавливает,
+    /// перекрывает огонь на своём уровне»; it only never burns again. It was
+    /// spent here from before U-09 left a burnt wood standing.</summary>
     private static readonly CoverState[] Spent =
     {
-        CoverState.Burnt, CoverState.Breached, CoverState.Cleared,
+        CoverState.Breached, CoverState.Cleared,
     };
 
     public static GroundRule Of(Foundation ground)
