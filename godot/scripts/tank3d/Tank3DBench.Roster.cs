@@ -37,6 +37,8 @@ public sealed partial class Tank3DBench
     private static readonly Color RosterHull = new(0.20f, 0.21f, 0.19f);
     private static readonly Color RosterGrey = new(0.48f, 0.48f, 0.46f);
     private static readonly Color RosterCross = new(0.89f, 0.29f, 0.29f);
+    /// <summary>The F-key over each icon, as Baldur's Gate 3 labels its party.</summary>
+    private static readonly string[] RosterKeys = { "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8" };
 
     private struct RosterSlot
     {
@@ -229,6 +231,16 @@ public sealed partial class Tank3DBench
             else
                 RosterTank(c, box.Position + new Vector2(RosterIcon * 0.5f, 22.0f), cls,
                            gone ? RosterGrey : ink, a);
+            // the key that takes it (Tank3DBench.Acts), top left - the state's
+            // token has the other corner
+            if (i < RosterKeys.Length)
+            {
+                var plate = new Rect2(box.Position + new Vector2(4.0f, 4.0f), 22.0f, 15.0f);
+                c.DrawRect(plate, new Color(0.0f, 0.0f, 0.0f, 0.55f * a));
+                c.DrawRect(plate, new Color(gone ? RosterGrey : CardPale, 0.5f * a), false, 1.0f);
+                c.DrawString(font, plate.Position + new Vector2(0.0f, 11.5f), RosterKeys[i],
+                             HorizontalAlignment.Center, plate.Size.X, 11, new Color(gone ? RosterGrey : CardPale, a));
+            }
             int ci = Array.IndexOf(MovementProfile.All, cls);
             c.DrawString(font, box.Position + new Vector2(0.0f, RosterIcon - 9.0f), ci >= 0 ? ClassShort[ci] : cls.Tag,
                          HorizontalAlignment.Center, RosterIcon, 12, new Color(gone ? RosterGrey : CardPale, a));

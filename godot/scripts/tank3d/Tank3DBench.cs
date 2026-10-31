@@ -2471,14 +2471,16 @@ public sealed partial class Tank3DBench : Node3D
         // knock out or reset the tank on the rig past them are off - Backspace
         // restarts the whole match instead (Tank3DBench.Match).
         if (Match && key.Keycode is Key.Space or Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5
-                or Key.J or Key.K or Key.X or Key.T or Key.Backspace)
+                or Key.J or Key.K or Key.X or Key.T or Key.Backspace
+                or (>= Key.F1 and <= Key.F8))
         {
             if (key.Keycode == Key.Backspace)
                 Restart();
             // J, the bench's fire, puts the unit's fire out (Tank3DBench.Blast)
             else if (key.Keycode == Key.J)
                 Execute(new Command(CommandKind.Douse));
-            // 1 to 5, the bench's hits, take the roster's units (Tank3DBench.Acts)
+            // 1 to 5, the bench's hits, and F1 to F8 take the roster's units
+            // (Tank3DBench.Acts); the hints, the overlay and Edit move to F9-F11
             else
                 ActKey(key.Keycode);
             return;
@@ -2502,6 +2504,9 @@ public sealed partial class Tank3DBench : Node3D
             case Key.Home: FollowTank(); break;
             // in a match: both sides' line and the controls (Tank3DBench.Match)
             case Key.F1: _hints = !_hints; break;
+            case Key.F9 when Match: _hints = !_hints; break;
+            case Key.F10 when Match: TogglePerf(); break;
+            case Key.F11 when Match: Edit(); break;
             // the relief's hex grid on and off (Stage3D.Relief); no free single key left
             case Key.G when key.ShiftPressed && _stage?.Relief is not null:
                 _stage.ShowEdges = !_stage.ShowEdges;

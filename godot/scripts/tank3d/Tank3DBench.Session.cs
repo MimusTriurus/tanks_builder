@@ -134,7 +134,8 @@ public sealed partial class Tank3DBench
             return;
         var back = new Button
         {
-            Text = _unsaved ? "Edit   F5   (board not saved)" : "Edit   F5",
+            // in a match F1-F8 take the roster's units (Tank3DBench.Acts)
+            Text = (Match ? "Edit   F11" : "Edit   F5") + (_unsaved ? "   (board not saved)" : ""),
             // Under the hud's three lines, which run the width of the board.
             Position = new Vector2(12.0f, 96.0f),
         };

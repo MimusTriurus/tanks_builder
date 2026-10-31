@@ -134,12 +134,13 @@ public sealed partial class Tank3DBench
         label.AddThemeColorOverride("font_color", open ? CardPale : SlotDim);
     }
 
-    /// <summary>Keys 1 to 5 in a match: the roster's icons, top down - the
-    /// unit taken and the view on it, as a click on its icon
-    /// (Tank3DBench.Roster). The ram and the fire have Tab and J.</summary>
+    /// <summary>Keys 1 to 5 and F1 to F8 in a match, as Baldur's Gate 3 picks
+    /// its party: the roster's icons, top down - the unit taken and the view
+    /// on it, as a click on its icon (Tank3DBench.Roster); each icon carries
+    /// its F-key. The ram and the fire have Tab and J.</summary>
     private void ActKey(Key key)
     {
-        int n = (int)(key - Key.Key1);
+        int n = key is >= Key.F1 and <= Key.F8 ? (int)(key - Key.F1) : (int)(key - Key.Key1);
         if (n >= 0 && n < _rosterCount)
             RosterTake(n);
     }
