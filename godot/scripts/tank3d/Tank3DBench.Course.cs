@@ -72,11 +72,13 @@ public sealed partial class Tank3DBench
         };
         AddChild(_course);
         // the relief's zone: its own mesh, built when the reach changes
+        var rim = new ShaderMaterial { Shader = new Shader { Code = ZoneShader }, RenderPriority = Stage3D.RingOrder };
+        rim.SetShaderParameter("line_ink", new Color(CourseInk, 0.95f));
         _zone = new MeshInstance3D
         {
             Name = "Zone",
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            MaterialOverride = _course.MaterialOverride,
+            MaterialOverride = rim,
         };
         AddChild(_zone);
         _courseInk = new Control { Name = "CourseInk", MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -282,8 +284,19 @@ public sealed partial class Tank3DBench
     /// world, nudged toward the eye like the marks.</summary>
     private Vector3 OnTop(Vector2I cell, Vector2 flat) =>
         _relief is not null ? OnGround(cell, flat)
-        : new Vector3(flat.X, TopOrWater(cell, flat) / RiseFactor, flat.Y / Squash)
-          + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
+        : new Vector3(flat.X, TopOrWater(cell, flat) / RiseFactor, flat.Y / Squash) + Lie;
+
+    /// <summary>
+    /// How the course is held off the ground: toward the eye along the
+    /// camera's own ray, as far as <c>Stage3D.Clear</c> and
+    /// <see cref="MarkNudge"/> together - no pixel moves, the camera being
+    /// orthographic, and depth is bought. <c>Clear</c> itself is up and back
+    /// along z: the ray of the camera the board was made for, and once the
+    /// camera turned a real shift, under which the slopes facing one way
+    /// covered the ribbon (the author's note, 2026-10-31).
+    /// </summary>
+    private Vector3 Lie =>
+        _camera.GlobalBasis.Z.Normalized() * (Stage3D.Clear(Squash, RiseFactor).Length() + MarkNudge * HexWidth);
 
     /// <summary>The cell's top, or over a water cell (a ramp's face aside)
     /// its water's surface: the zone and the way laid on the top of a pond
@@ -479,17 +492,20 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>One run of the outline from edge <paramref name="start"/>: its
-    /// rim on the ground, its inner side a width off it in the camera's plane.
-    /// Where two edges meet at two heights - a prism's step between levels -
-    /// the run is cut there, rather than drawn up the step and mitred on it
-    /// into a hook.</summary>
+    /// rim on the ground, and its inner side on the ground too
+    /// (<see cref="Run"/>). Where two edges meet at two heights - a prism's
+    /// step between levels - the run is cut there, rather than drawn up the
+    /// step and mitred on it into a hook.</summary>
     private void Chain(int start, int pieces, Basis eye, float w)
     {
         _rim.Clear();
+        _rimFlat.Clear();
+        _rimCell.Clear();
         int i = start;
         bool cut = false;
-        Vector3 inward = Vector3.Zero;
         Vector3 end = Vector3.Zero;
+        Vector2 endFlat = Vector2.Zero;
+        Vector2I endCell = Vector2I.Zero;
         while (true)
         {
             Edge e = _edges[i];
@@ -498,52 +514,104 @@ public sealed partial class Tank3DBench
             Vector3 from = OnTop(e.Cell, e.A);
             if (_rim.Count > 0 && Mathf.Abs(from.Y - end.Y) > 1e-3f)
             {
-                _rim.Add(end);
-                Run(false, inward, eye, w);
+                RimAdd(end, endFlat, endCell);
+                Run(false, eye, w);
                 _rim.Clear();
-                inward = Vector3.Zero;
+                _rimFlat.Clear();
+                _rimCell.Clear();
                 cut = true;
             }
-            inward += new Vector3(e.In.X, 0.0f, e.In.Y / Squash);
-            _rim.Add(from);
+            RimAdd(from, e.A, e.Cell);
             for (int k = 1; k < pieces; k++)
-                _rim.Add(OnTop(e.Cell, e.A.Lerp(e.B, (float)k / pieces)));
+            {
+                Vector2 p = e.A.Lerp(e.B, (float)k / pieces);
+                RimAdd(OnTop(e.Cell, p), p, e.Cell);
+            }
             end = OnTop(e.Cell, e.B);
+            endFlat = e.B;
+            endCell = e.Cell;
             if (!_edgeFrom.TryGetValue(CornerKey(e.B), out int n) || _edges[n].Done)
             {
                 bool closed = !cut && n == start && Mathf.Abs(end.Y - _rim[0].Y) <= 1e-3f;
                 if (!closed)
-                    _rim.Add(end);
-                Run(closed, inward, eye, w);
+                    RimAdd(end, endFlat, endCell);
+                Run(closed, eye, w);
                 return;
             }
             i = n;
         }
     }
 
-    /// <summary>A run of the rim in <see cref="_rim"/> made into band triangles.</summary>
-    private void Run(bool closed, Vector3 inward, Basis eye, float w)
+    private void RimAdd(Vector3 at, Vector2 flat, Vector2I cell)
+    {
+        _rim.Add(at);
+        _rimFlat.Add(flat);
+        _rimCell.Add(cell);
+    }
+
+    /// <summary>The rim's flat-space points and the cells they are on, beside
+    /// <see cref="_rim"/>.</summary>
+    private readonly List<Vector2> _rimFlat = new();
+    private readonly List<Vector2I> _rimCell = new();
+
+    /// <summary>
+    /// A run of the rim in <see cref="_rim"/> made into band triangles, both
+    /// sides on the ground that is seen (2026-10-31, the author's notes).
+    /// <list type="bullet">
+    /// <item>The inner side first is the rim moved <paramref name="w"/> in
+    /// the camera's own plane, square to the line as the eye sees it and
+    /// mitred at the bends: one width on the screen at any height, the
+    /// camera being orthographic.</item>
+    /// <item>That point is then slid along the eye's ray on to the ground
+    /// seen there (<see cref="Seen"/>): the screen does not see it move. Left
+    /// in the camera's plane, it went under the ground on the zone's far
+    /// edges, which hid half the band; drawn toward the eye to clear it, the
+    /// band hung over the hulls in front; moved inward on the ground, it ran
+    /// up a rise's face in wedges and fell behind a crest.</item>
+    /// </list>
+    /// </summary>
+    private void Run(bool closed, Basis eye, float w)
     {
         _rimIn.Clear();
         int count = _rim.Count;
         if (count < 2)
             return;
-        // the line on the camera's plane, and which of its sides is inside
-        Vector2 Plane(Vector3 p) => new(p.Dot(eye.X), p.Dot(eye.Y));
+        Vector3 ex = eye.X.Normalized(), ey = eye.Y.Normalized();
+        Vector2 Plane2(Vector3 p) => new(p.Dot(ex), p.Dot(ey));
+        // Square to a segment as the eye sees it, on the side of its own
+        // cell's middle - judged on the ground's plane, where the eye's
+        // projection keeps which side is which, not with the heights: one
+        // side for the whole run, from the sum of the ways to the cells'
+        // middles, came out at random on a closed ring - the sum nearly
+        // nothing - and the band lay outside the zone under a rise (the
+        // author's note, 2026-10-31).
+        // Which hand the cell is on is read off the plan, and carried to the
+        // screen by the projection's own handedness: compared on the screen,
+        // a segment up a slope's face turned there by its heights, the side
+        // came out the other way for it than for its neighbours, and the band
+        // twisted into a loop at the bend (the author's note, the same day).
+        float hand = Mathf.Sign(ex.X * ey.Z - ex.Z * ey.X);
         Vector2 Square(int a, int b)
         {
-            Vector2 d = Plane(_rim[b]) - Plane(_rim[a]);
-            return d.LengthSquared() < 1e-8f ? Vector2.Zero : d.Normalized().Orthogonal();
+            Vector2 d = Plane2(_rim[b]) - Plane2(_rim[a]);
+            if (d.LengthSquared() < 1e-8f)
+                return Vector2.Zero;
+            Vector2 n = d.Normalized().Orthogonal();
+            Vector2 t = _rimFlat[b] - _rimFlat[a];
+            Vector2 to = CellFlat(_rimCell[a]) - (_rimFlat[a] + _rimFlat[b]) * 0.5f;
+            // the plan's cross, in world x, z (flat y is z squashed)
+            float plan = (t.X * to.Y - t.Y * to.X) / (Squash * Squash);
+            // Orthogonal() lies on d's negative hand on the screen
+            return plan * hand > 0.0f ? -n : n;
         }
-        float sign = Square(0, 1).Dot(Plane(inward)) >= 0.0f ? 1.0f : -1.0f;
         for (int k = 0; k < count; k++)
         {
             int prev = k > 0 ? k - 1 : closed ? count - 1 : -1;
             int next = k + 1 < count ? k + 1 : closed ? 0 : -1;
             Vector2 n0 = prev >= 0 ? Square(prev, k) : Vector2.Zero;
             Vector2 n1 = next >= 0 ? Square(k, next) : Vector2.Zero;
-            Vector2 m = Mitre(n0 == Vector2.Zero ? n1 : n0, n1 == Vector2.Zero ? n0 : n1) * (w * sign);
-            _rimIn.Add(_rim[k] + eye.X * m.X + eye.Y * m.Y);
+            Vector2 m = Mitre(n0 == Vector2.Zero ? n1 : n0, n1 == Vector2.Zero ? n0 : n1) * w;
+            _rimIn.Add(Seen(k, _rim[k] + ex * m.X + ey * m.Y, eye));
         }
         int last = closed ? count : count - 1;
         for (int k = 0; k < last; k++)
@@ -554,6 +622,29 @@ public sealed partial class Tank3DBench
         }
     }
 
+    /// <summary>
+    /// <paramref name="p"/>, a point by rim point <paramref name="k"/>, slid
+    /// along the eye's ray - which does not move it on the screen - on to the
+    /// ground there, as <see cref="OnTop"/> lays the rim: a few steps of the
+    /// height it is off by. Flat space is read off the rim's own, so the
+    /// board's offsets cancel.
+    /// </summary>
+    private Vector3 Seen(int k, Vector3 p, Basis eye)
+    {
+        Vector3 back = eye.Z.Normalized();
+        float rise = Mathf.Max(back.Y, 0.2f);
+        Vector3 rim = _rim[k];
+        for (int step = 0; step < 5; step++)
+        {
+            Vector3 d = p - rim;
+            Vector3 g = OnTop(_rimCell[k], _rimFlat[k] + new Vector2(d.X, d.Z * Squash));
+            float off = g.Y - p.Y;
+            if (Mathf.Abs(off) < 0.05f)
+                break;
+            p += back * (off / rise);
+        }
+        return p;
+    }
 
     /// <summary>The way and length, per unit of width, to offset a joint of
     /// two segments with normals <paramref name="n"/> and <paramref name="m"/>.</summary>
@@ -574,20 +665,21 @@ public sealed partial class Tank3DBench
     private MeshInstance3D? _zone;
     private int _zoneBuilt = -1;
 
-    /// <summary>How many pieces a hexagon's fan triangle and an outline edge
-    /// are cut into on the relief: enough for the tint to follow a terrace.</summary>
-    private const int ZoneCuts = 5;
-
     /// <summary>
     /// The zone on the relief (BOT-11): the same tint and outline as
-    /// <see cref="Zone"/>, cut fine and laid on the drawn ground - and on the
-    /// water's surface over a water cell, not on its bed.
+    /// <see cref="Zone"/>, laid on the drawn ground - and on the water's
+    /// surface over a water cell, not on its bed.
     ///
     /// <b>Six flat triangles a cell were the prisms' zone</b>, a plane each
     /// face; on the relief their middles cut through the terraces and over a
     /// pond they lay on the bed, seen through the water and torn by its shore.
-    /// Built once a reach (<see cref="_reachVersion"/>), not every frame: a
-    /// few thousand triangles.
+    /// <b>Then a fan cut in fifths</b>, its corners on the ground: on a hill's
+    /// rounded slope the straight pieces between them went under the drawn
+    /// ground, and the slope showed untinted in patches (the author's note,
+    /// 2026-10-31). Now the zone is the relief's own triangles under each
+    /// hexagon, cut to it (<see cref="ReliefCell"/>) - the drawn ground itself,
+    /// a nudge toward the eye over it. Built once a reach
+    /// (<see cref="_reachVersion"/>), not every frame.
     /// </summary>
     private void ReliefZone(Steps.Reach reach)
     {
@@ -598,50 +690,393 @@ public sealed partial class Tank3DBench
         // the water's own, and on a tie the pond, drawn after, covered the
         // zone and the ribbon laid on its surface. The marks share the rung
         // above, and draw nothing since HUD stage 4.
-        if (_zone.MaterialOverride is BaseMaterial3D ink)
+        if (_course?.MaterialOverride is BaseMaterial3D ink)
             ink.RenderPriority = Stage3D.RingOrder;
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
         Vector2[] corner = Corners();
-        void Put(Color ink, Vector2I cell, Vector2 p)
-        {
-            st.SetColor(ink);
-            st.AddVertex(OnGround(cell, p));
-        }
-        var tint = new Color(CourseInk, ZoneTone);
         // the cells a move ends on, and the one the tank stands on (ZoneTone)
         _zoneFill.Clear();
         foreach ((Vector2I c, int _) in reach.Cells)
             _zoneFill.Add(c);
         _zoneFill.Add(reach.Start.Cell);
+        _zoneSet.Clear();
+        foreach (Vector2I cell in _zoneFill)
+            _zoneSet.Add(cell);
+        RimLoops(corner);
+        if (_zone.MaterialOverride is ShaderMaterial rim)
+        {
+            if (_rimSegs.Count > RimMax)
+                GD.PrintErr($"tank3d: the zone's rim has {_rimSegs.Count} sides, the shader takes {RimMax}");
+            var segs = new Vector4[RimMax];
+            for (int i = 0; i < _rimSegs.Count && i < RimMax; i++)
+                segs[i] = _rimSegs[i];
+            rim.SetShaderParameter("rim_seg", segs);
+            rim.SetShaderParameter("rim_count", Mathf.Min(_rimSegs.Count, RimMax));
+            rim.SetShaderParameter("line_w", ZoneLine * _tile!.HexRect.Size.X * 0.5f);
+            rim.SetShaderParameter("lift", Lie.Length());
+        }
+        foreach (Vector2I cell in _zoneFill)
+            ReliefCell(st, cell, corner);
+        _zone.Mesh = st.Commit();
+    }
+
+    /// <summary>A flat-space point on the ground's plan, world units.</summary>
+    private Vector2 Plan(Vector2 flat) => new(flat.X, flat.Y / Squash);
+
+    /// <summary>A side of the zone's rim on the plan, from <see cref="A"/> to
+    /// <see cref="B"/>, <see cref="In"/> toward its cell's middle, moved in by
+    /// <see cref="Off"/> (<see cref="RimLoops"/>).</summary>
+    private struct RimSide
+    {
+        public Vector2 A, B, In;
+        public float Off;
+        public Vector2I Next;
+        public bool Done;
+    }
+
+    private readonly List<RimSide> _rimSides = new();
+    private readonly Dictionary<Vector2I, int> _rimFrom = new();
+    private readonly List<int> _rimWalk = new();
+    private readonly List<Vector2> _rimCorner = new();
+    /// <summary>The moved rim's sides, (a.x, a.z, b.x, b.z) on the plan: the
+    /// shader's <c>rim_seg</c>.</summary>
+    private readonly List<Vector4> _rimSegs = new();
+
+    /// <summary>The most sides of the moved rim the shader takes.</summary>
+    private const int RimMax = 256;
+
+    /// <summary>
+    /// The zone's rim moved in, as closed loops on the plan, into
+    /// <see cref="_rimSegs"/>: every side by <see cref="ZoneGap"/>, a side
+    /// facing a rock off its wall (<see cref="RockInset"/>), and each corner
+    /// where a moved side meets the next one's line.
+    /// <para>
+    /// The cells cut themselves before, each by its own sides moved: where a
+    /// side facing a rock, moved far, met a plain one in the next cell, or two
+    /// cells by one rock were moved by different amounts, the two cuts met
+    /// the side between the cells at two points, and the line stepped and
+    /// hooked there (the author's note, 2026-10-31). Joined on the loop, the
+    /// sides meet whatever their moves.
+    /// </para>
+    /// </summary>
+    private void RimLoops(Vector2[] corner)
+    {
+        _rimSides.Clear();
+        _rimFrom.Clear();
+        _rimSegs.Clear();
+        float gap = ZoneGap * _tile!.HexRect.Size.X * 0.5f;
         foreach (Vector2I cell in _zoneFill)
         {
             Vector2 mid = CellFlat(cell);
-            for (int i = 0; i < 6; i++)
+            float wall = -1.0f;
+            foreach (int side in HexField.EdgeHeadings)
             {
-                Vector2 a = corner[i], b = corner[(i + 1) % 6];
-                // the fan triangle (mid, a, b) cut into ZoneCuts² pieces
-                for (int u = 0; u < ZoneCuts; u++)
-                    for (int v = 0; u + v < ZoneCuts; v++)
-                    {
-                        Vector2 P(float s, float t) => mid + a * (s / ZoneCuts) + b * (t / ZoneCuts);
-                        Put(tint, cell, P(u, v)); Put(tint, cell, P(u + 1, v)); Put(tint, cell, P(u, v + 1));
-                        if (u + v + 2 <= ZoneCuts)
-                        {
-                            Put(tint, cell, P(u + 1, v)); Put(tint, cell, P(u + 1, v + 1)); Put(tint, cell, P(u, v + 1));
-                        }
-                    }
+                Vector2I next = HexField.Step(cell, side);
+                if (_zoneSet.Contains(next))
+                    continue;
+                int k = EdgeOf(cell, side, corner);
+                Vector2 a = mid + corner[k], b = mid + corner[(k + 1) % 6];
+                float off = gap;
+                if (_field!.FoundationAt(next) == Foundation.Rock)
+                {
+                    if (wall < 0.0f)
+                        wall = RockInset(cell, corner);
+                    off = Mathf.Max(gap, wall);
+                }
+                Vector2 pa = Plan(a), pb = Plan(b);
+                Vector2 n = (pb - pa).Orthogonal().Normalized();
+                if (n.Dot(Plan(mid) - pa) < 0.0f)
+                    n = -n;
+                // every cell's corners go round the same way, so a side's end
+                // is the next one's start
+                _rimFrom[CornerKey(a)] = _rimSides.Count;
+                _rimSides.Add(new RimSide { A = pa, B = pb, In = n, Off = off, Next = CornerKey(b) });
             }
         }
-        var line = new Color(CourseInk, 0.95f);
-        ZoneBand(reach, corner, ZoneCuts);
-        foreach (Vector3 p in _band)
+        for (int s = 0; s < _rimSides.Count; s++)
         {
-            st.SetColor(line);
-            st.AddVertex(p);
+            if (_rimSides[s].Done)
+                continue;
+            _rimWalk.Clear();
+            for (int i = s; ;)
+            {
+                RimSide e = _rimSides[i];
+                e.Done = true;
+                _rimSides[i] = e;
+                _rimWalk.Add(i);
+                if (!_rimFrom.TryGetValue(e.Next, out int n) || _rimSides[n].Done)
+                    break;
+                i = n;
+            }
+            int count = _rimWalk.Count;
+            _rimCorner.Clear();
+            for (int k = 0; k < count; k++)
+            {
+                RimSide e0 = _rimSides[_rimWalk[k]], e1 = _rimSides[_rimWalk[(k + 1) % count]];
+                Vector2 p = e0.A + e0.In * e0.Off, q = e1.A + e1.In * e1.Off;
+                _rimCorner.Add(Meet(p, e0.B - e0.A, q, e1.B - e1.A, e0.B + (e0.In * e0.Off + e1.In * e1.Off) * 0.5f));
+            }
+            for (int k = 0; k < count; k++)
+            {
+                Vector2 p = _rimCorner[(k + count - 1) % count], q = _rimCorner[k];
+                _rimSegs.Add(new Vector4(p.X, p.Y, q.X, q.Y));
+            }
         }
-        _zone.Mesh = st.Commit();
     }
+
+    /// <summary>Where the line through <paramref name="p"/> along
+    /// <paramref name="d"/> meets the one through <paramref name="q"/> along
+    /// <paramref name="u"/>; <paramref name="or"/> if they run together.</summary>
+    private static Vector2 Meet(Vector2 p, Vector2 d, Vector2 q, Vector2 u, Vector2 or)
+    {
+        float den = d.Cross(u);
+        if (Mathf.Abs(den) < 1e-6f * d.Length() * u.Length())
+            return or;
+        return p + d * ((q - p).Cross(u) / den);
+    }
+
+    /// <summary>A polygon being cut to a hexagon (<see cref="ReliefCell"/>):
+    /// points in the relief's x, height, z - kept, the zone being built
+    /// once a reach.</summary>
+    private readonly List<Vector3> _cutIn = new(), _cutOut = new();
+    private readonly Vector2[] _hexXZ = new Vector2[6], _hexIn = new Vector2[6];
+
+    /// <summary>How high over its middle's ground a point of a cell beside a
+    /// rock has to stand to be the rock's wall, of a level
+    /// (<see cref="RockInset"/>): over the relief's own warp and terraces.</summary>
+    private const float RockRise = 0.04f;
+
+    /// <summary>The space left between the wall's foot and the zone's side
+    /// moved off it, of a hexagon's circumradius.</summary>
+    private const float RockGap = 0.04f;
+
+    /// <summary>How far in from the hexagons' sides the zone's rim lies on
+    /// the relief, of a circumradius (the author's suggestion, 2026-10-31):
+    /// the same space all round as by a rock, the line off the board's grid
+    /// line and off the foot of the slope beyond.</summary>
+    private const float ZoneGap = 0.07f;
+
+    /// <summary>The hexagon of <paramref name="cell"/> on the plan, into
+    /// <see cref="_hexXZ"/>, its sides' inward normals into
+    /// <see cref="_hexIn"/>.</summary>
+    private void HexPlan(Vector2I cell, Vector2[] corner)
+    {
+        Vector2 mid = CellFlat(cell);
+        Vector2 centre = Plan(mid);
+        for (int k = 0; k < 6; k++)
+            _hexXZ[k] = Plan(mid + corner[k]);
+        for (int k = 0; k < 6; k++)
+        {
+            Vector2 h = _hexXZ[k], n = (_hexXZ[(k + 1) % 6] - h).Orthogonal().Normalized();
+            _hexIn[k] = n.Dot(centre - h) > 0.0f ? n : -n;
+        }
+    }
+
+    /// <summary>
+    /// How far a rock's wall reaches into <paramref name="cell"/> over its
+    /// sides facing a rock, and <see cref="RockGap"/> past that; 0 if it does
+    /// not. Its wall spills over the hexagon's side: the rock's, and no cell a
+    /// tank drives on (the author's note, 2026-10-31: a mesa's wall tinted,
+    /// the outline up its face). The points standing over
+    /// <see cref="RockRise"/> above the middle's ground count, by the side
+    /// they are nearest (the one they lie past, outside), if it faces a rock.
+    /// A point is a triangle's corner, and its triangles carry its height a
+    /// step of the grid and more inward: with only the points inside counted,
+    /// a wall point just past the side still drew the tint up its face in
+    /// teeth. Cut at a height, or at the blurred rock share, the line lay on
+    /// the wall's steep foot, where every step of the raster stood up into a
+    /// tooth; moved off it, it runs straight along flat ground.
+    /// </summary>
+    private float RockInset(Vector2I cell, Vector2[] corner)
+    {
+        Relief r = _relief!;
+        HexPlan(cell, corner);
+        int rocky = 0;
+        foreach (int side in HexField.EdgeHeadings)
+            if (_field!.FoundationAt(HexField.Step(cell, side)) == Foundation.Rock)
+                rocky |= 1 << EdgeOf(cell, side, corner);
+        (int i0, int i1, int j0, int j1) = HexRaster(r);
+        float base_ = r.HeightAt(CellFlat(cell)), wall = RockRise * _field!.Lift, carry = r.Cell * 1.5f;
+        float inset = 0.0f;
+        for (int j = Mathf.Max(j0 - 2, 0); j <= Mathf.Min(j1 + 3, r.Ny - 1); j++)
+            for (int i = Mathf.Max(i0 - 2, 0); i <= Mathf.Min(i1 + 3, r.Nx - 1); i++)
+            {
+                if (r.Height[j * r.Nx + i] - base_ <= wall)
+                    continue;
+                var at = new Vector2(r.X0 + i * r.Cell, r.Z0 + j * r.Cell);
+                int near = -1;
+                float least = float.MaxValue;
+                for (int k = 0; k < 6; k++)
+                {
+                    float dist = (at - _hexXZ[k]).Dot(_hexIn[k]);
+                    if (dist < least)
+                    {
+                        least = dist;
+                        near = k;
+                    }
+                }
+                if (least > -carry && (rocky & (1 << near)) != 0)
+                    inset = Mathf.Max(inset, least + carry);
+            }
+        return inset > 0.0f ? inset + RockGap * _tile!.HexRect.Size.X * 0.5f : 0.0f;
+    }
+
+    /// <summary>The squares of the relief's grid under the hexagon in
+    /// <see cref="_hexXZ"/>.</summary>
+    private (int I0, int I1, int J0, int J1) HexRaster(Relief r)
+    {
+        float x0 = float.MaxValue, x1 = float.MinValue, z0 = float.MaxValue, z1 = float.MinValue;
+        for (int k = 0; k < 6; k++)
+        {
+            x0 = Mathf.Min(x0, _hexXZ[k].X);
+            x1 = Mathf.Max(x1, _hexXZ[k].X);
+            z0 = Mathf.Min(z0, _hexXZ[k].Y);
+            z1 = Mathf.Max(z1, _hexXZ[k].Y);
+        }
+        return (Mathf.Clamp(Mathf.FloorToInt((x0 - r.X0) / r.Cell), 0, r.Nx - 2),
+                Mathf.Clamp(Mathf.FloorToInt((x1 - r.X0) / r.Cell), 0, r.Nx - 2),
+                Mathf.Clamp(Mathf.FloorToInt((z0 - r.Z0) / r.Cell), 0, r.Ny - 2),
+                Mathf.Clamp(Mathf.FloorToInt((z1 - r.Z0) / r.Cell), 0, r.Ny - 2));
+    }
+
+    /// <summary>
+    /// The relief's triangles under <paramref name="cell"/>'s hexagon, cut to
+    /// it, into <paramref name="st"/>: each square of the height grid split
+    /// along the diagonal the ground's mesh takes (the gentler one,
+    /// Stage3D.BuildRelief), each triangle clipped by the hexagon's six sides
+    /// with its height carried on its own plane - so the tint lies on the
+    /// ground that is drawn, at every point and not only at its corners. UV
+    /// is the point on the plan, world units: the shader keeps what lies
+    /// inside the moved rim (<see cref="RimLoops"/>).
+    /// </summary>
+    private void ReliefCell(SurfaceTool st, Vector2I cell, Vector2[] corner)
+    {
+        Relief r = _relief!;
+        HexPlan(cell, corner);
+        (int i0, int i1, int j0, int j1) = HexRaster(r);
+        var tint = new Color(CourseInk, ZoneTone);
+        bool wet = _field!.IsWater(cell);
+        float water = wet ? _field.WaterTop(cell) : 0.0f;
+        Vector3 At(int i, int j) => new(r.X0 + i * r.Cell, r.Height[j * r.Nx + i], r.Z0 + j * r.Cell);
+        void Put(Vector3 p)
+        {
+            var flat = new Vector2(p.X, p.Z * Squash);
+            float top = wet ? Mathf.Max(p.Y, water) : p.Y;
+            if (r.WaterAt(flat) is var sea && !float.IsNaN(sea))
+                top = Mathf.Max(top, sea);
+            st.SetColor(tint);
+            st.SetUV(new Vector2(p.X, p.Z));
+            // on the ground itself: the shader lifts it toward the eye (lift)
+            st.AddVertex(new Vector3(p.X, top / RiseFactor, p.Z));
+        }
+        void Cut(Vector3 a, Vector3 b, Vector3 c)
+        {
+            _cutIn.Clear();
+            _cutIn.Add(a);
+            _cutIn.Add(b);
+            _cutIn.Add(c);
+            for (int k = 0; k < 6 && _cutIn.Count >= 3; k++)
+            {
+                Vector2 h = _hexXZ[k], n = _hexIn[k];
+                _cutOut.Clear();
+                for (int m = 0; m < _cutIn.Count; m++)
+                {
+                    Vector3 p = _cutIn[m], q = _cutIn[(m + 1) % _cutIn.Count];
+                    float sp = (new Vector2(p.X, p.Z) - h).Dot(n);
+                    float sq = (new Vector2(q.X, q.Z) - h).Dot(n);
+                    if (sp >= 0.0f)
+                        _cutOut.Add(p);
+                    if ((sp >= 0.0f) != (sq >= 0.0f))
+                        _cutOut.Add(p.Lerp(q, sp / (sp - sq)));
+                }
+                _cutIn.Clear();
+                _cutIn.AddRange(_cutOut);
+            }
+            for (int m = 1; m + 1 < _cutIn.Count; m++)
+            {
+                Put(_cutIn[0]);
+                Put(_cutIn[m]);
+                Put(_cutIn[m + 1]);
+            }
+        }
+        for (int j = j0; j <= j1; j++)
+            for (int i = i0; i <= i1; i++)
+            {
+                Vector3 a = At(i, j), b = At(i + 1, j), c = At(i, j + 1), d = At(i + 1, j + 1);
+                if (Mathf.Abs(a.Y - d.Y) <= Mathf.Abs(b.Y - c.Y))
+                {
+                    Cut(a, b, d);
+                    Cut(a, d, c);
+                }
+                else
+                {
+                    Cut(a, b, c);
+                    Cut(b, d, c);
+                }
+            }
+    }
+
+    /// <summary>
+    /// The relief's zone: its tint, and the outline drawn by the tint's own
+    /// fragments - those nearer the moved rim than <c>line_w</c> as the
+    /// screen sees it (2026-10-31, the author's notes: the band was high over
+    /// the ground, of other widths, twisted into loops at a cliff's bends).
+    /// <list type="bullet">
+    /// <item>The band was a mesh of its own, offset in the camera's plane -
+    /// and the zone is built once a reach, so when the camera turned the band
+    /// kept the old view's offsets and broke into blobs; on a cliff the rim
+    /// laid on the ground jumped between the top and the foot, and no offset
+    /// of that line on the screen lies flat.</item>
+    /// <item>Here the line is part of the ground's tint: each fragment knows
+    /// where it is on the plan (UV), keeps itself if it lies inside the moved
+    /// rim's loops (<c>rim_seg</c>, a crossing count), finds the plan
+    /// distance to their nearest side, and turns it into pixels by how fast
+    /// it changes on the screen - so it lies on whatever ground is drawn and
+    /// is as wide everywhere and from any view.</item>
+    /// </list>
+    /// </summary>
+    private const string ZoneShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, blend_mix;
+
+uniform vec4 line_ink;
+uniform float line_w = 0.05;
+uniform float lift = 0.0;
+uniform vec4 rim_seg[256];
+uniform int rim_count = 0;
+
+void vertex() {
+    // toward the eye along its own ray, however the camera has turned since
+    // the mesh was built - the orthographic screen does not see it move
+    vec4 v = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
+    v.z += lift;
+    POSITION = PROJECTION_MATRIX * v;
+}
+
+void fragment() {
+    vec2 p = UV;
+    float d = 1e9;
+    bool inside = false;
+    for (int i = 0; i < rim_count; i++) {
+        vec4 s = rim_seg[i];
+        vec2 a = s.xy, ab = s.zw - s.xy;
+        float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+        d = min(d, length(p - a - ab * t));
+        if ((s.y > p.y) != (s.w > p.y) && p.x < a.x + ab.x * (p.y - s.y) / ab.y)
+            inside = !inside;
+    }
+    // plan units a pixel here, and the line's width in pixels: the camera is
+    // orthographic, so the view's x a pixel across is world units a pixel
+    float g = max(length(vec2(dFdx(d), dFdy(d))), 1e-6);
+    float wide = line_w / max(abs(dFdx(VERTEX.x)), 1e-6);
+    if (!inside)
+        discard;
+    float on = 1.0 - smoothstep(wide - 0.7, wide + 0.7, d / g);
+    ALBEDO = mix(COLOR.rgb, line_ink.rgb, on);
+    ALPHA = mix(COLOR.a, line_ink.a, on);
+}
+";
 
     /// <summary><see cref="OnTop"/> on the relief: the drawn ground, or the
     /// water's surface where water is drawn over it - a water cell's own, and
@@ -656,8 +1091,7 @@ public sealed partial class Tank3DBench
             top = Mathf.Max(top, _field.WaterTop(cell));
         if (_relief?.WaterAt(flat) is float wet && !float.IsNaN(wet))
             top = Mathf.Max(top, wet);
-        return new Vector3(flat.X, top / RiseFactor, flat.Y / Squash)
-               + Stage3D.Clear(Squash, RiseFactor) + _camera.GlobalBasis.Z * MarkNudge * HexWidth;
+        return new Vector3(flat.X, top / RiseFactor, flat.Y / Squash) + Lie;
     }
 
     /// <summary>The ribbon: a strip through the middles of the cells the way
