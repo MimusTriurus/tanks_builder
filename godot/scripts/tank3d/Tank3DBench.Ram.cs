@@ -930,6 +930,18 @@ public sealed partial class Tank3DBench
                           new Vector3(mid.X, top / RiseFactor, mid.Z), HexWidth * 0.5f);
             _ripples.Strike(new Vector2(o.Rig.Position.X, o.Rig.Position.Z), Stage3D.Waves);
             Log.Print($"tank3d: target {o.Tag} thrown into the pond at {MapAt(cell)}");
+            // Without the wading gear it drowns (GDD units.md, «Таран»: «вода
+            // топит или держит на плаву по ОПВТ»; П-12, Д4) - the core's word,
+            // played: down to the bed, out of the fight, its fire out.
+            if (Match && o.Unit && o.Fate == Fate.Alive && !Snorkel(o.Id))
+            {
+                o.Fate = Fate.Knocked;
+                Quench(o.Id, steam: false);
+                Founder(o.Model, cell);
+                _matchNote = $"{SideName(o.Side)} {o.Tag} утонул";
+                Log.Print($"tank3d: match: {SideName(o.Side)} {o.Tag}#{o.Id} on {MapAt(cell)} drowned - no wading gear");
+                MatchCheckEnd();
+            }
         }
         o.Wet = wet;
 

@@ -196,6 +196,11 @@ public sealed partial class Tank3DBench
         o.Model.Droop = 1.0f;
         o.Model.Slackness = 1.0f;
         _note = $"{o.Tag} knocked out by a mine";
+        // In a match the pose is the fate too (GDD field.md, «мины»: «танк,
+        // вытолкнутый тараном на гекс с миной, подрывается так же, как въехавший
+        // сам»; П-11, Д4): it used to be the look alone, the unit fought on.
+        if (Match && o.Unit)
+            UnitStruck(o, pierced: true);
     }
 
     /// <summary>

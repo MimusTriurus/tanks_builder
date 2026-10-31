@@ -334,16 +334,21 @@ public sealed partial class Tank3DBench
     /// gets into it (<see cref="Gunnery.Penetration(int, MovementProfile, Gunnery.Plate)"/>);
     /// nought holds. A knocked-out unit's armour no longer counts: any round
     /// sets it off (docs/gdd/states.md, «Уничтожен»; Tank3DBench.Match).</summary>
-    private static int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate)
+    private int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate)
     {
-        int level = LevelOn(o.Ahead, o.Profile, way, might, out face, out plate);
+        // from a level up the round meets the roof, whatever face it came by
+        // (GDD units.md, «Броня»: «крыша старше граней»; П-10, Д4) - as the
+        // rules core has it (Battle.PlateOf)
+        bool above = Match && _field is not null
+                     && StandingLevel(CellHere, CellHere) > StandingLevel(OtherCell(o), CellHere);
+        int level = LevelOn(o.Ahead, o.Profile, way, might, out face, out plate, above);
         return o.Fate == Fate.Knocked ? Mathf.Max(level, 1) : level;
     }
 
     /// <summary>The same for any hull looking <paramref name="ahead"/> - a
     /// standing one the ricochet meets (<see cref="GlanceLeg"/>).</summary>
     private static int LevelOn(Vector3 ahead, MovementProfile profile, Vector3 way, int might, out string face,
-                               out Gunnery.Plate plate)
+                               out Gunnery.Plate plate, bool above = false)
     {
         Vector3 left = new(ahead.Z, 0.0f, -ahead.X);
         Vector3 from = -new Vector3(way.X, 0.0f, way.Z);
@@ -351,7 +356,7 @@ public sealed partial class Tank3DBench
         face = Mathf.Abs(bearing) <= 30.0f ? "front"
              : Mathf.Abs(bearing) >= 150.0f ? "rear"
              : bearing > 0.0f ? "left" : "right";
-        plate = Gunnery.PlateFor(face, 0);
+        plate = above ? Gunnery.Plate.Roof : Gunnery.PlateFor(face, 0);
         return Gunnery.Penetration(might, profile, plate);
     }
 

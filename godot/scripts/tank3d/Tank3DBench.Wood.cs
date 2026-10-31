@@ -174,6 +174,16 @@ public sealed partial class Tank3DBench
         foreach (Vector2I cell in wooded)
             _woodedCells.Add(cell);
         _wildfire = new Wildfire { Field = _field, Enabled = true, Wooded = _woodedCells.Contains };
+        // In a match the fire is the rules': it holds at full flame until a
+        // field tick counts its two rounds and hands it on, a wall barring the
+        // way (GDD match.md, «Ход и раунд»; П-16, Д4) - the events bench's way
+        // (EventBench). It ran by seconds and spread by itself before.
+        if (Match)
+        {
+            _wildfire.Ruled = true;
+            _wildfire.Spreads = false;
+            _wildfire.Barred = (a, b) => _field!.Walled(a, HexField.HeadingTo(a, b));
+        }
         if (_stage is not null)
             _stage.Blaze = _wildfire;
         if (!_pbr)

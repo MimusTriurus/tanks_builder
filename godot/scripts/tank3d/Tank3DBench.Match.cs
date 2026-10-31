@@ -378,6 +378,8 @@ public sealed partial class Tank3DBench
     {
         // the rules core read against the bench (Tank3DBench.Shadow)
         ShadowTurnOver();
+        // the heavy's wood (Tank3DBench.Rules)
+        HeavyClears();
         Side ending = _mt.Turn;
         int turn = _mt.TurnNo++;
         HandOver();
@@ -400,7 +402,10 @@ public sealed partial class Tank3DBench
         {
             _mt.Turn = Across(_mt.Turn);
             if (_mt.Turn == Side.Green)
+            {
+                FieldTick();
                 _mt.Round++;
+            }
             if (MatchCheckEnd())
                 return;
             if (FirstReady(_mt.Turn) is { } next)
@@ -499,6 +504,8 @@ public sealed partial class Tank3DBench
         bool busy = MatchBusy;
         // the rules core takes the turn off the bench (Tank3DBench.Shadow)
         ShadowTick(busy);
+        // what a hex does to a hull coming on to it (Tank3DBench.Rules)
+        HexEffectsTick();
         if (_other is { Unit: true, Fate: Fate.Destroyed } && !busy)
             DropTarget();
         if (MatchOver)
@@ -679,6 +686,14 @@ public sealed partial class Tank3DBench
         _matchNote = $"{SideName(side)} {tag} уничтожен";
         Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} destroyed");
         Blast(cell);
+        // ...and the wood under it and round it catches, the walls on its hex
+        // come down (GDD states.md, «Уничтожен»; П-13, Д4) - the own tank's
+        // blast did it (FxDestroyed), a unit's in a match did not. Afloat there
+        // is no blast wave.
+        bool wet = _field is not null && _field.IsDeep(cell);
+        WoodIgnite(Foot(at), grounded: !wet);
+        if (!wet)
+            WallsBlown(Foot(at), "the blast", TankBlast);
         return Fate.Destroyed;
     }
 

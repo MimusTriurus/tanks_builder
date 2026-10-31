@@ -245,9 +245,8 @@ public static class Battle
                 s.Events.Add(new BattleEvent(BattleEventKind.Spent, -1, c, heading, "ground"));
                 return;
             }
-            // a wood screens its hex; masonry stands on edges (above), not on the hex,
-            // though terrain.json has the walls' cover "screen" for the 2D board
-            if (s.Board.LevelAt(c) >= floor && s.Board.CoverAt(c) != Cover.Walls && s.Board.Screened(c))
+            // a wood screens its hex; masonry its edges (above, BoardRules.Screened)
+            if (s.Board.LevelAt(c) >= floor && s.Board.Screened(c))
             {
                 s.Events.Add(new BattleEvent(BattleEventKind.Spent, -1, c, heading, "wood"));
                 return;

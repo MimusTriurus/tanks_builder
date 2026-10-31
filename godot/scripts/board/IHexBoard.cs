@@ -123,9 +123,13 @@ public static class BoardRules
     public static bool Blocked(IHexBoard b, Vector2I from, int heading) =>
         TerrainRules.Of(Cover.Walls).Blocks && Walled(b, from, heading);
 
-    /// <summary><see cref="HexField.Screened"/>.</summary>
+    /// <summary><see cref="HexField.Screened"/>: what stands on the hex stops a
+    /// round crossing it - a wood. Not masonry: a wall stands on an edge and
+    /// stops what crosses that edge (<see cref="Blocked"/>), not the hex
+    /// (GDD field.md, «кирпичные стены»; П-26, Д4). <c>terrain.json</c> has
+    /// the walls screen for the 2D board's capon, which asks the table.</summary>
     public static bool Screened(IHexBoard b, Vector2I cell) =>
-        TerrainRules.Screens(b.CoverAt(cell), b.CoverStateAt(cell));
+        b.CoverAt(cell) != Cover.Walls && TerrainRules.Screens(b.CoverAt(cell), b.CoverStateAt(cell));
 
     /// <summary><see cref="HexField.Lane"/>.</summary>
     public static List<Vector2I> Lane(IHexBoard b, Vector2I cell, int heading, int limit = int.MaxValue)
