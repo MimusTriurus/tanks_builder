@@ -16,6 +16,8 @@ namespace TankSpriteTest;
 /// <item><b>Утоплен</b> - knocked out in deep water: the circle with water
 /// over its lower half.</item>
 /// <item><b>Плывёт</b> - alive in deep water, on the gear: a lifebuoy.</item>
+/// <item><b>В засаде</b> - a sight in its side's ink (Tank3DBench.Ambush),
+/// beside the state's sign when it has one too.</item>
 /// </list>
 /// A hull the blast preview marks wears its mark instead.
 /// </summary>
@@ -50,16 +52,26 @@ public sealed partial class Tank3DBench
             Parked p = _parked[i];
             BadgeOn(ink, p.Model, p.Rig, p.Id, p.Side, p.Fate, p.Cell, r);
         }
-        // who watches which axis (Tank3DBench.Ambush)
-        DrawAmbushes(ink, r);
     }
 
     private void BadgeOn(Control ink, TankModel model, Node3D rig, int id, Side side, Fate fate, Vector2I cell, float r)
     {
         Badge badge = BadgeOf(id, fate, cell);
-        if (badge == Badge.None || BlastMarked(model) || ShotMarked(model))
+        // in ambush (Tank3DBench.Ambush): the sight, beside the state's sign if it has one
+        bool watching = fate == Fate.Alive && _ambush.ContainsKey(id);
+        if ((badge == Badge.None && !watching) || BlastMarked(model) || ShotMarked(model))
             return;
         Vector2 at = Over(model, rig);
+        if (badge == Badge.None)
+        {
+            Sight(ink, at, r, SideInk(side));
+            return;
+        }
+        if (watching)
+        {
+            Sight(ink, at + new Vector2(r * 1.15f, 0.0f), r, SideInk(side));
+            at -= new Vector2(r * 1.15f, 0.0f);
+        }
         // the drowned on the bed: over the water, not over the hull under it,
         // which would put the sign on whoever stands in front
         if (badge == Badge.Drowned)

@@ -126,6 +126,7 @@ public sealed partial class Tank3DBench
         };
         AddChild(_aimMesh);
         BuildBeads();
+        BuildAxisLines();
         _aimInk = new Control { Name = "AimInk", MouseFilter = Control.MouseFilterEnum.Ignore };
         _aimInk.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         _aimInk.Draw += DrawAim;
@@ -183,6 +184,8 @@ public sealed partial class Tank3DBench
         else
             BlastPlanTick(null, null);
         BeadsTick();
+        // the ambushes' axes (Tank3DBench.Ambush)
+        AxisLinesTick();
         _aimInk?.QueueRedraw();
     }
 
@@ -781,8 +784,8 @@ public sealed partial class Tank3DBench
         if (_beads?.Multimesh is not { } mm)
             return;
         mm.VisibleInstanceCount = 0;
-        // «Засада» on: the axis being picked instead (Tank3DBench.Ambush)
-        if (AmbushBeads(mm))
+        // «Засада» on: the axis being picked instead (Tank3DBench.Ambush, AxisLinesTick)
+        if (_ambushMode)
             return;
         if (_judged is not { } shot || !_fireAxis || shot.Axis < 0 || !OnTarget(shot))
             return;
