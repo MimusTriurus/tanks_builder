@@ -115,6 +115,12 @@ public sealed partial class Tank3DBench
     private readonly MatchTurn _mt = new();
     /// <summary>Seconds to the turn passing by itself; null while it waits.</summary>
     private float? _passIn;
+    /// <summary>When the turn last went by itself (<see cref="_passIn"/> run
+    /// out), ms of <c>Time.GetTicksMsec</c>; 0 for never.</summary>
+    private ulong _passedByItself;
+    /// <summary>A hand's pass this soon after the turn went by itself was meant
+    /// for the turn that went, ms - the new turn's banner (<see cref="BannerFor"/>).</summary>
+    private const ulong PassGrace = 2200;
     private string _matchNote = "";
     /// <summary><c>--map</c> was given: the match plays it, not its own board.</summary>
     private bool _mapNamed;
@@ -438,6 +444,25 @@ public sealed partial class Tank3DBench
         PassTurn();
     }
 
+    /// <summary>Ctrl+Enter and the button: <see cref="EndTurn"/>, unless the
+    /// turn has just gone by itself and the new side has done nothing yet -
+    /// the press was meant for the turn that went. An ambush spends the whole
+    /// turn, it went on its own while the player reached for the button, and
+    /// the press passed the other side's turn back (2026-10-31). A command's
+    /// pass (<c>--commands</c>) is not a hand and is not held.</summary>
+    private void PassByHand()
+    {
+        if (!Deploying && !MatchOver && _passedByItself > 0
+            && Time.GetTicksMsec() - _passedByItself < PassGrace
+            && !(_side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus)))
+        {
+            Log.Print($"tank3d: match: a pass {Time.GetTicksMsec() - _passedByItself} ms after the turn went by itself - held");
+            _matchNote = "ход уже передан";
+            return;
+        }
+        Execute(new Command(CommandKind.Pass));
+    }
+
     /// <summary>To the other side, and the side that ended its turn checked for
     /// fires left burning (Tank3DBench.Blast) - after the hand-over, so a unit
     /// that burns out stands, as every other, rather than rides.</summary>
@@ -630,7 +655,10 @@ public sealed partial class Tank3DBench
         {
             _passIn = left - dt;
             if (_passIn <= 0.0f)
+            {
                 PassTurn();
+                _passedByItself = Time.GetTicksMsec();
+            }
         }
     }
 
@@ -974,7 +1002,7 @@ public sealed partial class Tank3DBench
             FocusMode = Control.FocusModeEnum.None,
         };
         pass.AddThemeFontSizeOverride("font_size", 16);
-        pass.Pressed += EndTurn;
+        pass.Pressed += PassByHand;
         layer.AddChild(pass);
         _passButton = pass;
         BuildUndo(layer);

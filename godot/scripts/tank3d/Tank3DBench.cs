@@ -1552,7 +1552,7 @@ public sealed partial class Tank3DBench : Node3D
             case "charge": if (_other is not null) OrderTo(OtherCell(_other), ram: true); break;
             case "cancel": CancelOrder(); break;
             // the end of turn's button (Tank3DBench.Match)
-            case "pass": EndTurn(); break;
+            case "pass": PassByHand(); break;
             // the move taken back (Tank3DBench.Undo)
             case "undo": UndoMove(); break;
             case "ram-mode": RamToggle(); break;
@@ -2419,7 +2419,7 @@ public sealed partial class Tank3DBench : Node3D
                 case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen && (_spinOpen || SpinMay)) SpinStep(left: false); else if (_chosen) OrderTurn(left: false); return;
                 // Ctrl+Enter in a match: the turn handed over (Tank3DBench.Match)
                 case Key.Enter or Key.KpEnter:
-                    if (Match && order.CtrlPressed) Execute(new Command(CommandKind.Pass));
+                    if (Match && order.CtrlPressed) PassByHand();
                     else if (AmbushConfirm()) { }
                     else if (_spinOpen && _spinPick is int pick) SpinTo(pick);
                     else Confirm();
