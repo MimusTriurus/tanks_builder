@@ -206,6 +206,17 @@ bool burn_gone(float at, vec3 p) {
     return (burn_role == 1 && (burn > at || (burn_eat && burn_left(at, p) < 0.0)))
         || (burn_role == 2 && burn <= at);
 }
+// A tree seen through over a tank of the side to move (Tank3DBench.Wood,
+// WoodSee): 1 whole .. 0 gone, a screen door on a 4 x 4 Bayer.
+uniform float see = 1.0;
+bool see_gone(vec2 frag) {
+    if (see >= 1.0) {
+        return false;
+    }
+    const float bayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    ivec2 i = ivec2(mod(frag, 4.0));
+    return (bayer[i.x + i.y * 4] + 0.5) / 16.0 > see;
+}
 ";
 
     /// <summary>
@@ -431,7 +442,7 @@ void vertex() {
     mud_local = VERTEX * length(MODEL_MATRIX[0].xyz);
 }
 void fragment() {
-    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+    if ((burn_role != 0 && burn_gone(UV2.x, world)) || see_gone(FRAGCOORD.xy)) {
         discard;
     }
     " + (both ? "if (!FRONT_FACING) { NORMAL = -NORMAL; }" : "") + @"
@@ -726,7 +737,7 @@ void vertex() {
     NORMAL = n;
 }
 void fragment() {
-    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+    if ((burn_role != 0 && burn_gone(UV2.x, world)) || see_gone(FRAGCOORD.xy)) {
         discard;
     }
     ALBEDO = texture(albedo_tex, UV).rgb * albedo.rgb * dark;

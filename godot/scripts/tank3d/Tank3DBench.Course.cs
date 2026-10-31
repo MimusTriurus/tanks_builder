@@ -14,7 +14,8 @@ namespace TankSpriteTest;
 /// <item><b>The reach</b> - the cells tinted in two tones, bright where the tank
 /// arrives with a step to spare for a turn, faint where it arrives with none,
 /// and a contour round the whole. A red stop sign on the cells where a move
-/// ends: mud, wood, a mine, deep water without the snorkel.</item>
+/// ends: mud, deep water without the snorkel - not a mine, not a wood
+/// (drawn through instead, Tank3DBench.Wood).</item>
 /// <item><b>The way</b> - a ribbon through the cells' middles lying on the
 /// ground, chevrons along it, the steps spent by each cell in a disc (brown on
 /// sand, which costs two), a pill for what it risks
@@ -712,8 +713,11 @@ public sealed partial class Tank3DBench
         foreach (Vector2I cell in _reach.Cells.Keys)
             // a mine is no stop sign (2026-10-29, the author's note): it is
             // driven on to and goes off - the ghost on it shows that
-            // (Tank3DBench.Ghost, GhostMined), the mine is seen on the board
-            if (Steps.Stops(_field!, cell, _reach.Mover) || (_field!.IsDeep(cell) && !RigSnorkel))
+            // (Tank3DBench.Ghost, GhostMined), the mine is seen on the board;
+            // nor a wood (2026-10-31): it stands drawn through in the reach
+            // (Tank3DBench.Wood, WoodSee), and the sign lay on its crowns
+            if ((Steps.Stops(_field!, cell, _reach.Mover) || (_field!.IsDeep(cell) && !RigSnorkel))
+                && _field.CoverAt(cell) != Cover.Forest)
             {
                 Vector2 at = Screen(cell) + new Vector2(hex * 0.42f, -hex * 0.30f);
                 ink.DrawCircle(at, r * 0.8f, StopInk);

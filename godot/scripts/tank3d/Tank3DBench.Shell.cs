@@ -149,21 +149,26 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>
-    /// The angle the mortar's tube is laid at for a target <paramref name="cells"/>
-    /// out: the rules' nearest (<see cref="Gunnery.LobShortest"/>) at the
-    /// tube's bottom, the furthest (<see cref="Gunnery.LobReach"/>) at its top,
-    /// <see cref="LobSpare"/> in from each stop, evenly between - so the tube
-    /// says the range, and the charge (<see cref="Charge"/>) puts the bomb on
-    /// the hex whatever the ground does there.
+    /// The angle the mortar's tube is laid at: its top, <see cref="LobSpare"/>
+    /// in from the stop, for every range - the steepest throw it has, and the
+    /// charge (<see cref="Charge"/>) puts the bomb on the hex. The bomb goes
+    /// over whatever stands between (GDD classes.md, «HM»: «минуя всё, что
+    /// стоит между стрелком и гексом»), and the higher the arc the more of it
+    /// it clears.
+    ///
+    /// Until 2026-10-31 the tube said the range: the rules' nearest
+    /// (<see cref="Gunnery.LobShortest"/>) at its bottom, the furthest at its
+    /// top. HMR's tube runs 12 to 40 degrees, so three cells went out at 13 -
+    /// a gun's flat shot - and a mesa between went into the face (the
+    /// author's note: the drill10 mesa, from (8, 4) at (8, 7)). Under 45
+    /// degrees a steeper tube is a higher arc at any range.
+    /// <paramref name="cells"/> is kept for the callers' reading.
     /// </summary>
     private float LobLay(float cells, float pitch, TankModel? tube = null)
     {
         // the tank's own tube, or the ghost's (the HUD's preview, Tank3DBench.Aim)
         tube ??= _model;
-        float lo = pitch - tube.Elevation + Mathf.DegToRad(tube.ElevMin + LobSpare);
-        float hi = pitch - tube.Elevation + Mathf.DegToRad(tube.ElevMax - LobSpare);
-        float k = Mathf.Clamp((cells - Gunnery.LobShortest) / (float)(Gunnery.LobReach - Gunnery.LobShortest), 0.0f, 1.0f);
-        return Mathf.Lerp(lo, hi, k);
+        return pitch - tube.Elevation + Mathf.DegToRad(tube.ElevMax - LobSpare);
     }
 
     /// <summary>How far in from each of the tube's stops the mortar lays,

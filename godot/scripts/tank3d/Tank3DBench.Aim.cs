@@ -18,8 +18,9 @@ namespace TankSpriteTest;
 /// order's cell gives way to the ghost, which now stands there for the whole
 /// drive.</item>
 /// <item><b>The line of fire</b> - with the pointer on the target: from the
-/// muzzle along the axis to the hull, the mortar's as an arc; cut short with a
-/// cross where the lane is shut, dashed and grey off the axis. A ricochet goes
+/// muzzle along the axis to the hull, the mortar's as an arc; where the lane is
+/// shut, grey and still, ended with a bar across it. Seen faint through a
+/// wood's crowns (<see cref="BeadGhostShader"/>). A ricochet goes
 /// on from the flank down the rules' axis to what stops it
 /// (<c>Tank3DBench.Glance</c>), in the outcome's colour there.</item>
 /// <item><b>The plate</b> - the edge of the target's hex the round comes in
@@ -421,7 +422,7 @@ public sealed partial class Tank3DBench
             stop = wall.Cell;
         }
         else if (stop is Vector2I shut)
-            end = CellWorld(shut) + Vector3.Up * (0.3f * tall);
+            end = ShutAt(from, shut, end);
         // A tank in the lane: the line runs on into its plate, as the round
         // would - no cross short of it, no word over the target; the order
         // is still refused, and the HUD says why (the author's note, 2026-10-29).
@@ -451,20 +452,81 @@ public sealed partial class Tank3DBench
         else
         {
             level = LevelOn(o, end - muzzle, might, out face, out plate);
-            // the plate itself, where the round from the muzzle meets it
+            // the plate itself, where the round from the muzzle meets it -
+            // the middle of the one the rules name (PlateMid)
             Vector3 tip = TipAt(from);
-            if (why.Length == 0 && o.Hits.Cast(tip, (end - tip).Normalized()) is { } hit)
-                end = hit.At;
+            if (why.Length == 0)
+                end = PlateMid(o, face, tip, end);
         }
         var judged = new Judged(from, cell, muzzle, end, axis, face, plate, level, why, _profile.Lobs, cells, stop, TipAt(from));
         judged = judged with { Breach = breach, Screened = screen is not null, Holed = why.Length == 0 ? holed : null };
         // where it goes on to past the target - the round's own leg (Strike):
         // held by a flank, or a destroyer's with its pass still in hand
+        // along the rules' axis, not the line's last stretch: that runs to the
+        // plate's middle (PlateMid), off the axis by as much as the hull is wide
         if (judged.Glances && !judged.Lob)
-            judged = judged with { Onward = GlanceLeg(o, end, end - judged.Tip, might) };
+            judged = judged with { Onward = GlanceLeg(o, end, HexWay(from, axis), might) };
         else if (judged.Pierces && !judged.Lob && ShootsThrough && breach is null && holed is null)
-            judged = judged with { Onward = PassLeg(o, end, end - judged.Tip, Gunnery.PassedMight(_profile)) };
+            judged = judged with { Onward = PassLeg(o, end, HexWay(from, axis), Gunnery.PassedMight(_profile)) };
         return judged;
+    }
+
+    /// <summary>
+    /// Where the line of fire meets the target: the middle of the plate the
+    /// rules name (<paramref name="face"/>, <see cref="LevelOn"/>'s sector -
+    /// front within 30 degrees, rear from 150, the sides between), on the
+    /// surface, as the line from <paramref name="tip"/> to it meets the hull.
+    /// The rules' axis through the hull's middle met a side plate from 60
+    /// degrees off the rear behind its middle, by the rear corner, and in
+    /// the board's foreshortening the line read as into the stern while the
+    /// rules and the hex's edge said the side (the author's note,
+    /// 2026-10-31). The outcome is the rules' either way; this is where the
+    /// line says it is. <paramref name="centre"/> when nothing is met.
+    /// </summary>
+    private static Vector3 PlateMid(Other o, string face, Vector3 tip, Vector3 centre)
+    {
+        Vector3 ahead = o.Ahead, left = new(ahead.Z, 0.0f, -ahead.X);
+        Vector3 n = face switch
+        {
+            "front" => ahead,
+            "rear" => -ahead,
+            "left" => left,
+            "right" => -left,
+            _ => Vector3.Zero,
+        };
+        Vector3 mid = centre;
+        // the plate's middle: in along its normal from well outside the hull
+        float reach = o.Model.Size.Length() * o.Model.PixelsPerUnit;
+        if (n != Vector3.Zero && o.Hits.Cast(centre + n * reach, -n) is { } plate)
+            mid = plate.At;
+        // and where the line to it meets the hull first, so no bead lies in it
+        return o.Hits.Cast(tip, (mid - tip).Normalized()) is { } hit ? hit.At : mid;
+    }
+
+    /// <summary>
+    /// Where the line of a shot the lane shuts at <paramref name="shut"/>
+    /// ends: on the barrel's line, as far out as the middle of that hex - in
+    /// a wood, its middle under the crowns (the author's note, 2026-10-31).
+    /// It ran to a point on the datum, a third of a hull up, and out of a
+    /// wood into the next it left the gun at an angle no barrel had. The
+    /// barrel the shot leaves from is the ghost's or the tank's, laid on the
+    /// target (the line is drawn only then, <see cref="OnTarget"/>); else
+    /// the level way to <paramref name="aim"/>.
+    /// </summary>
+    private Vector3 ShutAt(Vector2I from, Vector2I shut, Vector3 aim)
+    {
+        Vector3 tip = TipAt(from);
+        TankModel? tube = GhostOn(from) ?? (from == CellHere ? _model : null);
+        Vector3 way = tube is not null && !_profile.Lobs ? tube.Muzzle.GlobalBasis.Z : aim - tip;
+        if (tube is null || _profile.Lobs)
+            way.Y = 0.0f;
+        if (way.LengthSquared() < 1e-6f)
+            return CellMiddle(shut);
+        way = way.Normalized();
+        Vector3 mid = CellMiddle(shut);
+        Vector2 flat = new Vector2(way.X, way.Z);
+        float run = new Vector2(mid.X - tip.X, mid.Z - tip.Z).Dot(flat) / Mathf.Max(flat.LengthSquared(), 1e-6f);
+        return tip + way * run;
     }
 
     /// <summary>Where the line of fire starts from <paramref name="from"/>: over
@@ -803,7 +865,9 @@ public sealed partial class Tank3DBench
         if (total <= gap * 0.5f)
             return;
         float t = (float)(Time.GetTicksMsec() / 1000.0);
-        float run = Mathf.PosMod(t * BeadRun * CellStep, gap);
+        // a shot that will not be fired stands still: grey, no light running
+        // along it, to where it stops (the author's note, 2026-10-31)
+        float run = shot.Fires ? Mathf.PosMod(t * BeadRun * CellStep, gap) : 0.0f;
         float r = Mathf.Clamp(HexScreen() * 0.045f, 2.5f, 6.0f);
         // screen px a world unit: the camera is orthographic, one figure
         Vector3 basisX = _camera.GlobalBasis.X.Normalized();
@@ -819,8 +883,11 @@ public sealed partial class Tank3DBench
         int n = 0;
         for (float s = start + run; s <= total && n < BeadsMost; s += gap)
         {
-            float wave = 0.5f + 0.5f * Mathf.Sin(t * BeadWave - s / gap * 0.9f);
-            float edge = Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / tail + 0.3f, 0.0f, 1.0f);
+            float wave = shot.Fires ? 0.5f + 0.5f * Mathf.Sin(t * BeadWave - s / gap * 0.9f) : 0.4f;
+            // the still line does not fade at its ends: shut a hex out of a
+            // wood, it is little more than its ends
+            float edge = !shot.Fires ? 1.0f
+                : Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / tail + 0.3f, 0.0f, 1.0f);
             Color bead = leg is not null && s > first ? leg.Ink : c;
             float size = r * (0.8f + 0.35f * wave) * (0.4f + 0.6f * edge);
             // the disc with its dark ring, 1.6 px past the colour
@@ -830,8 +897,58 @@ public sealed partial class Tank3DBench
             mm.SetInstanceCustomData(n, new Color(size / (size + 1.6f), 0.5f * edge, 0.0f, 0.0f));
             n++;
         }
+        // every line ends in a bead twice the size, where the round stops -
+        // on the plate it meets, at the end of a ricochet's or a pass's leg,
+        // where the lane is shut (the author's notes, 2026-10-31): a bar
+        // across the line drawn on the screen was lost on a wood's crowns. A
+        // leg off the board dies away instead. Pulled toward the eye by its
+        // radius, so a hull it lies on does not cut it in half.
+        if (leg is not { Fades: true } && n < BeadsMost)
+        {
+            // a shot that will be fired flashes as the wave of light along it
+            // gets to the end (EndPulse): the round arriving; the still one
+            // does not (the author's note, 2026-10-31)
+            float hit = shot.Fires ? Mathf.Pow(0.5f + 0.5f * Mathf.Sin(t * BeadWave - total / gap * 0.9f), 3.0f) : 0.0f;
+            float size = r * EndBead * (1.0f + EndPulse * hit);
+            float outer = (size + 2.0f) / px;
+            // on a hull, pulled past it: the plate the rules name may face
+            // away from the eye (PlateMid), and the hull hid the bead on it;
+            // the camera is orthographic, so on the screen it stays on the plate
+            TankModel? on = leg is not null ? leg.Hull?.Model : shot.Fires ? _other?.Model : null;
+            float pull = outer + (on is not null ? on.Size.Length() * on.PixelsPerUnit : 0.0f);
+            Vector3 at = (leg is not null ? leg.End : shot.End) + _camera.GlobalBasis.Z.Normalized() * pull;
+            Color ink = leg is not null ? leg.Ink : c;
+            mm.SetInstanceTransform(n, new Transform3D(facing.Scaled(Vector3.One * outer), at));
+            mm.SetInstanceColor(n, new Color(ink.Lerp(Colors.White, 0.3f + 0.4f * hit), 1.0f));
+            mm.SetInstanceCustomData(n, new Color(size / (size + 2.0f), 0.7f, 0.0f, 0.0f));
+            n++;
+        }
+        // a line that goes on past the target - off a flank or through it -
+        // marks where it meets it too, smaller, pulled past the hull as the
+        // end bead is: the plate there may face away from the eye
+        if (leg is not null && shot.Fires && _other is { } target && n < BeadsMost)
+        {
+            float size = r * HitBead;
+            float outer = (size + 2.0f) / px;
+            float pull = outer + target.Model.Size.Length() * target.Model.PixelsPerUnit;
+            mm.SetInstanceTransform(n, new Transform3D(facing.Scaled(Vector3.One * outer),
+                                                       shot.End + _camera.GlobalBasis.Z.Normalized() * pull));
+            mm.SetInstanceColor(n, new Color(c.Lerp(Colors.White, 0.3f), 1.0f));
+            mm.SetInstanceCustomData(n, new Color(size / (size + 2.0f), 0.7f, 0.0f, 0.0f));
+            n++;
+        }
         mm.VisibleInstanceCount = n;
     }
+
+    /// <summary>Where a line that goes on past the target meets it, beads' radii.</summary>
+    private const float HitBead = 1.6f;
+
+    /// <summary>The bead every line of fire ends in, beads' radii; the
+    /// ambush's axes end in one as many dash widths (<c>AxisLine</c>).</summary>
+    private const float EndBead = 2.2f;
+
+    /// <summary>How much the end bead grows at the top of its flash.</summary>
+    private const float EndPulse = 0.2f;
 
     /// <summary>The most beads drawn at once.</summary>
     private const int BeadsMost = 600;
@@ -864,6 +981,40 @@ void fragment() {
 ",
     };
 
+    /// <summary>How much of a bead shows through the crowns
+    /// (<see cref="BeadGhostShader"/>).</summary>
+    private const float BeadGhost = 0.6f;
+
+    /// <summary>
+    /// The same beads once more, as a ghost: with no depth test, only on the
+    /// pixels the trees' own surfaces mark (<see cref="TreeModel.Stencil"/>) -
+    /// faint, through the crowns, so a shot from under them or into them
+    /// reads from the muzzle to where it stops (the author's note,
+    /// 2026-10-31). A hull still hides the beads: it leaves no such mark.
+    /// Drawn before the beads themselves, so where a bead is seen it lies
+    /// over its ghost.
+    /// </summary>
+    private static readonly Shader BeadGhostShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_test_disabled, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+stencil_mode read, compare_equal, " + TreeModel.Stencil + @";
+varying vec2 ring;
+void vertex() {
+    ring = INSTANCE_CUSTOM.xy;
+}
+void fragment() {
+    float d = length(UV - vec2(0.5)) * 2.0;
+    float w = fwidth(d);
+    float disc = 1.0 - smoothstep(1.0 - w, 1.0, d);
+    float core = 1.0 - smoothstep(ring.x - w, ring.x, d);
+    ALBEDO = mix(vec3(0.0), mix(COLOR.rgb, vec3(1.0), 0.35), core);
+    ALPHA = disc * mix(ring.y, COLOR.a, core) * " + BeadGhost.ToString(System.Globalization.CultureInfo.InvariantCulture) + @";
+}
+",
+    };
+
     private void BuildBeads()
     {
         var mm = new MultiMesh
@@ -880,11 +1031,20 @@ void fragment() {
             Name = "AimBeads",
             Multimesh = mm,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            MaterialOverride = new ShaderMaterial { Shader = BeadShader },
+            MaterialOverride = new ShaderMaterial { Shader = BeadShader, RenderPriority = 1 },
             // the beads move every frame; nothing of them is culled
             CustomAabb = new Aabb(new Vector3(-1e5f, -1e5f, -1e5f), new Vector3(2e5f, 2e5f, 2e5f)),
         };
         AddChild(_beads);
+        // their ghost through the crowns, off the same instances
+        AddChild(new MultiMeshInstance3D
+        {
+            Name = "AimBeadsGhost",
+            Multimesh = mm,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = new ShaderMaterial { Shader = BeadGhostShader, RenderPriority = 0 },
+            CustomAabb = _beads.CustomAabb,
+        });
     }
 
     /// <summary>
@@ -943,10 +1103,10 @@ void fragment() {
         }
     }
 
-    // --- the screen: the reticle, the cross, the label ----------------------
+    // --- the screen: the reticle and the label ----------------------
 
     /// <summary>Over the board: a reticle round the target in the outcome's
-    /// colour, or a cross where the lane is shut, and the label.</summary>
+    /// colour, and LT's label after the move.</summary>
     private void DrawAim()
     {
         // the target can go between the judging and the drawing: a match's
@@ -984,25 +1144,14 @@ void fragment() {
             if (shot.Holed is { } holed && _fireAxis && OnTarget(shot))
                 Burst(ink, _camera.UnprojectPosition(holed.End), Mathf.Max(size * 0.8f, hex * 0.18f), AimPierce);
         }
-        else if (shot.Axis >= 0 && !shot.Screened)
-        {
-            // the lane shut: a cross where the round would stop
-            var dark = new Color(0.0f, 0.0f, 0.0f, 0.55f);
-            foreach ((Color c, float w) in new[] { (dark, 5.5f), (new Color(0.92f, 0.92f, 0.9f), 3.0f) })
-            {
-                ink.DrawLine(end - new Vector2(r, r), end + new Vector2(r, r), c, w, true);
-                ink.DrawLine(end - new Vector2(r, -r), end + new Vector2(r, -r), c, w, true);
-            }
-        }
         Vector2 over = _camera.UnprojectPosition(_other!.Rig.Position + _other.Up * (_other.Model.Size.Y * _other.Model.PixelsPerUnit * 1.2f));
         // kept under the HUD's three lines
         over.Y = Mathf.Max(over.Y, 100.0f + size * 2.0f);
         // The outcome is the line's colour and its course - no words over the
-        // target for it; only why there is no shot, which nothing else says.
-        // Off the axes it says nothing: the rims of the units in reach do
-        // (ReachTick, the author's note 2026-10-29).
-        if (!shot.Fires && !shot.Screened && shot.Axis >= 0)
-            Pill(ink, font, over + new Vector2(0, -size), shot.Says, shot.Ink, new Color(0.12f, 0.12f, 0.12f), size);
+        // target for it, and none for why there is no shot either: the still
+        // grey line into what shuts it says that, and the rims of the units
+        // in reach (ReachTick) say who can be hit; the words are on the
+        // status line (the author's notes, 2026-10-29 and 2026-10-31).
         int semi = _judgedNote.IndexOf("; после хода", System.StringComparison.Ordinal);
         if (semi >= 0)
             Pill(ink, font, over + new Vector2(0, size * 0.8f), _judgedNote[(semi + 2)..], new Color(0.92f, 0.95f, 0.98f),

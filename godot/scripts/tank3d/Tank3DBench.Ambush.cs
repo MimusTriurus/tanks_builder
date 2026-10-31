@@ -801,6 +801,32 @@ public sealed partial class Tank3DBench
                 mesh.SurfaceSetColor(c1); mesh.SurfaceAddVertex(p1 - side);
             }
         }
+        // where it stops, the line of fire's end bead (EndBead, the author's
+        // note 2026-10-31); off the board's edge it dies away instead
+        if (fades)
+            return;
+        float bead = Mathf.Clamp(HexScreen() * 0.045f, 2.5f, 6.0f) * EndBead;
+        Vector3 ex = _camera.GlobalBasis.X.Normalized(), ey = _camera.GlobalBasis.Y.Normalized();
+        // the axis stops on a unit's cell middle, inside the hull: the bead
+        // is pulled toward the eye past it - the camera is orthographic, so
+        // on the screen it stays on the hull's middle
+        float pull = (bead + 2.0f) / px;
+        if (UnitOn(_field!.FlatCellAt(Board(end))) is { Model: { } hull })
+            pull += hull.Size.Length() * hull.PixelsPerUnit;
+        Vector3 mid = end + _camera.GlobalBasis.Z.Normalized() * pull;
+        const int sides = 16;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            float rad = (pass == 0 ? bead + 2.0f : bead) / px;
+            Color ink = pass == 0 ? new Color(0.0f, 0.0f, 0.0f, 0.7f) : new Color(c.Lerp(Colors.White, 0.35f), 1.0f);
+            for (int i = 0; i < sides; i++)
+            {
+                float u = Mathf.Tau * i / sides, v = Mathf.Tau * (i + 1) / sides;
+                mesh.SurfaceSetColor(ink); mesh.SurfaceAddVertex(mid);
+                mesh.SurfaceSetColor(ink); mesh.SurfaceAddVertex(mid + (ex * Mathf.Cos(u) + ey * Mathf.Sin(u)) * rad);
+                mesh.SurfaceSetColor(ink); mesh.SurfaceAddVertex(mid + (ex * Mathf.Cos(v) + ey * Mathf.Sin(v)) * rad);
+            }
+        }
     }
 
     /// <summary>The watcher's sign: a sight on a dark token.</summary>

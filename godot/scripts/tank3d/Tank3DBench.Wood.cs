@@ -79,6 +79,9 @@ public sealed partial class Tank3DBench
         /// of its height) - the spring's rest; zero once nothing touches it.</summary>
         public Vector2 Bend;
         public readonly List<(float Due, Vector2 Kick, float Shiver)> Kicks = new();
+        /// <summary>How much of it is drawn over a tank of the side to move
+        /// (<see cref="WoodSee"/>): 1 whole, <see cref="SeeThrough"/> at most.</summary>
+        public float See = 1.0f;
     }
 
     /// <summary>The wood's fire (<see cref="Wildfire"/>), the cells it may
@@ -303,6 +306,60 @@ public sealed partial class Tank3DBench
         _relief is not null && _field!.InBounds(cell) && _field.CoverAt(cell) == Cover.Minefield
         && _field.FoundationAt(cell) == Foundation.Solid && !_field.IsWater(cell);
 
+    /// <summary>How much of a tree is left drawn over a tank of the side to
+    /// move, and how fast it gets there and back, a second.</summary>
+    private const float SeeThrough = 0.6f, SeeRate = 3.0f;
+
+    /// <summary>The cells <see cref="WoodSee"/> thins the wood on this frame.</summary>
+    private readonly HashSet<Vector2I> _seeCells = new();
+
+    /// <summary>
+    /// The trees on a cell a unit of the side to move stands on - in a match,
+    /// any of its own, the chosen one, the standing ones, the other if it is
+    /// theirs; off a match, the bench's tank - are drawn through
+    /// (<c>see</c>, <see cref="Toon.BurnCode"/>: a screen door over the cel
+    /// pass and the ink), so the crowns do not hide the side's own hulls (the
+    /// author's note, 2026-10-31). The enemy's under the wood stay hidden. The
+    /// crown's mask is whole, so its line keeps the crown's shape.
+    /// </summary>
+    private void WoodSee(float dt)
+    {
+        _seeCells.Clear();
+        if (_field is not null)
+        {
+            bool ownSide = !Match || _side == _mt.Turn;
+            if (ownSide && _fate != Fate.Destroyed)
+                _seeCells.Add(CellHere);
+            if (Match)
+            {
+                for (int i = 0; i < _parked.Count; i++)
+                    if (_parked[i].Side == _mt.Turn && _parked[i].Fate != Fate.Destroyed)
+                        _seeCells.Add(_parked[i].Cell);
+                if (_other is { Unit: true } o && o.Side == _mt.Turn && o.Fate != Fate.Destroyed)
+                    _seeCells.Add(OtherCell(o));
+            }
+            // and every wood the chosen tank may drive into, while its reach
+            // is shown (the author's note, 2026-10-31): the zone, the way and
+            // the ghost under the crowns are seen
+            if (CourseShown && _reach is not null)
+                // over the wooded cells, a HashSet's own enumerator: the
+                // reach's IReadOnlyDictionary boxed one every frame
+                foreach (Vector2I cell in _woodedCells)
+                    if (_reach.Reaches(cell))
+                        _seeCells.Add(cell);
+        }
+        float step = SeeRate * dt;
+        foreach (Planted t in _trees)
+        {
+            float want = _seeCells.Contains(t.Cell) ? SeeThrough : 1.0f;
+            if (Mathf.IsEqualApprox(t.See, want))
+                continue;
+            t.See = Mathf.MoveToward(t.See, want, step);
+            for (int k = 0; k < t.Model.Burn.Count; k++)
+                t.Model.Burn[k].Param("see", t.See);
+        }
+    }
+
     /// <summary>A frame of the wood: the wind on the crowns, and the grass
     /// pressed under the hulls.</summary>
     private void WoodTick(float dt)
@@ -319,6 +376,7 @@ public sealed partial class Tank3DBench
         if (_other is { Falling: false, Wet: false } o)
             Brush(BoxOf(o.Rig.Position, o.Heading, o.Foot), dt > 0.0f ? o.Slid / dt : 0.0f, o.Tag);
         _brushing.IntersectWith(_brushed);
+        WoodSee(dt);
         float w = Mathf.Tau * SwayHz;
         foreach (Planted t in _trees)
         {
