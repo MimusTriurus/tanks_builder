@@ -15,8 +15,8 @@ namespace TankSpriteTest;
 /// own, else the nearest of the six; a casemate's hull's); the medium takes a
 /// second beside it for its sector, or the same again (or Enter) for one. In
 /// the mode the move is not shown nor given, the turret comes round to the
-/// axis under the pointer and it is drawn as the line of fire is, red beads
-/// out of the muzzle to what cuts it (<see cref="AmbushBeads"/>). A command
+/// axis under the pointer and it is drawn as a red line out of the muzzle to
+/// what cuts it (<see cref="AxisLinesTick"/>), its hexes red as the move's zone (<see cref="AmbushZone"/>). A command
 /// too: <c>ambush:SIDE[:SIDE2]</c>. The turn is spent with it: set last
 /// (units.md); the turret is laid along the axis and stays so.</item>
 /// <item><b>Lifted</b> by any order to the unit (<c>ShadowAct</c>), a ram into
@@ -27,8 +27,9 @@ namespace TankSpriteTest;
 /// from the watcher's muzzle down the core's legs. A hull it knocks out is
 /// stopped at once and rolls to the hex's middle, as a mine's; the fates land
 /// with the round.</item>
-/// <item><b>Drawn</b>: the axis as far as it sees now, dashed in the side's
-/// ink, and a sight over the watcher (<see cref="DrawAmbushes"/>).</item>
+/// <item><b>Drawn</b>: the axis as far as it sees now, a solid line in the
+/// air out of the watcher's muzzle in its side's ink (<see cref="AxisLinesTick"/>),
+/// and a sight over it among the state's signs (Tank3DBench.Badges).</item>
 /// </list>
 /// </summary>
 public sealed partial class Tank3DBench
@@ -171,8 +172,74 @@ public sealed partial class Tank3DBench
             _speed = (_speed < 0.0f ? -1.0f : 1.0f) * Mathf.Max(Mathf.Abs(_speed), 0.2f * MaxSpeed);
             _driveScripted = 0.0f;
         }
-        AmbushPlay(st, was);
+        // fired as the hull comes on to the axis, not as it crosses the hex's
+        // rim, which is where the core answered (AmbushDueTick)
+        _ambushDue.Add(new AmbushDue(st, was, id, cell));
     }
+
+    /// <summary>An ambush the core has fired, its round waiting for the hull
+    /// it took to come on to the axis.</summary>
+    private sealed class AmbushDue(BattleState st, int from, int unit, Vector2I cell)
+    {
+        public readonly BattleState St = st;
+        public readonly int From = from, Unit = unit;
+        public readonly Vector2I Cell = cell;
+        /// <summary>The hull's distance from the hex's middle last frame.</summary>
+        public float Near = float.MaxValue;
+        public float Waited;
+    }
+
+    private readonly List<AmbushDue> _ambushDue = new();
+
+    /// <summary>The longest an ambush round waits for its hull, s.</summary>
+    private const float AmbushWaitMost = 1.5f;
+
+    /// <summary>An ambush round's speed against a gun's shot: the hull is
+    /// moving under it, and a round that took a gun's time landed where the
+    /// hull had been.</summary>
+    private const float AmbushPace = 2.5f;
+
+    /// <summary>
+    /// Every frame of a match: each ambush round the core fired is flown
+    /// (<see cref="AmbushPlay"/>) once its hull is on the axis. The core
+    /// answers as the hull crosses into the hex (<c>HexEffectsTick</c>), but
+    /// an axis runs through the hexes' middles - a round fired then left the
+    /// muzzle before the hull was in its line and landed on its trail. So it
+    /// waits: until the hull is at the hex's middle, has stopped short of it
+    /// or is going away from it, or <see cref="AmbushWaitMost"/> is up.
+    /// Allocates nothing while it waits.
+    /// </summary>
+    private void AmbushDueTick()
+    {
+        if (_ambushDue.Count == 0)
+            return;
+        float dt = (float)GetProcessDeltaTime();
+        for (int i = _ambushDue.Count - 1; i >= 0; i--)
+        {
+            AmbushDue due = _ambushDue[i];
+            due.Waited += dt;
+            float near = 0.0f;
+            if (RigOf(due.Unit) is { } rig)
+            {
+                Vector3 off = rig.GlobalPosition - CellWorld(due.Cell);
+                off.Y = 0.0f;
+                near = off.Length();
+            }
+            bool on = near < CellStep * 0.08f || near >= due.Near - 0.01f || due.Waited >= AmbushWaitMost;
+            due.Near = near;
+            if (!on)
+                continue;
+            _ambushDue.RemoveAt(i);
+            AmbushPlay(due.St, due.From);
+        }
+    }
+
+    /// <summary>Unit <paramref name="id"/>'s rig: the own tank's, the target's
+    /// or a standing one's.</summary>
+    private Node3D? RigOf(int id) =>
+        id == _unitId ? _rig
+        : _other is { Unit: true } o && o.Id == id ? o.Rig
+        : UnitStanding(id)?.Rig;
 
     /// <summary>The core's ambush rounds from event <paramref name="from"/>
     /// on: each flown from its watcher's muzzle along the legs the core gave it
@@ -190,7 +257,7 @@ public sealed partial class Tank3DBench
             ShellsBuild();
             if (path.Count < 2)
                 path.Add(path[0] + Vector3.Up);
-            _shells!.Fly(path, Shell.Speed, TracerCal, SmokeCal, false, () => AmbushLanded(hits));
+            _shells!.Fly(path, Shell.Speed * AmbushPace, TracerCal, SmokeCal, false, () => AmbushLanded(hits));
             path = null;
             struck.Clear();
         }
@@ -268,10 +335,7 @@ public sealed partial class Tank3DBench
     private Vector3 HullPoint(int id, Vector2I cell)
     {
         TankModel? m = ModelOf(id);
-        Node3D? rig = id == _unitId ? _rig
-            : _other is { Unit: true } o && o.Id == id ? o.Rig
-            : UnitStanding(id)?.Rig;
-        Vector3 at = rig?.GlobalPosition ?? Foot(CellWorld(cell));
+        Vector3 at = RigOf(id)?.GlobalPosition ?? Foot(CellWorld(cell));
         return at + Vector3.Up * ((m?.Size.Y ?? 1.0f) * (m?.PixelsPerUnit ?? 1.0f) * 0.45f);
     }
 
@@ -377,84 +441,23 @@ public sealed partial class Tank3DBench
 
     // --- the picture ---------------------------------------------------------------------
 
-    /// <summary>Over the board: each watcher's axes, dashed in its side's ink as
-    /// far as they see now, and a sight over it; the medium's first pick too.
-    /// Allocates nothing.</summary>
-    private void DrawAmbushes(Control ink, float r)
-    {
-        foreach (KeyValuePair<int, (int A, int B, int Shots)> w in _ambush)
-        {
-            int id = w.Key;
-            TankModel? model = ModelOf(id);
-            Node3D? rig = id == _unitId ? _rig
-                : _other is { Unit: true } o && o.Id == id ? o.Rig
-                : UnitStanding(id)?.Rig;
-            Vector2I? cell = id == _unitId ? CellHere
-                : _other is { Unit: true } ot && ot.Id == id ? OtherCell(ot)
-                : UnitStanding(id)?.Cell;
-            if (model is null || rig is null || cell is not Vector2I c || SideOfUnit(id) is not Side side)
-                continue;
-            Color tint = SideInk(side);
-            bool thermal = (KitOf(id) & Kit.Thermal) != 0;
-            AxisLine(ink, c, w.Value.A, tint, thermal);
-            if (w.Value.B >= 0)
-                AxisLine(ink, c, w.Value.B, tint, thermal);
-            Sight(ink, Over(model, rig) + new Vector2(r * 2.3f, 0.0f), r, tint);
-        }
-        if (_ambushMode && _ambushPick is int pick)
-            AxisLine(ink, CellHere, pick, CardPale, (KitOf(_unitId) & Kit.Thermal) != 0);
-    }
-
-    /// <summary>One axis out of <paramref name="cell"/>: hex to hex until the
-    /// first thing that cuts it - a wall across an edge, a hull, a wood, the
-    /// board's edge - dashed, with a tick on each hex it watches. A thermal
-    /// imager's goes through smoke (Д8).</summary>
-    private void AxisLine(Control ink, Vector2I cell, int heading, Color tint, bool thermal = false)
-    {
-        Vector2 start = _camera.UnprojectPosition(Foot(CellWorld(cell)));
-        Vector2 end = start;
-        Vector2I at = cell;
-        int level = _field!.LevelAt(cell);
-        for (int k = 0; k < 16; k++)
-        {
-            if (_field.Walled(at, heading))
-                break;
-            Vector2I next = HexField.Step(at, heading);
-            if (next == at || !_field.InBounds(next))
-                break;
-            Vector2 p = _camera.UnprojectPosition(Foot(CellWorld(next)));
-            end = p;
-            ink.DrawCircle(p, 2.5f, new Color(tint, 0.85f));
-            if (UnitOn(next) is not null || _field.LevelAt(next) > level
-                || (_field.LevelAt(next) >= level && BoardRules.Screened(_field, next, thermal)))
-                break;
-            at = next;
-        }
-        if (end == start)
-            return;
-        ink.DrawDashedLine(start, end, new Color(0.0f, 0.0f, 0.0f, 0.45f), 4.0f, 10.0f, true, true);
-        ink.DrawDashedLine(start, end, new Color(tint, 0.9f), 2.0f, 10.0f, true, true);
-    }
-
     /// <summary>
-    /// The axis being picked, as the line of fire is drawn (<c>BeadsTick</c>):
-    /// beads in the air from the muzzle down <paramref name="axis"/> to the
-    /// first thing that cuts it - a wall across an edge, a hull, a wood or
-    /// smoke on its level, a rise, the board's edge (as <see cref="AxisLine"/>
-    /// walks it). Its start is the muzzle's tip brought on to the axis, so the
-    /// line leaves the barrel once the turret is round to it.
+    /// An ambush's axis in the air: from <paramref name="tip"/>, the muzzle's
+    /// tip brought on to the axis - so the line leaves the barrel once the
+    /// turret is round to it - down <paramref name="axis"/> out of
+    /// <paramref name="cell"/> to the first thing that cuts it: a wall across
+    /// an edge, a hull, a wood or smoke on its level (a thermal imager's sees
+    /// through smoke, Д8), a rise, the board's edge (<see cref="Fades"/>).
     /// </summary>
-    private (Vector3 From, Vector3 End, bool Fades) AmbushRay(int axis)
+    private (Vector3 From, Vector3 End, bool Fades) AmbushRay(Vector2I cell, Vector3 tip, int axis, bool thermal)
     {
-        Vector3 mid = CellWorld(CellHere);
-        Vector3 tip = TipAt(CellHere);
-        Vector3 dir = HexWay(CellHere, axis);
+        Vector3 mid = CellWorld(cell);
+        Vector3 dir = HexWay(cell, axis);
         Vector3 from = mid + dir * Mathf.Max(dir.Dot(tip - mid), 0.0f);
         from.Y = tip.Y;
         Vector3 On(Vector3 p) => from + dir * Mathf.Max(dir.Dot(p - from), 0.0f);
-        bool thermal = (KitOf(_unitId) & Kit.Thermal) != 0;
-        int level = _field!.LevelAt(CellHere);
-        Vector2I at = CellHere;
+        int level = _field!.LevelAt(cell);
+        Vector2I at = cell;
         Vector3 end = from;
         for (int k = 0; k < 16; k++)
         {
@@ -530,57 +533,133 @@ public sealed partial class Tank3DBench
         return true;
     }
 
-    /// <summary>The beads of the axis or axes being picked: the medium's first
-    /// pick and the one under the pointer, red where the ambush may be set,
-    /// grey where not. True when the mode had the beads.</summary>
-    private bool AmbushBeads(MultiMesh mm)
+    private MeshInstance3D? _axisLines;
+
+    /// <summary>The ambushes' axes in the scene (<see cref="AxisLinesTick"/>):
+    /// tested against the depth and not writing it, as the line of fire's
+    /// beads are - a hull in front hides the axis, the axis hides nothing.</summary>
+    private void BuildAxisLines()
     {
-        if (!_ambushMode || _field is null)
-            return false;
-        int n = 0;
-        if (_ambushPick is int pick)
-            n = AxisBeads(mm, n, pick, AimPierce);
-        if (_ambushAxis is int axis && axis != _ambushPick)
+        _axisLines = new MeshInstance3D
         {
-            string why = _ambushPick is int first ? AmbushWhy(first, axis) : AmbushWhy(axis, -1);
-            n = AxisBeads(mm, n, axis, why.Length == 0 ? AimPierce : AimOff);
-        }
-        mm.VisibleInstanceCount = n;
-        return true;
+            Name = "AmbushAxes",
+            Mesh = new ImmediateMesh(),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = new StandardMaterial3D
+            {
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                VertexColorUseAsAlbedo = true,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            },
+            // drawn anew every frame, from anywhere on the board
+            CustomAabb = new Aabb(new Vector3(-1e5f, -1e5f, -1e5f), new Vector3(2e5f, 2e5f, 2e5f)),
+        };
+        AddChild(_axisLines);
     }
 
-    /// <summary>One axis's beads from <paramref name="n"/> on: spaced, sized,
-    /// running and waving as the line of fire's; returns the count after.</summary>
-    private int AxisBeads(MultiMesh mm, int n, int axis, Color c)
+    /// <summary>
+    /// Every frame (<c>AimTick</c>): each ambush's axes, a solid line in the air
+    /// out of the watcher's muzzle (<see cref="AmbushRay"/>) in its side's
+    /// ink; with «Засада» on, the axis being picked and the medium's first
+    /// pick in the line of fire's red - grey where the ambush may not be set.
+    /// </summary>
+    private void AxisLinesTick()
     {
-        (Vector3 from, Vector3 end, bool fades) = AmbushRay(axis);
+        if (_axisLines?.Mesh is not ImmediateMesh mesh)
+            return;
+        mesh.ClearSurfaces();
+        if (!Match || _field is null)
+            return;
+        bool begun = false;
+        foreach (KeyValuePair<int, (int A, int B, int Shots)> w in _ambush)
+        {
+            int id = w.Key;
+            Vector2I? cell = id == _unitId ? CellHere
+                : _other is { Unit: true } o && o.Id == id ? OtherCell(o)
+                : UnitStanding(id)?.Cell;
+            if (cell is not Vector2I c || SideOfUnit(id) is not Side side)
+                continue;
+            bool thermal = (KitOf(id) & Kit.Thermal) != 0;
+            AxisLine(mesh, ref begun, c, MuzzleOf(id), w.Value.A, SideInk(side), thermal);
+            if (w.Value.B >= 0)
+                AxisLine(mesh, ref begun, c, MuzzleOf(id), w.Value.B, SideInk(side), thermal);
+        }
+        if (_ambushMode && _fate == Fate.Alive)
+        {
+            bool thermal = (KitOf(_unitId) & Kit.Thermal) != 0;
+            if (_ambushPick is int pick)
+                AxisLine(mesh, ref begun, CellHere, TipAt(CellHere), pick, AimPierce, thermal);
+            if (_ambushAxis is int axis && axis != _ambushPick)
+            {
+                string why = _ambushPick is int first ? AmbushWhy(first, axis) : AmbushWhy(axis, -1);
+                AxisLine(mesh, ref begun, CellHere, TipAt(CellHere), axis, why.Length == 0 ? AimPierce : AimOff, thermal);
+            }
+        }
+        if (begun)
+            mesh.SurfaceEnd();
+    }
+
+    /// <summary>One axis: dashes facing the camera, as wide on the screen at
+    /// any distance, each on a dark one 1.5 px wider all round; they run down
+    /// it toward what it watches, as the line of fire's beads do, under a
+    /// soft wave of light. It comes in at the muzzle and, off the board's
+    /// edge, dies away over two hexes.</summary>
+    private void AxisLine(ImmediateMesh mesh, ref bool begun, Vector2I cell, Vector3 tip, int axis, Color c, bool thermal)
+    {
+        (Vector3 from, Vector3 end, bool fades) = AmbushRay(cell, tip, axis, thermal);
         float total = from.DistanceTo(end);
-        float gap = CellStep / BeadsAHex;
-        if (total <= gap * 0.5f)
-            return n;
-        float t = (float)(Time.GetTicksMsec() / 1000.0);
-        float run = Mathf.PosMod(t * BeadRun * CellStep, gap);
-        float r = Mathf.Clamp(HexScreen() * 0.045f, 2.5f, 6.0f);
+        if (total < 1.0f)
+            return;
+        // screen px a world unit: the camera is orthographic, one figure
         Vector3 basisX = _camera.GlobalBasis.X.Normalized();
         float px = (_camera.UnprojectPosition(end + basisX) - _camera.UnprojectPosition(end)).Length();
         if (px < 1e-4f)
-            return n;
-        Basis facing = _camera.GlobalBasis.Orthonormalized();
+            return;
         Vector3 dir = (end - from) / total;
-        float start = gap * 0.3f;
-        float tail = fades ? CellStep * 2.0f : gap;
-        for (float s = start + run; s <= total && n < BeadsMost; s += gap)
+        Vector3 across = dir.Cross(_camera.GlobalBasis.Z).Normalized();
+        float half = Mathf.Clamp(HexScreen() * 0.02f, 1.5f, 3.0f);
+        float gap = CellStep / BeadsAHex;
+        float tail = fades ? CellStep * 2.0f : 0.0f;
+        float t = (float)(Time.GetTicksMsec() / 1000.0);
+        float Edge(float s) => Mathf.Clamp(s / gap, 0.0f, 1.0f) * (tail > 0.0f ? Mathf.Clamp((total - s) / tail, 0.0f, 1.0f) : 1.0f);
+        Color Ink(float s, bool dark)
         {
+            if (dark)
+                return new Color(0.0f, 0.0f, 0.0f, 0.5f * Edge(s));
             float wave = 0.5f + 0.5f * Mathf.Sin(t * BeadWave - s / gap * 0.9f);
-            float edge = Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / tail + 0.3f, 0.0f, 1.0f);
-            float size = r * (0.8f + 0.35f * wave) * (0.4f + 0.6f * edge);
-            float outer = (size + 1.6f) / px;
-            mm.SetInstanceTransform(n, new Transform3D(facing.Scaled(Vector3.One * outer), from + dir * s));
-            mm.SetInstanceColor(n, new Color(c.Lerp(Colors.White, 0.45f * wave), (0.55f + 0.45f * wave) * edge));
-            mm.SetInstanceCustomData(n, new Color(size / (size + 1.6f), 0.5f * edge, 0.0f, 0.0f));
-            n++;
+            return new Color(c.Lerp(Colors.White, 0.35f * wave), (0.75f + 0.25f * wave) * Edge(s));
         }
-        return n;
+        if (!begun)
+        {
+            mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+            begun = true;
+        }
+        // a dash and the space after it: two of the line of fire's bead gaps,
+        // the dash the longer part, run toward the far end at the beads' pace
+        float period = gap * 2.0f, dash = period * 0.6f;
+        float run = Mathf.PosMod(t * BeadRun * CellStep, period);
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool dark = pass == 0;
+            float rim = dark ? 1.5f / px : 0.0f;
+            Vector3 side = across * (half / px + rim);
+            for (float a = run - period; a < total; a += period)
+            {
+                float s0 = Mathf.Max(a - rim, 0.0f), s1 = Mathf.Min(a + dash + rim, total);
+                if (s1 <= s0)
+                    continue;
+                Vector3 p0 = from + dir * s0, p1 = from + dir * s1;
+                Color c0 = Ink(s0, dark), c1 = Ink(s1, dark);
+                mesh.SurfaceSetColor(c0); mesh.SurfaceAddVertex(p0 - side);
+                mesh.SurfaceSetColor(c0); mesh.SurfaceAddVertex(p0 + side);
+                mesh.SurfaceSetColor(c1); mesh.SurfaceAddVertex(p1 + side);
+                mesh.SurfaceSetColor(c0); mesh.SurfaceAddVertex(p0 - side);
+                mesh.SurfaceSetColor(c1); mesh.SurfaceAddVertex(p1 + side);
+                mesh.SurfaceSetColor(c1); mesh.SurfaceAddVertex(p1 - side);
+            }
+        }
     }
 
     /// <summary>The watcher's sign: a sight on a dark token.</summary>

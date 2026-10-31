@@ -293,7 +293,9 @@ public sealed partial class Tank3DBench
         // given then went in under them)
         || _coastTo is not null || _wallRam
         // a hull on the winch's cable (Tank3DBench.Gear)
-        || _pull is not null;
+        || _pull is not null
+        // an ambush round waiting for its hull (Tank3DBench.Ambush)
+        || _ambushDue.Count > 0;
 
     private bool MatchOver => _mt.Won is not null || _mt.Drawn;
 
@@ -596,6 +598,8 @@ public sealed partial class Tank3DBench
         PullTick(dt);
         // the watchers out of the fight out of ambush (Tank3DBench.Ambush)
         AmbushTick();
+        // the ambush rounds waiting for their hull to come on to the axis (Tank3DBench.Ambush)
+        AmbushDueTick();
         // what a hex does to a hull coming on to it (Tank3DBench.Rules)
         HexEffectsTick();
         // --commands, one at a time (Tank3DBench.Commands)
