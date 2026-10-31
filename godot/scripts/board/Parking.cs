@@ -30,6 +30,11 @@ namespace TankSpriteTest;
 /// A side fields a tank per home, of any classes - three heavies among them if
 /// it likes.
 ///
+/// <b>The kit is the match's too</b> (GDD upgrades.md; the author's Р-4,
+/// docs/battle-core-plan.md, Д8): the upgrades the tank on this home carries.
+/// Null is silence - the starting squad's stub (<see cref="Kits.Starter"/>) by
+/// the class it gets; an empty kit says it carries nothing.
+///
 /// <b>A home is two jobs and only one of them is the tank.</b> The other is that
 /// <see cref="MapRules.ReachFaults"/> measures the board from every parking -
 /// that is the check which catches a valley cut off by mistake - and
@@ -38,7 +43,7 @@ namespace TankSpriteTest;
 /// tank will ever stand.
 /// </summary>
 public readonly record struct Parking(Vector2I Cell, string? Class = null,
-                                     string? Side = null, int? Facing = null)
+                                     string? Side = null, int? Facing = null, Kit? Kit = null)
 {
     public const string Green = "green";
     public const string Brown = "brown";
@@ -57,7 +62,7 @@ public readonly record struct Parking(Vector2I Cell, string? Class = null,
     public static implicit operator Parking(Vector2I cell) => new(cell);
 
     /// <summary>Nothing but the cell said: the file writes the bare pair.</summary>
-    public bool Plain => Class is null && Side is null && Facing is null;
+    public bool Plain => Class is null && Side is null && Facing is null && Kit is null;
 
     public override string ToString()
     {
@@ -68,6 +73,8 @@ public readonly record struct Parking(Vector2I Cell, string? Class = null,
             said += $" {side}";
         if (Facing is int facing)
             said += $" facing {facing}";
+        if (Kit is { } kit)
+            said += $" with {Kits.Names(kit)}";
         return said;
     }
 

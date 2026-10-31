@@ -151,7 +151,7 @@ public sealed partial class Tank3DBench
     /// </summary>
     private int _unitId = -1;
 
-    /// <summary>Each unit's kit, by its id (<see cref="Kits.Starter"/>).</summary>
+    /// <summary>Each unit's kit, by its id: its home's (<see cref="Parking.Kit"/>), else <see cref="Kits.Starter"/>.</summary>
     private Kit[] _kits = Array.Empty<Kit>();
 
     /// <summary>Whether unit <paramref name="id"/> has the wading gear - off
@@ -189,7 +189,8 @@ public sealed partial class Tank3DBench
         if (!Match)
             return;
         _lineup = Lineup.Of(_parkings);
-        _kits = _lineup.Select(u => Kits.Starter(ClassFor(u.Model))).ToArray();
+        // the home's kit, else the starting squad's stub by the class (Р-4, Д8)
+        _kits = _lineup.Select(u => _parkings[u.Slot].Kit ?? Kits.Starter(ClassFor(u.Model))).ToArray();
         Log.Print("tank3d: match: kits "
                  + string.Join(", ", _lineup.Select((u, i) => $"{SideName(SideOf(u))} {u.Model}#{i} {Kits.Names(_kits[i])}")));
         int green = _lineup.Count(u => u.Side == Parking.Green), brown = _lineup.Count - green;

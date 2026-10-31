@@ -407,6 +407,31 @@ public static partial class SelfTest
                   $"ahead: {Said(ahead)}; back: {Said(back)}");
         }
 
+        // Д8, Р-4: a home names its tank's kit; silence is the stub, an empty
+        // list is nothing, a name no upgrade has is refused; written back as read.
+        {
+            string drill = System.IO.File.ReadAllText(MapFile.PathOf("drill10"));
+            string kitted = drill.Replace("\"homes\": [[1, 7], [3, 4]",
+                "\"homes\": [{ \"at\": [1, 7], \"kit\": [\"smoke\", \"trawl\"] }, { \"at\": [3, 4], \"kit\": [] }");
+            BoardMap map = MapFile.Parse(kitted, "drill10");
+            BoardMap again = MapFile.Parse(MapFile.Write(map), "drill10");
+            string? refused = null;
+            try
+            {
+                MapFile.Parse(kitted.Replace("\"trawl\"", "\"jetpack\""), "drill10");
+            }
+            catch (InvalidOperationException e)
+            {
+                refused = e.Message;
+            }
+            check("a home's kit is read, written back the same, and an unknown upgrade refused",
+                  kitted != drill && map.Parked[0].Kit == (Kit.Smoke | Kit.Trawl) && map.Parked[1].Kit == Kit.None
+                  && map.Parked[2].Kit is null && again.Parked[0].Kit == map.Parked[0].Kit
+                  && again.Parked[1].Kit == Kit.None && again.Parked[2].Kit is null
+                  && refused is not null && refused.Contains("jetpack"),
+                  $"read {map.Parked[0]}, {map.Parked[1]}, {map.Parked[2]}; again {again.Parked[0]}, {again.Parked[1]}; refused: {refused}");
+        }
+
         // A copy is a copy.
         {
             BattleState s = Probe(9, 10);

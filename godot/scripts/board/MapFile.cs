@@ -561,7 +561,7 @@ public static class MapFile
                     $"{name}: a home written as an object needs an \"at\"");
             // read by hand, so Reading's refusal of a stray key is said here
             foreach (JsonProperty field in home.EnumerateObject())
-                if (field.Name is not ("at" or "class" or "side" or "facing"))
+                if (field.Name is not ("at" or "class" or "side" or "facing" or "kit"))
                     throw new InvalidOperationException(
                         $"{name}: a home has no field \"{field.Name}\"");
             string? crew = home.TryGetProperty("class", out JsonElement said_)
@@ -581,10 +581,28 @@ public static class MapFile
                         + $"and this is {face.ValueKind}");
                 facing = f;
             }
+            // the upgrades the tank here carries (Д8): names, all known; none
+            // said is the starting squad's stub, an empty list is nothing
+            Kit? kit = null;
+            if (home.TryGetProperty("kit", out JsonElement fitted))
+            {
+                if (fitted.ValueKind != JsonValueKind.Array)
+                    throw new InvalidOperationException(
+                        $"{name}: a home's \"kit\" is a list of upgrades, and this is {fitted.ValueKind}");
+                Kit all = Kit.None;
+                foreach (JsonElement one in fitted.EnumerateArray())
+                {
+                    string id = one.ValueKind == JsonValueKind.String ? one.GetString() ?? "" : one.ToString();
+                    all |= Kits.Parse(id) ?? throw new InvalidOperationException(
+                        $"{name}: a home's kit has no upgrade \"{id}\" - "
+                        + string.Join(", ", Kits.All.Select(k => k.Id)));
+                }
+                kit = all;
+            }
             homes.Add(new Parking(Pair(at, name),
                                   crew is { Length: > 0 } ? crew : null,
                                   side is { Length: > 0 } ? side : null,
-                                  facing));
+                                  facing, kit));
         }
         return homes;
     }
@@ -614,6 +632,8 @@ public static class MapFile
             said.Add($"\"side\": {Quote(side)}");
         if (p.Facing is int facing)
             said.Add($"\"facing\": {facing}");
+        if (p.Kit is { } kit)
+            said.Add("\"kit\": [" + string.Join(", ", Kits.Ids(kit).Select(Quote)) + "]");
         return "{ " + string.Join(", ", said) + " }";
     }
 

@@ -1282,6 +1282,23 @@ public sealed class MapEdit
         return true;
     }
 
+    /// <summary>
+    /// The upgrades the tank on a home carries (GDD upgrades.md; Р-4, Д8): null
+    /// for the starting squad's stub by its class, which is what every board
+    /// said before kits; an empty kit is a tank with nothing.
+    /// </summary>
+    public bool Equip(int slot, Kit? kit, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        _homes[slot] = _homes[slot] with { Kit = kit };
+        return true;
+    }
+
     public bool DropHome(int slot, out string why)
     {
         why = "";

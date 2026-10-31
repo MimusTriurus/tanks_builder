@@ -570,6 +570,7 @@ public sealed partial class MapEditor
             Crew(into, slot);
             Team(into, slot);
             Face(into, slot);
+            Equip(into, slot);
             into.AddChild(Does("drop this home",
                 () => _edit.DropHome(slot, out string why) ? "" : why));
         }
@@ -1065,6 +1066,31 @@ public sealed partial class MapEditor
         pick.Selected = facing is int f ? Array.FindIndex(Facings, x => x.Heading == f) + 1 : 0;
         Pick(pick, index => _edit.Face(slot, index == 0 ? null : Facings[index - 1].Heading, out string why) ? "" : why);
         into.AddChild(Field("facing", pick));
+    }
+
+    /// <summary>
+    /// The upgrades the home's tank carries (GDD upgrades.md; Д8): "starter"
+    /// ticked is the starting squad's stub by the class it gets - the file
+    /// writes nothing; an upgrade ticked or cleared makes the kit the home's
+    /// own, starting from what the stub gave.
+    /// </summary>
+    private void Equip(VBoxContainer into, int slot)
+    {
+        Kit? kit = _edit.Homes[slot].Kit;
+        Kit starter = Kits.Starter(Lineup.ClassFor(Lineup.Of(_edit.Homes)[slot].Model));
+        Kit now = kit ?? starter;
+        into.AddChild(Ticked($"starter kit ({Kits.Names(starter)})", kit is null,
+            on => _edit.Equip(slot, on ? null : starter, out string why) ? "" : why));
+        var grid = new GridContainer { Columns = 2 };
+        foreach ((Kit one, string id, string _) in Kits.All)
+        {
+            CheckBox tick = Ticked(id, (now & one) != 0,
+                on => _edit.Equip(slot, on ? now | one : now & ~one, out string why) ? "" : why);
+            // fourteen in two columns: the panel's width holds the longest names at 11
+            tick.AddThemeFontSizeOverride("font_size", 11);
+            grid.AddChild(tick);
+        }
+        into.AddChild(Field("kit", grid));
     }
 
     /// <summary>A dropdown that writes through <paramref name="write"/> as one
