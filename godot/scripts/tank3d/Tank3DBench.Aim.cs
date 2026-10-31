@@ -139,6 +139,8 @@ public sealed partial class Tank3DBench
         if (_noUi)
             return;
         UnderTick();
+        // the axis under the pointer with «Засада» on (Tank3DBench.Ambush)
+        AmbushAimTick();
         ReachTick();
         HaloTick();
         _judged = null;
@@ -521,7 +523,10 @@ public sealed partial class Tank3DBench
         if (!_chosen || _aim is not null || RouteMoving || !_model.Turreted || _fate != Fate.Alive || dt <= 0.0f)
             return 0.0f;
         Vector3 at;
-        if (_overTarget && _other is { } o)
+        // «Засада» on: round to the axis being picked (Tank3DBench.Ambush)
+        if (_ambushAxis is int axis)
+            at = AxisPoint(axis);
+        else if (_overTarget && _other is { } o)
             at = Centre(o);
         else if (_overParked is { } p)
             at = p.Rig.GlobalPosition + Vector3.Up * (0.45f * p.Model.Size.Y * p.Model.PixelsPerUnit);
@@ -776,6 +781,9 @@ public sealed partial class Tank3DBench
         if (_beads?.Multimesh is not { } mm)
             return;
         mm.VisibleInstanceCount = 0;
+        // «Засада» on: the axis being picked instead (Tank3DBench.Ambush)
+        if (AmbushBeads(mm))
+            return;
         if (_judged is not { } shot || !_fireAxis || shot.Axis < 0 || !OnTarget(shot))
             return;
         var path = shot.Lob && LobPath(shot) is { } arc ? arc : new List<Vector3> { shot.Tip, shot.End };

@@ -10,10 +10,14 @@ namespace TankSpriteTest;
 /// bench keeps who watches which axis, asks the core whether a hull coming on
 /// to a hex is fired on, and plays what the core says - Р-1, the core decides.
 /// <list type="bullet">
-/// <item><b>Set</b>: the button «Засада» (no key - none is free), then a hex
-/// on the axis; the medium takes a second hex on the axis beside it for its
-/// sector, or the same axis again (or Enter) for one. A command too:
-/// <c>ambush:SIDE[:SIDE2]</c>. The turn is spent with it: set last
+/// <item><b>Set</b>: the button «Засада» (no key - none is free), then a
+/// click: the axis under the pointer (<see cref="AmbushAxisAt"/> - the hex's
+/// own, else the nearest of the six; a casemate's hull's); the medium takes a
+/// second beside it for its sector, or the same again (or Enter) for one. In
+/// the mode the move is not shown nor given, the turret comes round to the
+/// axis under the pointer and it is drawn as the line of fire is, red beads
+/// out of the muzzle to what cuts it (<see cref="AmbushBeads"/>). A command
+/// too: <c>ambush:SIDE[:SIDE2]</c>. The turn is spent with it: set last
 /// (units.md); the turret is laid along the axis and stays so.</item>
 /// <item><b>Lifted</b> by any order to the unit (<c>ShadowAct</c>), a ram into
 /// it, its knocking out or destruction (<see cref="AmbushTick"/>).</item>
@@ -88,8 +92,7 @@ public sealed partial class Tank3DBench
         {
             // two hexes out along the axis, at the hull's height: the turret
             // round to it by the keys' own inputs, then held (Laying)
-            Vector2I out2 = HexField.Step(HexField.Step(CellHere, axis), axis);
-            _aim = Foot(CellWorld(out2)) + Vector3.Up * (_model.Size.Y * _model.PixelsPerUnit * 0.5f);
+            _aim = AxisPoint(axis);
             _aimRound = null;
             _aimHold = true;
         }
@@ -291,27 +294,61 @@ public sealed partial class Tank3DBench
         if (_ambushMode)
             _ramMode = false;
         _orderNote = !_ambushMode ? "засада выключена"
-            : _profile.WatchesSector ? "засада: щёлкни по гексу оси, затем по соседней — сектор, или ещё раз — одна ось"
-            : _profile.Turreted ? "засада: щёлкни по гексу на оси"
-            : "засада по корпусу: щёлкни по гексу впереди";
+            : _profile.WatchesSector ? "засада: наведи на ось и щёлкни, затем соседнюю — сектор, или ту же — одна ось"
+            : _profile.Turreted ? "засада: наведи на ось и щёлкни"
+            : "засада по корпусу: щёлкни";
     }
 
-    /// <summary>The left button with «Засада» on: the hex's axis picked - for
-    /// the medium the first waits for its neighbour or itself again. True when
-    /// the click was the ambush's.</summary>
+    /// <summary>With «Засада» on, the axis under the pointer (or
+    /// <c>--hover</c>), every frame: the one the click sets and the line
+    /// shows; null off the mode or with the pointer on the own hex.</summary>
+    private int? _ambushAxis;
+
+    /// <summary>The axis the pointer at <paramref name="screen"/> picks: the
+    /// one its hex lies on, else the nearest of the six toward it - any hex
+    /// picks one, a rose round the tank. A casemate watches along its hull
+    /// (units.md), so its own whatever the pointer.</summary>
+    private int? AmbushAxisAt(Vector2 screen)
+    {
+        if (_field is null || _fate != Fate.Alive)
+            return null;
+        if (!_profile.Turreted)
+            return HullSide();
+        Vector2I cell;
+        if (_hoverFixed is Vector2I held)
+            cell = held;
+        else if (PickAt(screen) is var (point, onTank, onOwn))
+            cell = onTank && _other is { } t ? OtherCell(t) : onOwn ? CellHere : _field.FlatCellAt(Board(point));
+        else
+            return null;
+        if (cell == CellHere)
+            return null;
+        (int axis, _) = AxisTo(CellHere, cell);
+        return axis >= 0 ? axis : Nearest(CellHere, CellWorld(cell) - CellWorld(CellHere));
+    }
+
+    /// <summary>Every frame (<c>AimTick</c>): the axis under the pointer, with «Засада» on.</summary>
+    private void AmbushAimTick() =>
+        _ambushAxis = _ambushMode && Match ? AmbushAxisAt(GetViewport().GetMousePosition()) : null;
+
+    /// <summary>A point two hexes out along <paramref name="axis"/> at the
+    /// hull's height: what the turret is laid on for it.</summary>
+    private Vector3 AxisPoint(int axis)
+    {
+        Vector2I out2 = HexField.Step(HexField.Step(CellHere, axis), axis);
+        return Foot(CellWorld(out2)) + Vector3.Up * (_model.Size.Y * _model.PixelsPerUnit * 0.5f);
+    }
+
+    /// <summary>The left button with «Засада» on: the axis under it picked
+    /// (<see cref="AmbushAxisAt"/>) - for the medium the first waits for its
+    /// neighbour or itself again. The move is not to be had in the mode: the
+    /// click is always the ambush's.</summary>
     private bool AmbushClick(Vector2 screen)
     {
         if (!_ambushMode)
             return false;
-        if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
+        if (AmbushAxisAt(screen) is not int axis)
             return true;
-        Vector2I cell = onTank && _other is { } t ? OtherCell(t) : onOwn ? CellHere : _field.FlatCellAt(Board(point));
-        (int axis, _) = AxisTo(CellHere, cell);
-        if (axis < 0)
-        {
-            _orderNote = "засада: гекс не на оси";
-            return true;
-        }
         if (_profile.WatchesSector && _ambushPick is not int first)
         {
             if (AmbushWhy(axis, -1) is { Length: > 0 } no)
@@ -397,6 +434,96 @@ public sealed partial class Tank3DBench
             return;
         ink.DrawDashedLine(start, end, new Color(0.0f, 0.0f, 0.0f, 0.45f), 4.0f, 10.0f, true, true);
         ink.DrawDashedLine(start, end, new Color(tint, 0.9f), 2.0f, 10.0f, true, true);
+    }
+
+    /// <summary>
+    /// The axis being picked, as the line of fire is drawn (<c>BeadsTick</c>):
+    /// beads in the air from the muzzle down <paramref name="axis"/> to the
+    /// first thing that cuts it - a wall across an edge, a hull, a wood or
+    /// smoke on its level, a rise, the board's edge (as <see cref="AxisLine"/>
+    /// walks it). Its start is the muzzle's tip brought on to the axis, so the
+    /// line leaves the barrel once the turret is round to it.
+    /// </summary>
+    private (Vector3 From, Vector3 End, bool Fades) AmbushRay(int axis)
+    {
+        Vector3 mid = CellWorld(CellHere);
+        Vector3 tip = TipAt(CellHere);
+        Vector3 dir = HexWay(CellHere, axis);
+        Vector3 from = mid + dir * Mathf.Max(dir.Dot(tip - mid), 0.0f);
+        from.Y = tip.Y;
+        Vector3 On(Vector3 p) => from + dir * Mathf.Max(dir.Dot(p - from), 0.0f);
+        bool thermal = (KitOf(_unitId) & Kit.Thermal) != 0;
+        int level = _field!.LevelAt(CellHere);
+        Vector2I at = CellHere;
+        Vector3 end = from;
+        for (int k = 0; k < 16; k++)
+        {
+            Vector2I next = HexField.Step(at, axis);
+            Vector3 rim = 0.5f * (CellWorld(at) + CellWorld(next));
+            if (_field.Walled(at, axis))
+                return (from, On(rim), false);
+            if (next == at || !_field.InBounds(next))
+                return (from, On(rim), true);
+            if (UnitOn(next) is not null || _field.LevelAt(next) > level
+                || (_field.LevelAt(next) >= level && BoardRules.Screened(_field, next, thermal)))
+                return (from, On(CellWorld(next)), false);
+            end = On(CellWorld(next));
+            at = next;
+        }
+        return (from, end, true);
+    }
+
+    /// <summary>The beads of the axis or axes being picked: the medium's first
+    /// pick and the one under the pointer, red where the ambush may be set,
+    /// grey where not. True when the mode had the beads.</summary>
+    private bool AmbushBeads(MultiMesh mm)
+    {
+        if (!_ambushMode || _field is null)
+            return false;
+        int n = 0;
+        if (_ambushPick is int pick)
+            n = AxisBeads(mm, n, pick, AimPierce);
+        if (_ambushAxis is int axis && axis != _ambushPick)
+        {
+            string why = _ambushPick is int first ? AmbushWhy(first, axis) : AmbushWhy(axis, -1);
+            n = AxisBeads(mm, n, axis, why.Length == 0 ? AimPierce : AimOff);
+        }
+        mm.VisibleInstanceCount = n;
+        return true;
+    }
+
+    /// <summary>One axis's beads from <paramref name="n"/> on: spaced, sized,
+    /// running and waving as the line of fire's; returns the count after.</summary>
+    private int AxisBeads(MultiMesh mm, int n, int axis, Color c)
+    {
+        (Vector3 from, Vector3 end, bool fades) = AmbushRay(axis);
+        float total = from.DistanceTo(end);
+        float gap = CellStep / BeadsAHex;
+        if (total <= gap * 0.5f)
+            return n;
+        float t = (float)(Time.GetTicksMsec() / 1000.0);
+        float run = Mathf.PosMod(t * BeadRun * CellStep, gap);
+        float r = Mathf.Clamp(HexScreen() * 0.045f, 2.5f, 6.0f);
+        Vector3 basisX = _camera.GlobalBasis.X.Normalized();
+        float px = (_camera.UnprojectPosition(end + basisX) - _camera.UnprojectPosition(end)).Length();
+        if (px < 1e-4f)
+            return n;
+        Basis facing = _camera.GlobalBasis.Orthonormalized();
+        Vector3 dir = (end - from) / total;
+        float start = gap * 0.3f;
+        float tail = fades ? CellStep * 2.0f : gap;
+        for (float s = start + run; s <= total && n < BeadsMost; s += gap)
+        {
+            float wave = 0.5f + 0.5f * Mathf.Sin(t * BeadWave - s / gap * 0.9f);
+            float edge = Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / tail + 0.3f, 0.0f, 1.0f);
+            float size = r * (0.8f + 0.35f * wave) * (0.4f + 0.6f * edge);
+            float outer = (size + 1.6f) / px;
+            mm.SetInstanceTransform(n, new Transform3D(facing.Scaled(Vector3.One * outer), from + dir * s));
+            mm.SetInstanceColor(n, new Color(c.Lerp(Colors.White, 0.45f * wave), (0.55f + 0.45f * wave) * edge));
+            mm.SetInstanceCustomData(n, new Color(size / (size + 1.6f), 0.5f * edge, 0.0f, 0.0f));
+            n++;
+        }
+        return n;
     }
 
     /// <summary>The watcher's sign: a sight on a dark token.</summary>

@@ -117,7 +117,9 @@ public sealed partial class Tank3DBench
 
     private bool CourseShown =>
         _course is not null && _field is not null && _tile is not null && _rules && _chosen
-        && _fate == Fate.Alive && !RouteMoving && _turnGoal is null && !RamRunning && MatchMayMove;
+        && _fate == Fate.Alive && !RouteMoving && _turnGoal is null && !RamRunning && MatchMayMove
+        // «Засада» on: the turn ends in the ambush, so there is no move to show (Tank3DBench.Ambush)
+        && !_ambushMode;
 
     /// <summary>The way the click on <paramref name="cell"/> orders: the one
     /// shown, if it is to that cell.</summary>
