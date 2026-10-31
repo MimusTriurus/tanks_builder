@@ -22141,12 +22141,12 @@ public static partial class SelfTest
             // the plate its letters gave is derived again, not kept (MapEdit.Of;
             // five format-3 maps were saved as soil with their woods under it).
             {
-                MapEdit opened = MapEdit.Of(BoardMap.ByName("drill10"));
+                MapEdit opened = MapEdit.Of(BoardMap.ByName("field10"));
                 opened.Begin();
                 bool planted = opened.Over(new Vector2I(0, 0), Cover.Forest, out string plantWhy);
                 BoardMap wooded = opened.Build();
                 Check("a bare board wooded in the editor comes up on the mix, its plate not kept",
-                    BoardMap.ByName("drill10").Paint == TerrainSet.Default && opened.Paint is null
+                    BoardMap.ByName("field10").Paint == TerrainSet.Default && opened.Paint is null
                     && planted && wooded.Paint == TerrainSet.Mixed,
                     $"opened as {opened.Paint ?? "derived"}, planted {planted} {plantWhy}, built on {wooded.Paint}");
             }
