@@ -265,9 +265,11 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
-        Banner($"{TossSaid}Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
-        // the placement before the first turn, on a map with a zone (Tank3DBench.Deploy)
+        // the placement before the first turn, on a map with a zone (Tank3DBench.Deploy);
+        // its «В бой» says the round, and the curtain the toss
         DeployStart();
+        if (!Deploying)
+            Banner($"{TossSaid}Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
     }
 
     /// <summary>The side's paint on a model: brown or the model's own.</summary>
@@ -602,6 +604,8 @@ public sealed partial class Tank3DBench
             _banner.Modulate = new Color(1, 1, 1, Mathf.Clamp(_bannerLeft / 0.5f, 0.0f, 1.0f));
         }
         RollTick();
+        // the view's turn from placement into battle (Tank3DBench.Deploy)
+        CameraTurnTick(dt);
         bool busy = MatchBusy;
         // the placement before the first turn (Tank3DBench.Deploy): nothing of a turn yet
         if (Deploying)
@@ -1012,6 +1016,8 @@ public sealed partial class Tank3DBench
         BuildActs(layer);
         BuildCursors();
         BuildRoster(layer);
+        // the placement's panel, where the acts stand in the battle (Tank3DBench.Deploy)
+        BuildDeployPanel(layer);
         // the curtain between the sides in placement (Tank3DBench.Deploy), over all
         BuildCurtain(layer);
     }

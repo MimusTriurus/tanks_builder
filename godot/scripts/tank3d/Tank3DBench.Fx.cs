@@ -1438,7 +1438,8 @@ void fragment() {
         {
             // The engine runs until the tank is out; while it burns the fire's
             // column is the smoke, and the exhaust would stand in the flame.
-            _celExhaust.Running = !_wreck.Out && (_celBurn is null || _celBurn.Heat <= 0.001f);
+            // A ghost in placement runs no engine (Tank3DBench.Deploy).
+            _celExhaust.Running = !_wreck.Out && !Deploying && (_celBurn is null || _celBurn.Heat <= 0.001f);
             // Pulling, not braking: off the throttle the engine idles.
             _celExhaust.Working = _exhaust.Response(Mathf.Abs(speed)) > 0.5 && accel * speed >= 0.0f;
             _exhaustPorts.Clear();
@@ -1522,6 +1523,13 @@ void fragment() {
             item.QueueRedraw();
 
         BeltRuns();
+        // ghosts in placement (Tank3DBench.Deploy) leave no ruts nor dust:
+        // the pen up, so the first run after «В бой» starts afresh
+        if (Deploying)
+        {
+            _ruts?.Lift();
+            return;
+        }
         Ruts(dt);
         Dust(dt, speed);
     }

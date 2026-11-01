@@ -154,6 +154,8 @@ public sealed partial class Tank3DBench
             _passButton.Disabled = MatchOver;
         if (_undoButton is null)
             return;
+        // no move to take back before the first turn (Tank3DBench.Deploy)
+        _undoButton.Visible = !Deploying;
         string why = UndoWhy();
         if (ReferenceEquals(why, _undoShown))
             return;

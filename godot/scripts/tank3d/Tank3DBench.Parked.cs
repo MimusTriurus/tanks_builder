@@ -266,8 +266,10 @@ public sealed partial class Tank3DBench
             StandKnocked(_parked[^1], wasFate);
         using (Prof.Measure("takeover.choose"))
             Choose(true);
-        // the view flies to it rather than jumping with the rig
-        GlideTo(_rig.Position);
+        // the view flies to it rather than jumping with the rig - not in
+        // placement, where it stays over the zone (Tank3DBench.Deploy)
+        if (!Deploying)
+            GlideTo(_rig.Position);
         // another unit taken in a turn already under way (Tank3DBench.Shadow);
         // the hand-over's own is the next turn's, read off the bench
         if (_shadow is not null)

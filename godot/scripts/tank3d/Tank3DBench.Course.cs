@@ -1196,6 +1196,8 @@ void fragment() {
             return;
         DrawRose(ink);
         DrawSpin(ink);
+        // the placement's rose (Tank3DBench.Deploy)
+        DrawDeploy(ink);
     }
 
     private void DrawWay(Control ink)

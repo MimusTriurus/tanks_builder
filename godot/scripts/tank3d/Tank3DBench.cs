@@ -632,6 +632,8 @@ public sealed partial class Tank3DBench : Node3D
     private void OrbitBy(Vector2 screen)
     {
         _glideTo = null;
+        // the hand takes the view from a turn under way (Tank3DBench.Deploy)
+        _turnT = -1.0f;
         _orbitYaw = Mathf.Wrap(_orbitYaw - screen.X * OrbitRate, -Mathf.Pi, Mathf.Pi);
         float game = Mathf.Asin(Squash);
         _orbitPitch = Mathf.Clamp(_orbitPitch + screen.Y * OrbitRate,
@@ -707,6 +709,7 @@ public sealed partial class Tank3DBench : Node3D
     private void FollowTank()
     {
         _glideTo = null;
+        _turnT = -1.0f;
         _viewAt = null;
         _angleDefault = true;
         Log.Print("tank3d: camera follows the tank");
@@ -1649,6 +1652,54 @@ public sealed partial class Tank3DBench : Node3D
                         if (!ActClick(new Vector2(x, y)))
                             OrderClick(new Vector2(x, y), false);
                 }
+                else if (what.StartsWith("warp=", StringComparison.Ordinal))
+                {
+                    // warp=X,Y: the pointer moved to that screen pixel, no
+                    // button - what the hover shows (the placement's ghost)
+                    string[] xy = what[5..].Split(',');
+                    if (xy.Length == 2 && float.TryParse(xy[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
+                        && float.TryParse(xy[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float y))
+                        GetViewport().WarpMouse(new Vector2(x, y));
+                }
+                else if (what.StartsWith("press=", StringComparison.Ordinal) || what.StartsWith("release=", StringComparison.Ordinal))
+                {
+                    // press=X,Y / release=X,Y: the left button only down or
+                    // only up there - a carry held over frames, for a capture of its middle
+                    bool down = what[0] == 'p';
+                    string[] xy = what[(down ? 6 : 8)..].Split(',');
+                    if (xy.Length == 2)
+                    {
+                        var at = new Vector2(F(xy[0], 0), F(xy[1], 0));
+                        GetViewport().WarpMouse(at);
+                        Input.ParseInputEvent(new InputEventMouseButton
+                        {
+                            ButtonIndex = MouseButton.Left, Pressed = down, Position = at, GlobalPosition = at,
+                            ButtonMask = down ? MouseButtonMask.Left : 0,
+                        });
+                    }
+                }
+                else if (what.StartsWith("drag=", StringComparison.Ordinal))
+                {
+                    // drag=X1,Y1,X2,Y2: the left button down at the first
+                    // pixel and up at the second, through Input (the placement's carry)
+                    string[] xy = what[5..].Split(',');
+                    if (xy.Length == 4)
+                    {
+                        var a = new Vector2(F(xy[0], 0), F(xy[1], 0));
+                        var b = new Vector2(F(xy[2], 0), F(xy[3], 0));
+                        GetViewport().WarpMouse(a);
+                        Input.ParseInputEvent(new InputEventMouseButton
+                        {
+                            ButtonIndex = MouseButton.Left, Pressed = true, Position = a, GlobalPosition = a,
+                            ButtonMask = MouseButtonMask.Left,
+                        });
+                        GetViewport().WarpMouse(b);
+                        Input.ParseInputEvent(new InputEventMouseButton
+                        {
+                            ButtonIndex = MouseButton.Left, Pressed = false, Position = b, GlobalPosition = b,
+                        });
+                    }
+                }
                 else if (what.StartsWith("mouse=", StringComparison.Ordinal))
                 {
                     // mouse=X,Y: a real press and release of the left button at
@@ -1727,6 +1778,9 @@ public sealed partial class Tank3DBench : Node3D
                 // tip=NAME|off: the action panel's card held up for that act's button (Tank3DBench.ActTips)
                 else if (what.StartsWith("tip=", StringComparison.Ordinal))
                     _tipHeld = what == "tip=off" ? null : what[4..];
+                // deploy-reset: «Вернуть ряд» in placement (Tank3DBench.Deploy)
+                else if (what == "deploy-reset")
+                    DeployReset();
                 else if (what.StartsWith("act=", StringComparison.Ordinal))
                 {
                     Gear gear = what[4..] switch { "mine" => Gear.Mine, "repair" => Gear.Repair, "winch" => Gear.Winch, _ => Gear.None };

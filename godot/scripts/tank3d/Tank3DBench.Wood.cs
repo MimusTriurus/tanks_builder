@@ -401,8 +401,9 @@ public sealed partial class Tank3DBench
         Bulldoze(dt);
         if (_grass is null)
             return;
-        // On its belts: not afloat, not in the air, not once it is going under.
-        if (!_falling && !DeepHere && Gone < 0.5f)
+        // On its belts: not afloat, not in the air, not once it is going under;
+        // nor a ghost in placement (Tank3DBench.Deploy), which presses nothing.
+        if (!_falling && !DeepHere && Gone < 0.5f && !Deploying)
         {
             float h = Mathf.DegToRad(_heading);
             var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
