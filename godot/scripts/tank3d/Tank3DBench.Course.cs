@@ -690,20 +690,64 @@ public sealed partial class Tank3DBench
         if (_zone is null || _zoneBuilt == _reachVersion)
             return;
         _zoneBuilt = _reachVersion;
-        // Over the water, said for sure: the course's rung (RingOrder - 1) is
-        // the water's own, and on a tie the pond, drawn after, covered the
-        // zone and the ribbon laid on its surface. The marks share the rung
-        // above, and draw nothing since HUD stage 4.
-        if (_course?.MaterialOverride is BaseMaterial3D ink)
-            ink.RenderPriority = Stage3D.RingOrder;
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
-        Vector2[] corner = Corners();
         // the cells a move ends on, and the one the tank stands on (ZoneTone)
         _zoneFill.Clear();
         foreach ((Vector2I c, int _) in reach.Cells)
             _zoneFill.Add(c);
         _zoneFill.Add(reach.Start.Cell);
+        ReliefZoneBuild(CourseInk);
+        // another zone shown on the mesh is built again when it comes back
+        _zoneDrawn.Clear();
+    }
+
+    /// <summary>The cells and the ink of the zone last put on the relief's
+    /// mesh by <see cref="ReliefZoneShow"/> - the ambush's or a bonus act's.</summary>
+    private readonly List<Vector2I> _zoneDrawn = new();
+    private Color _zoneDrawnInk;
+
+    /// <summary>
+    /// <see cref="_zoneFill"/> on the relief as the move's zone is drawn -
+    /// the same mesh, the rim moved in by <see cref="ZoneGap"/> and inked by
+    /// the shader - in <paramref name="ink"/>: the ambush's axes, a bonus
+    /// act's hexes (the author's note, 2026-11-01: those ran to the hexes'
+    /// edges, the move's zone stands off them). Built again only when the
+    /// cells or the ink change.
+    /// </summary>
+    private void ReliefZoneShow(Color ink)
+    {
+        if (_zone is null)
+            return;
+        _zone.Visible = _zoneFill.Count > 0;
+        if (_zoneFill.Count == 0)
+            return;
+        bool same = ink == _zoneDrawnInk && _zoneDrawn.Count == _zoneFill.Count;
+        for (int i = 0; same && i < _zoneFill.Count; i++)
+            same = _zoneDrawn[i] == _zoneFill[i];
+        if (same)
+            return;
+        _zoneDrawn.Clear();
+        _zoneDrawn.AddRange(_zoneFill);
+        _zoneDrawnInk = ink;
+        // the move's zone is built again when it comes back
+        _zoneBuilt = -1;
+        ReliefZoneBuild(ink);
+    }
+
+    /// <summary>The relief's zone mesh off <see cref="_zoneFill"/>: the tint
+    /// and the moved rim in <paramref name="ink"/>.</summary>
+    private void ReliefZoneBuild(Color ink)
+    {
+        if (_zone is null)
+            return;
+        // Over the water, said for sure: the course's rung (RingOrder - 1) is
+        // the water's own, and on a tie the pond, drawn after, covered the
+        // zone and the ribbon laid on its surface. The marks share the rung
+        // above, and draw nothing since HUD stage 4.
+        if (_course?.MaterialOverride is BaseMaterial3D course)
+            course.RenderPriority = Stage3D.RingOrder;
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        Vector2[] corner = Corners();
         _zoneSet.Clear();
         foreach (Vector2I cell in _zoneFill)
             _zoneSet.Add(cell);
@@ -716,12 +760,14 @@ public sealed partial class Tank3DBench
             for (int i = 0; i < _rimSegs.Count && i < RimMax; i++)
                 segs[i] = _rimSegs[i];
             rim.SetShaderParameter("rim_seg", segs);
+            rim.SetShaderParameter("line_ink", new Color(ink, 0.95f));
             rim.SetShaderParameter("rim_count", Mathf.Min(_rimSegs.Count, RimMax));
             rim.SetShaderParameter("line_w", ZoneLine * _tile!.HexRect.Size.X * 0.5f);
             rim.SetShaderParameter("lift", Lie.Length());
         }
+        var tint = new Color(ink, ZoneTone);
         foreach (Vector2I cell in _zoneFill)
-            ReliefCell(st, cell, corner);
+            ReliefCell(st, cell, corner, tint);
         _zone.Mesh = st.Commit();
     }
 
@@ -954,12 +1000,11 @@ public sealed partial class Tank3DBench
     /// is the point on the plan, world units: the shader keeps what lies
     /// inside the moved rim (<see cref="RimLoops"/>).
     /// </summary>
-    private void ReliefCell(SurfaceTool st, Vector2I cell, Vector2[] corner)
+    private void ReliefCell(SurfaceTool st, Vector2I cell, Vector2[] corner, Color tint)
     {
         Relief r = _relief!;
         HexPlan(cell, corner);
         (int i0, int i1, int j0, int j1) = HexRaster(r);
-        var tint = new Color(CourseInk, ZoneTone);
         bool wet = _field!.IsWater(cell);
         float water = wet ? _field.WaterTop(cell) : 0.0f;
         Vector3 At(int i, int j) => new(r.X0 + i * r.Cell, r.Height[j * r.Nx + i], r.Z0 + j * r.Cell);

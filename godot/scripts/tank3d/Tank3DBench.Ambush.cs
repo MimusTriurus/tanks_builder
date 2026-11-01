@@ -656,6 +656,12 @@ public sealed partial class Tank3DBench
                 at = next;
             }
         }
+        // on the relief as the move's zone is: off the hexes' edges
+        if (_relief is not null)
+        {
+            ReliefZoneShow(AimPierce);
+            return true;
+        }
         if (_zoneFill.Count == 0)
             return true;
         Vector2[] corner = Corners();

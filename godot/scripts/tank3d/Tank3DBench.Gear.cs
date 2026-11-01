@@ -100,10 +100,16 @@ public sealed partial class Tank3DBench
             _pickFound = true;
             PickCells();
         }
-        if (_pickCells.Count == 0)
-            return;
         _zoneFill.Clear();
         _zoneFill.AddRange(_pickCells);
+        // on the relief as the move's zone is: off the hexes' edges
+        if (_relief is not null)
+        {
+            ReliefZoneShow(PickInk);
+            return;
+        }
+        if (_pickCells.Count == 0)
+            return;
         Vector2[] corner = Corners();
         mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         var tint = new Color(PickInk, ZoneTone);
