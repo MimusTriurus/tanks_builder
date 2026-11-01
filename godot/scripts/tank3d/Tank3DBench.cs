@@ -583,10 +583,10 @@ public sealed partial class Tank3DBench : Node3D
     }
 
     /// <summary>
-    /// Where the view's middle stands in the camera's plane (x across, y down
-    /// the screen, <see cref="BoardBox"/>'s units) once the player has moved
-    /// it - the keys (<see cref="PanKeys"/>) or the wheel about
-    /// the cursor - or null while it follows the tank. <c>Home</c> lets go.
+    /// The point on the ground the view looks at, as (X, Z·<see cref="Squash"/>)
+    /// - <see cref="PlaneOf"/>'s units - once the player has moved it: the
+    /// keys (<see cref="PanKeys"/>) or the wheel about the cursor; null while
+    /// it follows the tank. <c>Home</c> lets go.
     /// </summary>
     private Vector2? _viewAt;
 
@@ -609,13 +609,44 @@ public sealed partial class Tank3DBench : Node3D
 
     /// <summary>
     /// The view the bench opens at and Home returns to (the author's choice,
-    /// 2026-10-30): isometric - turned 45° off the board's axis, 35.26° above
-    /// the ground, the angle at which the three axes of a cube are drawn
-    /// alike. <c>--game-angle</c> opens at the old one instead, the sprites'
-    /// (yaw 0, the pitch the hex's art is drawn at): a capture to set beside
-    /// one from before.
+    /// 2026-10-30): isometric - 35.26° above the ground, the angle at which
+    /// the three axes of a cube are drawn alike - turned off the board's axis
+    /// by 60°, a step of the turn (<see cref="YawStepDeg"/>; it was 45°, which
+    /// no step reaches, until 2026-11-01). <c>--game-angle</c> opens at the
+    /// old one instead, the sprites' (yaw 0, the pitch the hex's art is drawn
+    /// at): a capture to set beside one from before.
     /// </summary>
-    private const float IsoYawDeg = -45.0f, IsoPitchDeg = 35.264f;
+    private const float IsoYawDeg = -60.0f, IsoPitchDeg = 35.264f;
+
+    /// <summary>The view's turn goes in steps of a hex's side (the author's
+    /// choice, 2026-11-01, as tactics games turn theirs): from one the
+    /// flat-topped hexes look as from any other. Q/E in a match turn a step;
+    /// the middle button turns freely and, let go, the view comes round to the
+    /// nearest step.</summary>
+    private const float YawStepDeg = 60.0f;
+
+    /// <summary>The nearest step of the turn to <paramref name="yaw"/>, radians.</summary>
+    private static float YawStep(float yaw)
+    {
+        float step = Mathf.DegToRad(YawStepDeg);
+        return Mathf.Wrap(Mathf.Round(yaw / step) * step, -Mathf.Pi, Mathf.Pi);
+    }
+
+    /// <summary>Q/E: the view a step round, from where a turn under way is going.</summary>
+    private void TurnViewStep(int way)
+    {
+        float from = _turnT >= 0.0f ? _turnYawTo : YawStep(_orbitYaw);
+        CameraTurnTo(from + way * Mathf.DegToRad(YawStepDeg), Mathf.Asin(Squash) + (_turnT >= 0.0f ? _turnPitchTo : _orbitPitch));
+    }
+
+    /// <summary>The middle button let go: the view round to the nearest step,
+    /// at the pitch it was left at.</summary>
+    private void OrbitLetGo()
+    {
+        float yaw = YawStep(_orbitYaw);
+        if (Mathf.Abs(Mathf.Wrap(yaw - _orbitYaw, -Mathf.Pi, Mathf.Pi)) > 1e-4f)
+            CameraTurnTo(yaw, Mathf.Asin(Squash) + _orbitPitch);
+    }
     private bool _gameAngle;
     /// <summary>The default to be put on at the next frame: its pitch is an
     /// offset from the game's, which needs the board (<see cref="Squash"/>).</summary>
@@ -640,37 +671,41 @@ public sealed partial class Tank3DBench : Node3D
                                   Mathf.DegToRad(OrbitPitchLow) - game, Mathf.DegToRad(OrbitPitchHigh) - game);
     }
 
-    /// <summary>
-    /// The end of <c>FrameCamera</c>: the camera framed at the game's angle,
-    /// turned about the point it looks at on the ground. Nothing at the
-    /// game's angle, so every picture taken there is what it was.
-    /// </summary>
-    private void Orbit(Vector3 pivot, Vector3 axis, float dist)
+    /// <summary>The default angle put on, once the board is there (its pitch
+    /// is an offset from the game's, <see cref="Squash"/>).</summary>
+    private void AngleDefault()
     {
-        float game = Mathf.Asin(Squash);
-        if (_angleDefault)
-        {
-            _angleDefault = false;
-            _orbitYaw = _gameAngle ? 0.0f : Mathf.DegToRad(IsoYawDeg);
-            _orbitPitch = _gameAngle ? 0.0f : Mathf.DegToRad(IsoPitchDeg) - game;
-        }
-        if (!Orbited)
-        {
-            _camera.Rotation = new Vector3(-game, 0.0f, 0.0f);
+        if (!_angleDefault)
             return;
+        _angleDefault = false;
+        _orbitYaw = _gameAngle ? 0.0f : Mathf.DegToRad(IsoYawDeg);
+        _orbitPitch = _gameAngle ? 0.0f : Mathf.DegToRad(IsoPitchDeg) - Mathf.Asin(Squash);
+    }
+
+    /// <summary>The view's pitch above the ground, radians.</summary>
+    private float ViewPitch => Mathf.Asin(Squash) + _orbitPitch;
+
+    /// <summary>Toward the eye from the ground, unit: the camera stands along it.</summary>
+    private Vector3 ViewBack
+    {
+        get
+        {
+            float p = ViewPitch;
+            return new Vector3(Mathf.Sin(_orbitYaw) * Mathf.Cos(p), Mathf.Sin(p), Mathf.Cos(_orbitYaw) * Mathf.Cos(p));
         }
-        // the point on the ground at the middle of the view: down the axis
-        // from the pivot to the board's zero
-        Vector3 u = axis.Normalized();
-        Vector3 focus = pivot - u * (pivot.Y / Mathf.Max(u.Y, 0.05f));
-        float pitch = game + _orbitPitch;
-        float reach = dist * axis.Length();
-        var dir = new Vector3(Mathf.Sin(_orbitYaw) * Mathf.Cos(pitch), Mathf.Sin(pitch),
-                              Mathf.Cos(_orbitYaw) * Mathf.Cos(pitch));
-        _camera.Position = focus + dir * reach;
-        _camera.Rotation = new Vector3(-pitch, _orbitYaw, 0.0f);
-        // turned, the board's far corner can lie further than the game's view had it
-        _camera.Far = 2.0f * reach + DepthSpare * 2.0f;
+    }
+
+    /// <summary>The screen's right and up in the world, at the view's angle.</summary>
+    private Vector3 ViewRight => new(Mathf.Cos(_orbitYaw), 0.0f, -Mathf.Sin(_orbitYaw));
+
+    private Vector3 ViewUp => ViewBack.Cross(ViewRight);
+
+    /// <summary>The point on the ground's zero drawn where <paramref name="world"/>
+    /// is: down the line of sight.</summary>
+    private Vector3 GroundUnder(Vector3 world)
+    {
+        Vector3 back = ViewBack;
+        return world - back * (world.Y / Mathf.Max(back.Y, 0.05f));
     }
 
     /// <summary>How fast the keys move the view, screen px a second; Shift doubles it.</summary>
@@ -735,7 +770,9 @@ public sealed partial class Tank3DBench : Node3D
     private void GlideTo(Vector3 world)
     {
         _glideFrom = _viewNow;
-        _glideTo = new Vector2(world.X, world.Z * Squash - world.Y * RiseFactor);
+        // the view's middle is a point on the ground: the one drawn where the unit is
+        Vector3 at = GroundUnder(world);
+        _glideTo = new Vector2(at.X, at.Z * Squash);
         _glideT = 0.0f;
         _viewAt = _glideFrom;
     }
@@ -752,18 +789,19 @@ public sealed partial class Tank3DBench : Node3D
     }
 
     /// <summary>
-    /// The board's box in the camera's own plane, world units: x across the
-    /// screen, y down it - <see cref="Board"/> of the ground, less the height a
-    /// raised cell stands at, which is how far up the screen its top is drawn.
-    /// Null on the flat ground. Measured once: the board does not move.
+    /// The board as a box in the world, measured once (the board does not
+    /// move): the cells' ground and, on the relief, its sea and frame round
+    /// them (<c>Relief.Frame</c>), on the plan - x the world's X, y its Z - and
+    /// the lowest and highest the ground goes. Null on the flat ground.
     /// </summary>
-    private Rect2? BoardBox()
+    private (Rect2 Plan, float Low, float High)? BoardGround()
     {
-        if (_boardBox is not null || _field is null || _tile is null)
-            return _boardBox;
+        if (_boardGround is not null || _field is null || _tile is null)
+            return _boardGround;
         Vector2 half = (Vector2)_tile.HexRect.Size * 0.5f;
         var lo = new Vector2(float.MaxValue, float.MaxValue);
         var hi = new Vector2(float.MinValue, float.MinValue);
+        float low = 0.0f, high = 0.0f;
         for (int r = 0; r < _field.Rows; r++)
         for (int q = 0; q < _field.Columns; q++)
         {
@@ -771,134 +809,144 @@ public sealed partial class Tank3DBench : Node3D
             if (!_field.InBounds(cell))
                 continue;
             Vector2 c = _field.FlatAnchor(cell) + _field.CentreOffset;
-            float lift = LiftAt(new Vector3(c.X, 0.0f, c.Y / Squash));
-            lo = new Vector2(Mathf.Min(lo.X, c.X - half.X), Mathf.Min(lo.Y, c.Y - half.Y - Mathf.Max(lift, 0.0f)));
-            hi = new Vector2(Mathf.Max(hi.X, c.X + half.X), Mathf.Max(hi.Y, c.Y + half.Y - Mathf.Min(lift, 0.0f)));
+            var plan = new Vector2(c.X, c.Y / Squash);
+            // the lift is drawn up the screen at the game's angle: the height over it
+            float y = LiftAt(new Vector3(plan.X, 0.0f, plan.Y)) / RiseFactor;
+            low = Mathf.Min(low, y);
+            high = Mathf.Max(high, y);
+            lo = new Vector2(Mathf.Min(lo.X, plan.X - half.X), Mathf.Min(lo.Y, plan.Y - half.Y / Squash));
+            hi = new Vector2(Mathf.Max(hi.X, plan.X + half.X), Mathf.Max(hi.Y, plan.Y + half.Y / Squash));
         }
         if (lo.X > hi.X)
             return null;
-        // the relief's sea and frame round the cells (Relief.Frame), in flat
-        // space: rows squashed
         if (_reliefOn && _relief is not null)
         {
             Rect2 frame = _relief.Frame.Grow(Stage3D.FrameWide * half.X);
-            lo = new Vector2(Mathf.Min(lo.X, frame.Position.X), Mathf.Min(lo.Y, frame.Position.Y * Squash));
-            hi = new Vector2(Mathf.Max(hi.X, frame.End.X), Mathf.Max(hi.Y, frame.End.Y * Squash));
+            lo = new Vector2(Mathf.Min(lo.X, frame.Position.X), Mathf.Min(lo.Y, frame.Position.Y));
+            hi = new Vector2(Mathf.Max(hi.X, frame.End.X), Mathf.Max(hi.Y, frame.End.Y));
         }
-        _boardBox = new Rect2(lo, hi - lo);
-        return _boardBox;
+        // what stands on it - a tree, a hull, the mesa's top - over the highest ground
+        _boardGround = (new Rect2(lo, hi - lo), low - half.X, high + 2.0f * half.X);
+        return _boardGround;
     }
 
-    private Rect2? _boardBox;
+    private (Rect2 Plan, float Low, float High)? _boardGround;
+
+    /// <summary>The board box's eight corners on the screen at the view's angle,
+    /// world units: across along the screen's right, up along its up.</summary>
+    private Rect2 BoardOnScreen((Rect2 Plan, float Low, float High) board)
+    {
+        Vector3 right = ViewRight, up = ViewUp;
+        float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+        for (int i = 0; i < 8; i++)
+        {
+            var corner = new Vector3((i & 1) != 0 ? board.Plan.End.X : board.Plan.Position.X,
+                                     (i & 4) != 0 ? board.High : board.Low,
+                                     (i & 2) != 0 ? board.Plan.End.Y : board.Plan.Position.Y);
+            float x = corner.Dot(right), y = corner.Dot(up);
+            x0 = Mathf.Min(x0, x);
+            x1 = Mathf.Max(x1, x);
+            y0 = Mathf.Min(y0, y);
+            y1 = Mathf.Max(y1, y);
+        }
+        return new Rect2(x0, y0, x1 - x0, y1 - y0);
+    }
 
     /// <summary>The zoom the whole board fits the window at, with
-    /// <see cref="FitMargin"/>; the old default, 2.5, on the flat ground.</summary>
+    /// <see cref="FitMargin"/>, at the view's angle (its box's corners as the
+    /// camera draws them); the old default, 2.5, on the flat ground.</summary>
     private float FitZoom()
     {
-        if (BoardBox() is not { } box || box.Size.X <= 0.0f || box.Size.Y <= 0.0f)
+        if (BoardGround() is not { } board)
             return 2.5f;
         Vector2 view = GetViewport().GetVisibleRect().Size;
-        Vector2 size = box.Size;
-        if (Orbited)
-        {
-            // turned (Orbit): the box's corners on the ground, as the turned
-            // camera draws them - across along its right, up the screen by how
-            // far toward the eye, foreshortened by its pitch
-            float pitch = Mathf.Asin(Squash) + _orbitPitch;
-            var right = new Vector2(Mathf.Cos(_orbitYaw), -Mathf.Sin(_orbitYaw));
-            var toward = new Vector2(Mathf.Sin(_orbitYaw), Mathf.Cos(_orbitYaw));
-            float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
-            for (int i = 0; i < 4; i++)
-            {
-                var corner = new Vector2((i & 1) != 0 ? box.End.X : box.Position.X,
-                                         ((i & 2) != 0 ? box.End.Y : box.Position.Y) / Squash);
-                float x = corner.Dot(right), y = corner.Dot(toward) * Mathf.Sin(pitch);
-                x0 = Mathf.Min(x0, x);
-                x1 = Mathf.Max(x1, x);
-                y0 = Mathf.Min(y0, y);
-                y1 = Mathf.Max(y1, y);
-            }
-            size = new Vector2(x1 - x0, y1 - y0);
-        }
-        return Mathf.Min(view.X / size.X, view.Y / size.Y) / FitMargin;
+        Rect2 seen = BoardOnScreen(board);
+        if (seen.Size.X <= 0.0f || seen.Size.Y <= 0.0f)
+            return 2.5f;
+        return Mathf.Min(view.X / seen.Size.X, view.Y / seen.Size.Y) / FitMargin;
     }
 
-    /// <summary>Size the camera to the zoom and keep the tank a little below
-    /// the middle, so a plume or a thrown turret has sky to go into - but no
-    /// further out than the board's edge: along each axis of the screen the
-    /// view is held inside the board, and where the board is narrower than
-    /// the view it stands in the middle of it. At the fit that is the whole
-    /// board, still; zoomed in, it is the tank, until it drives to an edge.</summary>
+    /// <summary>
+    /// The camera on its boom (2026-11-01, as tactics games frame theirs):
+    /// <list type="bullet">
+    /// <item><b>A point on the ground it looks at</b> - the tank, a little
+    /// below the middle so a plume or a thrown turret has room over it; the
+    /// view the player moved (<see cref="_viewAt"/>); at the fit, the whole
+    /// board's middle.</item>
+    /// <item><b>That point held over the board's plan</b>, not the view's edges
+    /// inside it: the edges were held in the game angle's own plane, and
+    /// turned, the view went off to one side of the board.</item>
+    /// <item><b>The camera far back along the line of sight</b>, by the board's
+    /// box: its near and far planes take the whole board at any angle - they
+    /// were set for the game's angle, and turned, the near edge fell in front
+    /// of the near plane and was cut off.</item>
+    /// </list>
+    /// Orthographic, so how far back does not change the picture.
+    /// </summary>
     private void FrameCamera()
     {
-        const float back = Back;
+        AngleDefault();
         Vector2 window = GetViewport().GetVisibleRect().Size;
-        float height = window.Y;
         if (_zoomFit)
             _zoom = FitZoom();
-        _camera.Size = height / _zoom;
-        // Not up with the wreck's hop, nor down into its crater or the ground
-        // after it (Tank3DBench.Pits, Gone): the board stays where it is.
-        Vector3 pivot = _rig.Position - Vector3.Up * _wreckLift;
-        bool loose = _viewAt is not null;
-        // Both hulls in the picture while a target stands near: toward the
-        // middle between them, eased off with the distance so the rammer stays
-        // on the screen - a switch at one distance was a jump of the view.
-        if (_other is not null && !loose)
-        {
-            Vector3 mid = 0.5f * (_rig.Position + _other.Rig.Position);
-            float d = mid.DistanceTo(_rig.Position) / _camera.Size;
-            pivot = pivot.Lerp(mid, 1.0f - Smooth(0.3f, 0.6f, d));
-        }
-        // Up the screen by a sixth of the view: screen up is -Z on the ground.
-        pivot.Z -= _camera.Size / 6.0f / Squash;
-        // Moved by the player: the plane point itself, on the ground's zero.
+        _camera.Size = window.Y / _zoom;
+        Vector3 back = ViewBack;
+        (Rect2 Plan, float Low, float High)? board = BoardGround();
+        Vector3 focus;
         if (_viewAt is Vector2 view)
-            pivot = new Vector3(view.X, 0.0f, view.Y / Squash);
-        // Held inside the board. The middle of the view in the camera's
-        // plane is the pivot's Board() less its height drawn up the screen.
-        if (BoardBox() is { } box)
+            // moved by the player: the plane point itself, on the ground
+            focus = new Vector3(view.X, 0.0f, view.Y / Squash);
+        else if (_zoomFit && board is { } whole)
         {
-            var half = new Vector2(_camera.Size * window.X / Mathf.Max(window.Y, 1.0f), _camera.Size) * 0.5f;
-            var at = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
-            // Following, the view is kept inside the board; moved by the
-            // player, only its middle is - as strategy games hold the camera's
-            // focus over the map. Held by its edges, a view at the fit, where
-            // the board is smaller than the view both ways, had nowhere to go
-            // and a pan did nothing.
-            float Hold(float c, float lo, float size, float h) =>
-                loose ? Mathf.Clamp(c, lo, lo + size)
-                : size <= 2.0f * h ? lo + 0.5f * size : Mathf.Clamp(c, lo + h, lo + size - h);
-            var held = new Vector2(Hold(at.X, box.Position.X, box.Size.X, half.X),
-                                   Hold(at.Y, box.Position.Y, box.Size.Y, half.Y));
-            pivot.X += held.X - at.X;
-            pivot.Z += (held.Y - at.Y) / Squash;
-            // A drag past the edge is not stored past it, or the way back
-            // would first have to undo the overshoot.
-            if (loose)
-                _viewAt = held;
-            _viewNow = held;
+            // the fit: the middle of the board as drawn
+            Rect2 seen = BoardOnScreen(whole);
+            Vector2 mid = seen.GetCenter();
+            focus = GroundUnder(ViewRight * mid.X + ViewUp * mid.Y);
         }
         else
-            _viewNow = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
-        // Along its own axis the camera stands back from the board's middle,
-        // not from the tank - orthographic, the picture is the same - and
-        // further where the board is deeper than the view's 3000: with the
-        // tank on the near row the relief's near frame fell in front of the
-        // near plane and the far one past the far plane (BOT-11).
-        var axis = new Vector3(0.0f, Squash, RiseFactor);
-        float dist = back;
-        if (BoardBox() is { } deep)
         {
-            Vector3 u = axis.Normalized();
-            float mid = (deep.Position.Y + 0.5f * deep.Size.Y) / Squash;
-            pivot += u * (new Vector3(pivot.X, 0.0f, mid) - pivot).Dot(u);
-            float half = 0.5f * deep.Size.Y / Squash * u.Z + DepthSpare;
-            dist = Mathf.Max(back, half / axis.Length());
+            // Not up with the wreck's hop, nor down into its crater or the
+            // ground after it (Tank3DBench.Pits, Gone): the board stays where it is.
+            Vector3 pivot = _rig.Position - Vector3.Up * _wreckLift;
+            // Both hulls in the picture while a target stands near: toward the
+            // middle between them, eased off with the distance so the rammer
+            // stays on the screen - a switch at one distance was a jump of the view.
+            if (_other is not null)
+            {
+                Vector3 mid = 0.5f * (_rig.Position + _other.Rig.Position);
+                float d = mid.DistanceTo(_rig.Position) / _camera.Size;
+                pivot = pivot.Lerp(mid, 1.0f - Smooth(0.3f, 0.6f, d));
+            }
+            focus = GroundUnder(pivot);
+            // up the screen by a sixth of the view: on the ground, away from
+            // the eye by that over the pitch's sine
+            var away = new Vector3(-back.X, 0.0f, -back.Z);
+            if (away.LengthSquared() > 1e-6f)
+                focus += away.Normalized() * (_camera.Size / 6.0f / Mathf.Max(Mathf.Sin(ViewPitch), 0.2f));
         }
-        _camera.Far = 2.0f * dist * axis.Length();
-        _camera.Position = pivot + axis * dist;
-        Orbit(pivot, axis, dist);
+        if (board is { } b)
+        {
+            focus.X = Mathf.Clamp(focus.X, b.Plan.Position.X, b.Plan.End.X);
+            focus.Z = Mathf.Clamp(focus.Z, b.Plan.Position.Y, b.Plan.End.Y);
+        }
+        focus.Y = 0.0f;
+        _viewNow = new Vector2(focus.X, focus.Z * Squash);
+        // a drag past the edge is not stored past it, or the way back would
+        // first have to undo the overshoot
+        if (_viewAt is not null)
+            _viewAt = _viewNow;
+        // back along the line of sight past the whole board, whatever the angle
+        float reach = Back, depth = 2.0f * Back;
+        if (board is { } box)
+        {
+            var centre = new Vector3(box.Plan.GetCenter().X, 0.5f * (box.Low + box.High), box.Plan.GetCenter().Y);
+            float radius = new Vector3(box.Plan.Size.X, box.High - box.Low, box.Plan.Size.Y).Length() * 0.5f;
+            reach = focus.DistanceTo(centre) + radius + DepthSpare;
+            depth = 2.0f * reach;
+        }
+        _camera.Position = focus + back * reach;
+        _camera.Rotation = new Vector3(-ViewPitch, _orbitYaw, 0.0f);
+        _camera.Far = depth;
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
         _camera.Position += _camera.Basis.X * shake.X - _camera.Basis.Y * shake.Y;
@@ -1620,7 +1668,10 @@ public sealed partial class Tank3DBench : Node3D
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                         _hoverFixed = MapCell(q, r);
                 }
-                // orbit=DX,DY: the middle button dragged that many pixels (Orbit)
+                // view-step=N: the view N steps of the turn round, as Q/E (TurnViewStep)
+                else if (what.StartsWith("view-step=", StringComparison.Ordinal))
+                    TurnViewStep(int.Parse(what[10..], CultureInfo.InvariantCulture));
+                // orbit=DX,DY: the middle button dragged that many pixels (OrbitBy)
                 else if (what.StartsWith("orbit=", StringComparison.Ordinal))
                 {
                     string[] xy = what[6..].Split(',');
@@ -2525,10 +2576,24 @@ public sealed partial class Tank3DBench : Node3D
                     return;
             }
         }
-        // The middle button held: the view turned and tilted (Orbit).
+        // The middle button held: the view turned and tilted (OrbitBy); let
+        // go, it comes round to the nearest step of the turn (OrbitLetGo).
         if (@event is InputEventMouseMotion drag && (drag.ButtonMask & MouseButtonMask.Middle) != 0)
         {
             OrbitBy(drag.Relative);
+            return;
+        }
+        if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle, Pressed: false })
+        {
+            OrbitLetGo();
+            return;
+        }
+        // Q/E in a match: the view a step round (YawStepDeg) - outside one
+        // they turn the turret
+        if (Match && @event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Q or Key.E } turnKey
+            && !turnKey.CtrlPressed && !turnKey.AltPressed)
+        {
+            TurnViewStep(turnKey.Keycode == Key.Q ? 1 : -1);
             return;
         }
         // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
