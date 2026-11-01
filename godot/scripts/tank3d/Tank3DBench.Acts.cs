@@ -72,7 +72,17 @@ public sealed partial class Tank3DBench
     private readonly List<ActArt> _actIcons = new();
     private int _actIconRaster;
 
+    /// <summary>Each group's row of key caps under its frame, by the group's
+    /// row of buttons; and each button's slot there - as wide as the button,
+    /// so the cap stands under it - and the cap.</summary>
+    private readonly Dictionary<HBoxContainer, HBoxContainer> _keyRows = new();
+    private readonly List<(Button Button, Control Slot, Label Cap)> _actKeys = new();
+    /// <summary>The key caps' row under the frames, px in the layout.</summary>
+    private const float KeyRowPx = 24.0f;
+
     private static readonly Color SlotDim = new(0.42f, 0.43f, 0.40f);
+    /// <summary>A spent button's key cap: dimmed with it.</summary>
+    private static readonly Color KeyOff = new(1.0f, 1.0f, 1.0f, 0.4f);
     /// <summary>The icon's side on a button in the 1600 × 900 layout, px; on
     /// screen it is this times the window's stretch (<see cref="ActIconsFit"/>).</summary>
     private const int ActIconPx = 36;
@@ -80,12 +90,13 @@ public sealed partial class Tank3DBench
     private void BuildActs(CanvasLayer layer)
     {
         // bottom centre (the author's layout, 2026-10-31): the move's frame,
-        // the attack's, the bonus act's, a gap between
+        // the attack's, the bonus act's, a gap between; under each frame its
+        // buttons' keys, a row of their own (the author's note, 2026-11-01)
         _acts = new HBoxContainer
         {
             Name = "Acts",
             AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
-            OffsetTop = -12.0f - 56.0f, OffsetBottom = -12.0f,
+            OffsetTop = -12.0f - 60.0f - 4.0f - KeyRowPx, OffsetBottom = -12.0f,
             GrowHorizontal = Control.GrowDirection.Both,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Visible = false,
@@ -159,15 +170,40 @@ public sealed partial class Tank3DBench
         art.Button.Icon = art.Button.Disabled ? art.Off : art.On;
     }
 
-    /// <summary>A slot's frame: its buttons in a row.</summary>
+    /// <summary>A slot's frame: its buttons in a row, and under the frame the
+    /// row their key caps stand in.</summary>
     private (PanelContainer, HBoxContainer) Group()
     {
+        var column = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        column.AddThemeConstantOverride("separation", 4);
         var frame = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         row.AddThemeConstantOverride("separation", 6);
         frame.AddChild(row);
-        _acts!.AddChild(frame);
+        column.AddChild(frame);
+        // the buttons' separation, centred under the frame: each slot as wide
+        // as its button, so the caps fall under the buttons
+        var keys = new HBoxContainer
+        {
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+            CustomMinimumSize = new Vector2(0.0f, KeyRowPx),
+        };
+        keys.AddThemeConstantOverride("separation", 6);
+        column.AddChild(keys);
+        _keyRows[row] = keys;
+        _acts!.AddChild(column);
         return (frame, row);
+    }
+
+    /// <summary>A key's cap: a small dark box with the digit, as the frames are drawn.</summary>
+    private static StyleBoxFlat KeyCap()
+    {
+        var box = new StyleBoxFlat { BgColor = new Color(0.08f, 0.085f, 0.075f, 0.8f), BorderColor = SlotDim };
+        box.SetBorderWidthAll(1);
+        box.SetCornerRadiusAll(4);
+        box.ContentMarginLeft = box.ContentMarginRight = 5.0f;
+        return box;
     }
 
     /// <summary>A button on or off: off - its slot spent - it is grey and
@@ -203,6 +239,22 @@ public sealed partial class Tank3DBench
         };
         var art = new ActArt { Button = b, Name = icon };
         ActPaint(art, ActIconPx);
+        // the key's cap in the row under the frame, under the button
+        var slot = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        var cap = new Label
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            CustomMinimumSize = new Vector2(20.0f, 20.0f),
+        };
+        cap.AddThemeFontSizeOverride("font_size", 13);
+        cap.AddThemeColorOverride("font_color", CardPale);
+        cap.AddThemeStyleboxOverride("normal", KeyCap());
+        slot.AddChild(cap);
+        _keyRows[row].AddChild(slot);
+        b.Resized += () => slot.CustomMinimumSize = new Vector2(b.Size.X, 0.0f);
+        _actKeys.Add((b, slot, cap));
         ActLabel(b, name, key);
         b.AddThemeConstantOverride("icon_max_width", ActIconPx);
         b.AddThemeFontSizeOverride("font_size", b.Icon is null ? 16 : 14);
@@ -224,12 +276,20 @@ public sealed partial class Tank3DBench
         return b;
     }
 
-    /// <summary>What a button says: the key beside the icon and the name in
-    /// the tooltip, or the name and the key without the icon.</summary>
-    private static void ActLabel(Button b, string name, string key)
+    /// <summary>What a button says: nothing beside the icon, or its name
+    /// without one; the name and key in the tooltip; the key on its cap under
+    /// the frame (2026-11-01; it stood beside the icon before), no cap for a
+    /// button without a key.</summary>
+    private void ActLabel(Button b, string name, string key)
     {
-        b.Text = b.Icon is not null ? key : key.Length > 0 ? $"{name}   {key}" : name;
+        b.Text = b.Icon is not null ? "" : name;
         b.TooltipText = key.Length > 0 ? $"{name} ({key})" : name;
+        for (int i = 0; i < _actKeys.Count; i++)
+            if (_actKeys[i].Button == b)
+            {
+                _actKeys[i].Cap.Text = key;
+                _actKeys[i].Cap.Visible = key.Length > 0;
+            }
     }
 
     /// <summary>The act's icon, <c>Icons/&lt;name&gt;.svg</c> rasterised
@@ -523,6 +583,13 @@ public sealed partial class Tank3DBench
         _actWinch!.Visible = RigHas(Kit.Winch);
         _actWinch.SetPressedNoSignal(bonus && _gearMode == Gear.Winch);
         _actDouse!.Visible = Burning(_unitId);
+        // each cap with its button: gone with it, grey with it
+        for (int i = 0; i < _actKeys.Count; i++)
+        {
+            (Button b, Control slot, Label cap) = _actKeys[i];
+            slot.Visible = b.Visible;
+            cap.Modulate = b.Disabled ? KeyOff : Colors.White;
+        }
         // the numbers run over the bonus buttons shown, from 4
         int shownMask = 0;
         for (int i = 0; i < _bonusActs.Count; i++)
