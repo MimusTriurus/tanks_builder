@@ -1724,6 +1724,9 @@ public sealed partial class Tank3DBench : Node3D
                 // act=move|attack|ram|ambush|smoke|fiery|mine|repair|winch|off: the action panel's modes (Tank3DBench.Acts)
                 else if (what == "act=move")
                     MoveOn();
+                // tip=NAME|off: the action panel's card held up for that act's button (Tank3DBench.ActTips)
+                else if (what.StartsWith("tip=", StringComparison.Ordinal))
+                    _tipHeld = what == "tip=off" ? null : what[4..];
                 else if (what.StartsWith("act=", StringComparison.Ordinal))
                 {
                     Gear gear = what[4..] switch { "mine" => Gear.Mine, "repair" => Gear.Repair, "winch" => Gear.Winch, _ => Gear.None };

@@ -127,6 +127,7 @@ public sealed partial class Tank3DBench
         _actWinch = BonusButton(bonus, "winch", "Лебёдка", toggle: true, () => GearToggle(Gear.Winch));
         _actDouse = BonusButton(bonus, "douse", "Тушить", toggle: false, () => Execute(new Command(CommandKind.Douse)));
         layer.AddChild(_acts);
+        BuildActTip(layer);
         ActIconsFit();
         GetTree().Root.SizeChanged += ActIconsFit;
     }
@@ -213,6 +214,7 @@ public sealed partial class Tank3DBench
         _groupArt[frame] = art;
         mark.Draw += () => MarkDraw(art);
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _rowGroup[row] = art;
         row.AddThemeConstantOverride("separation", 6);
         frame.AddChild(row);
         column.AddChild(frame);
@@ -291,6 +293,8 @@ public sealed partial class Tank3DBench
         b.Resized += () => slot.CustomMinimumSize = new Vector2(b.Size.X, 0.0f);
         _actKeys.Add((b, slot, cap));
         ActLabel(b, name, key);
+        // the act's card under the pointer (Tank3DBench.ActTips)
+        ActTipHook(b, row, icon, name);
         b.AddThemeConstantOverride("icon_max_width", ActIconPx);
         b.AddThemeFontSizeOverride("font_size", b.Icon is null ? 16 : 14);
         b.AddThemeStyleboxOverride("normal", ActBox(new Color(0.46f, 0.48f, 0.41f), 1));
@@ -312,13 +316,13 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>What a button says: nothing beside the icon, or its name
-    /// without one; the name and key in the tooltip; the key on its cap under
-    /// the frame (2026-11-01; it stood beside the icon before), no cap for a
-    /// button without a key.</summary>
+    /// without one; the key on its cap under the frame (2026-11-01; it stood
+    /// beside the icon before), no cap for a button without a key. The name,
+    /// the key and what the act does are the act's card's
+    /// (Tank3DBench.ActTips), not the engine's tooltip.</summary>
     private void ActLabel(Button b, string name, string key)
     {
         b.Text = b.Icon is not null ? "" : name;
-        b.TooltipText = key.Length > 0 ? $"{name} ({key})" : name;
         for (int i = 0; i < _actKeys.Count; i++)
             if (_actKeys[i].Button == b)
             {
@@ -374,16 +378,22 @@ public sealed partial class Tank3DBench
     {
         Control c = art.Mark;
         // the frame's top edge: the mark's row, then the column's separation
-        var mid = new Vector2(c.Size.X * 0.5f, c.Size.Y + 4.0f);
-        Color rim = art.Open ? MarkLine : SlotDim, fill = art.Open ? art.Ink : MarkSpent;
-        const float r = 7.5f, ink = 2.5f;
-        if (art.Shape == GroupShape.Circle)
+        MarkAt(c, new Vector2(c.Size.X * 0.5f, c.Size.Y + 4.0f), art.Shape, art.Ink, art.Open, 7.5f);
+    }
+
+    /// <summary>A group's shape at <paramref name="mid"/>, <paramref name="r"/>
+    /// across its middle: the frame's mark and the act's card's (Tank3DBench.ActTips).</summary>
+    private static void MarkAt(CanvasItem c, Vector2 mid, GroupShape shape, Color group, bool open, float r)
+    {
+        Color rim = open ? MarkLine : SlotDim, fill = open ? group : MarkSpent;
+        float ink = r / 3.0f;
+        if (shape == GroupShape.Circle)
         {
             c.DrawCircle(mid, r + ink, rim, true, -1.0f, true);
             c.DrawCircle(mid, r, fill, true, -1.0f, true);
             return;
         }
-        Vector2[] unit = art.Shape == GroupShape.Diamond
+        Vector2[] unit = shape == GroupShape.Diamond
             ? new[] { new Vector2(0.0f, -1.15f), new Vector2(1.15f, 0.0f), new Vector2(0.0f, 1.15f), new Vector2(-1.15f, 0.0f) }
             : new[] { new Vector2(0.0f, -1.2f), new Vector2(1.15f, 0.85f), new Vector2(-1.15f, 0.85f) };
         var outer = new Vector2[unit.Length];
@@ -618,6 +628,8 @@ public sealed partial class Tank3DBench
             DropTarget();
         bool ours = _chosen && _fate == Fate.Alive && Match && !MatchOver && _side == _mt.Turn;
         _acts.Visible = ours;
+        // the act's card under the pointer, gone with the panel (Tank3DBench.ActTips)
+        ActTipTick();
         if (!ours)
             return;
         bool attack = !MatchShotSpent, bonus = !MatchBonusSpent, move = MatchMayMove;
