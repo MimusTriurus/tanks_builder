@@ -30,6 +30,16 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
         _ => Kind.ToString().ToLowerInvariant(),
     };
 
+    /// <summary>The order with its cell moved by <paramref name="by"/> - a
+    /// script's map cell on a board in a sea (<see cref="BattleState.Shift"/>),
+    /// as the bench's <c>MapCell</c> moves its commands'.</summary>
+    public Order Moved(Vector2I by) => Kind switch
+    {
+        OrderKind.Go or OrderKind.Place or OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke
+            or OrderKind.Mine or OrderKind.Repair or OrderKind.Winch => this with { Cell = Cell + by },
+        _ => this,
+    };
+
     /// <summary>One order in <c>--commands</c>' words, or null.</summary>
     public static Order? Parse(string text)
     {

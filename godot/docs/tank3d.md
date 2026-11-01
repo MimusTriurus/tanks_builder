@@ -2539,6 +2539,9 @@ back`, и танк стоит на плите.
   стенде (`Battle.TurnDone`, `Battle.Pass`), события каждого приказа — в лог,
   итог — в `out/battle-run/MAP.txt` (`BattleState.Say`) и `MAP.log`.
   `--first`, `--out DIR`, `--measure N` (замер), код выхода 2 — приказ отклонён.
+  Доска — рельефа, как у стенда (с 2026-11-01): склоны, без рамп и стен, в
+  море (`BattleRun.Played`); приказы и итог — в клетках карты. `--ramps` —
+  старая доска, с рампами и стенами карты: её и сверять со стендом с `--ramps`.
   Стенд с `--state-out PATH` пишет тот же текст с себя, когда команды
   отданы и всё улеглось, и выходит — два файла сравниваются `diff`.
 - **Доска** — `maps/field10.json`: 10 × 10 ровной земли, десять парковок
@@ -3013,7 +3016,8 @@ back`, и танк стоит на плите.
 центрировался на нём. Для снимков: `--do wheel-up=X,Y`, `wheel-down=X,Y` (щелчок
 с курсором в точке экрана), `pan=DX,DY` (протяжка средней кнопкой), `follow`.
 
-`--model LTR`, `--map events` (по умолчанию; `test` — прежняя), `--edit-at N` (Edit на кадре N, только если стенд прислал редактор), `--hover Q,R` (курсор на клетке: лента пути к ней, `Tank3DBench.Course`; `--do way` — Tab, `--do forks` — клетки с несколькими путями в лог), `--parked` (танки на всех парковках карты и на доске не из редактора; `--do take=Q,R` — взять стоящий на клетке), `--cell Q,R`, `--tremble 1.0`, `--reticle` (прицельный круг на цели, по умолчанию выключен), `--no-tracer`, `--tracer-smoke`, `--tracer-soft`, `--no-walls`, `--no-bunker`, `--no-crumble`, `--no-mines`, `--free-drive`, `--no-cel-relief`, `--scorch`, `--no-grass`, `--no-trees`, `--trees A,B,..`, `--wood N`, `--wind x`, `--no-amphibious`, `--no-ripples`, `--soft-water`, `--flat`, `--relief` (доска одним гладким мешем, уровни без рамп, `Shift+G` — гекс-сетка: [relief.md](relief.md)), `--pbr`, `--fx2d`, `--zoom 2.5` (без него — вся доска в окне), `--heading 215` (0 — нос к
+`--ramps` (доска — прежние призмы с рампами и стенами; без него рельеф, с
+2026-11-01 по умолчанию, [relief.md](relief.md)), `--model LTR`, `--map events` (по умолчанию; `test` — прежняя), `--edit-at N` (Edit на кадре N, только если стенд прислал редактор), `--hover Q,R` (курсор на клетке: лента пути к ней, `Tank3DBench.Course`; `--do way` — Tab, `--do forks` — клетки с несколькими путями в лог), `--parked` (танки на всех парковках карты и на доске не из редактора; `--do take=Q,R` — взять стоящий на клетке), `--cell Q,R`, `--tremble 1.0`, `--reticle` (прицельный круг на цели, по умолчанию выключен), `--no-tracer`, `--tracer-smoke`, `--tracer-soft`, `--no-walls`, `--no-bunker`, `--no-crumble`, `--no-mines`, `--free-drive`, `--no-cel-relief`, `--scorch`, `--no-grass`, `--no-trees`, `--trees A,B,..`, `--wood N`, `--wind x`, `--no-amphibious`, `--no-ripples`, `--soft-water`, `--flat`, `--relief` (доска одним гладким мешем, уровни без рамп, `Shift+G` — гекс-сетка: [relief.md](relief.md)), `--pbr`, `--fx2d`, `--zoom 2.5` (без него — вся доска в окне), `--heading 215` (0 — нос к
 камере), `--capture PATH --capture-at N`, `--sequence DIR FROM TO [STEP]` (выходит на кадре TO, даже если он не на шаге),
 `--no-ui`, `--do WHAT@FRAME` (имена: `shot`, `ricochet-*`, `pierce-*`, `he-*`,
 `ground`, `burn`, `unburn`, `knock`, `destroy`, `reset`, `heights`, `drive`, `reverse`,

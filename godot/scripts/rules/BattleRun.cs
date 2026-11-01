@@ -25,6 +25,8 @@ namespace TankSpriteTest;
 /// quiet - orders a second and bytes an order, and the state's copy
 /// (<see cref="BattleState.Clone"/>) timed and weighed on its own.</item>
 /// <item><c>--out DIR</c>: where the result goes.</item>
+/// <item><c>--ramps</c>: the old board, the map's ramps and walls - the
+/// relief's slopes without it (<see cref="Board"/>).</item>
 /// </list>
 /// A map with zones is placed first (<c>place</c>, <c>ready</c>) as the
 /// bench places it: player 1, then the other side, each in its zone or on its
@@ -41,6 +43,7 @@ public static class BattleRun
         string? mapName = null, scriptPath = null, commands = null, outDir = null;
         Camp first = Camp.Green;
         int measure = 0;
+        bool slopes = true;
         for (int i = 0; i < args.Length; i++)
         {
             bool more = i + 1 < args.Length;
@@ -51,10 +54,11 @@ public static class BattleRun
             else if (a == "--out" && more) outDir = args[++i];
             else if (a == "--first" && more) first = args[++i] == "brown" ? Camp.Brown : Camp.Green;
             else if (a == "--measure" && more) measure = int.TryParse(args[++i], out int n) ? n : 0;
+            else if (a == "--ramps") slopes = false;
         }
         try
         {
-            return Run(mapName, scriptPath, commands, outDir, first, measure);
+            return Run(mapName, scriptPath, commands, outDir, first, measure, slopes);
         }
         catch (Exception e)
         {
@@ -67,7 +71,8 @@ public static class BattleRun
         }
     }
 
-    private static int Run(string? mapName, string? scriptPath, string? commands, string? outDir, Camp first, int measure)
+    private static int Run(string? mapName, string? scriptPath, string? commands, string? outDir, Camp first, int measure,
+                           bool slopes)
     {
         if (mapName is null)
             return Refuse("--battle-run wants a map");
@@ -95,12 +100,12 @@ public static class BattleRun
         if (wrong.Count > 0)
             return Refuse($"not orders: {string.Join(", ", wrong)}");
 
-        var place = new Placing(map, first);
-        BattleState start = Start(map, first);
-        Log.Print($"battle-run: board {map.Name} {map.Columns}x{map.Rows}, {start.Units.Count} units, player 1 {first}, "
+        var place = new Placing(Played(map, slopes), first);
+        BattleState start = Start(map, first, slopes);
+        Log.Print($"battle-run: board {map.Name} {map.Columns}x{map.Rows} {(slopes ? "on the relief" : "with ramps and walls")}, {start.Units.Count} units, player 1 {first}, "
                   + $"{orders.Count} orders{(place.Side is Camp p ? $", {p} place first" : "")}");
         foreach (BattleUnit u in start.Units)
-            Log.Print($"battle-run: {u} kit {Kits.Names(u.Kit)}");
+            Log.Print($"battle-run: {u.Say(start.Shift)} kit {Kits.Names(u.Kit)}");
 
         var said = new List<string>();
         BattleState s = start.Clone();
@@ -126,10 +131,19 @@ public static class BattleRun
         return 1;
     }
 
-    /// <summary>The match at its start as the bench lines it up: the board
-    /// (<see cref="BattleBoard.Of"/> a field built from the map as the bench
-    /// builds its own), a unit on each home in bounds, the control point.</summary>
-    public static BattleState Start(BoardMap map, Camp first)
+    /// <summary>
+    /// The board a match is played on (<see cref="BattleBoard.Of"/> a field
+    /// built from the map as the bench builds its own): the relief's - the
+    /// levels joined by slopes, a level up or down a step from any side, and no
+    /// walls, neither in the cover nor on the edges (the bench's
+    /// <c>BuildBoard</c> with <c>--relief</c>; the ramps were given up,
+    /// 2026-11-01). With <paramref name="slopes"/> off (<c>--ramps</c>), the
+    /// old board: the map's ramps and its walls.
+    ///
+    /// The map as given, in its own cells: the sea round it is
+    /// <see cref="Played"/>'s, and <see cref="Start"/> asks for it.
+    /// </summary>
+    public static BattleBoard Board(BoardMap map, bool slopes = true)
     {
         var field = new HexField
         {
@@ -137,23 +151,42 @@ public static class BattleRun
             Trees = false,
             Columns = map.Columns, Rows = map.Rows, Plot = map.Plot, Sea = map.Sea,
         };
-        BattleBoard board;
         try
         {
             field.SetKinds(map.Kinds);
             field.SetGround(map.Ground);
-            field.SetCover(map.Over);
-            field.SetRelief(map.Levels, map.Ramps);
+            field.SetCover(slopes ? Array.ConvertAll(map.Over, c => c == Cover.Walls ? Cover.None : c) : map.Over);
+            field.SetRelief(map.Levels, slopes ? null : map.Ramps);
+            field.Slopes = slopes;
             field.SetWater(map.Water);
-            foreach ((Vector2I cell, Masonry wall) in map.Walling)
-                field.SetSides(cell, wall.Edges);
-            board = BattleBoard.Of(field);
+            if (!slopes)
+                foreach ((Vector2I cell, Masonry wall) in map.Walling)
+                    field.SetSides(cell, wall.Edges);
+            return BattleBoard.Of(field);
         }
         finally
         {
             field.Free();
         }
-        var s = new BattleState { Board = board, First = first, Turn = first };
+    }
+
+    /// <summary>The map as the match is played on it: on the relief in a sea
+    /// of deep water (<see cref="BoardMap.Moated"/>), as the bench's
+    /// <c>BuildBoard</c> rings it - the user's call, 2026-11-01: a ram at the
+    /// board's edge throws the tank into the sea, not refused. With
+    /// <paramref name="slopes"/> off, the map itself.</summary>
+    public static BoardMap Played(BoardMap map, bool slopes) => slopes ? map.Moated() : map;
+
+    /// <summary>The match at its start as the bench lines it up: the board
+    /// (<see cref="Board"/> of the <see cref="Played"/> map, in its sea), a
+    /// unit on each home in bounds, the control point. The state's cells are
+    /// the board's; <see cref="BattleState.Shift"/> takes them back to the
+    /// map's, the orders' and the printout's.</summary>
+    public static BattleState Start(BoardMap map, Camp first, bool slopes = true)
+    {
+        map = Played(map, slopes);
+        BattleBoard board = Board(map, slopes);
+        var s = new BattleState { Board = board, Shift = map.Shift, First = first, Turn = first };
         List<Lineup.Unit> lineup = Lineup.Of(map.Parked);
         for (int i = 0; i < lineup.Count; i++)
         {
@@ -180,7 +213,7 @@ public static class BattleRun
     /// <paramref name="map"/>, the placement with them; how many were
     /// refused. What the self test plays.</summary>
     public static int Play(BoardMap map, BattleState s, List<Order> orders) =>
-        Play(s, orders, new Placing(map, s.First), null);
+        Play(s, orders, new Placing(Played(map, s.Board.Slopes), s.First), null);
 
     /// <summary>
     /// The orders on <paramref name="s"/>, each with what it did into
@@ -195,9 +228,11 @@ public static class BattleRun
         {
             int from = s.Events.Count;
             long t0 = ticks is null ? 0 : Stopwatch.GetTimestamp();
+            // the script's cells are the map's, the board's are in the sea
+            Order on = o.Moved(s.Shift);
             string? why = o.Kind is OrderKind.Place or OrderKind.Ready || place.Side is not null
-                ? place.Apply(s, o)
-                : Battle.Apply(s, o);
+                ? place.Apply(s, on)
+                : Battle.Apply(s, on);
             // the turn goes by itself once nothing is left in it (Tank3DBench.Match)
             bool passed = why is null && o.Kind != OrderKind.Pass && Battle.TurnDone(s);
             if (passed)
@@ -214,8 +249,8 @@ public static class BattleRun
                 continue;
             }
             string line = why is not null
-                ? $"battle-run: {o}: refused - {why}"
-                : $"battle-run: {o}: {(s.Events.Count > from ? string.Join(", ", s.Events.Skip(from)) : "nothing")}"
+                ? $"battle-run: {o}: refused - {Said(why, s.Shift)}"
+                : $"battle-run: {o}: {(s.Events.Count > from ? string.Join(", ", s.Events.Skip(from).Select(e => Said(e, s.Shift))) : "nothing")}"
                   + (passed ? " - the turn goes by itself" : "");
             if (why is not null)
                 refused++;
@@ -224,6 +259,20 @@ public static class BattleRun
         }
         return refused;
     }
+
+    /// <summary>An event in the map's cells. (0, 0) is the cell of an event
+    /// that has none (a turn ended, the field's tick) and is left as it is: on
+    /// a board in a sea it is off the plot, never a cell anything happens on.</summary>
+    private static string Said(BattleEvent e, Vector2I shift) =>
+        (shift == Vector2I.Zero || e.Cell == Vector2I.Zero ? e : e with { Cell = e.Cell - shift }).ToString();
+
+    /// <summary>A refusal in the map's cells: the rules word it in the
+    /// board's, each <c>(q,r)</c> in it moved back.</summary>
+    private static string Said(string why, Vector2I shift) =>
+        shift == Vector2I.Zero
+            ? why
+            : System.Text.RegularExpressions.Regex.Replace(why, @"\((-?\d+),(-?\d+)\)",
+                m => $"({int.Parse(m.Groups[1].Value) - shift.X},{int.Parse(m.Groups[2].Value) - shift.Y})");
 
     /// <summary>
     /// What the AI's depth rests on: orders a second and bytes an order, the

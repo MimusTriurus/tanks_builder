@@ -42,7 +42,11 @@ public sealed class BattleUnit
 
     public BattleUnit Clone() => (BattleUnit)MemberwiseClone();
 
-    public override string ToString() => $"{Side} {Tag}#{Id} ({Cell.X},{Cell.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
+    public override string ToString() => Say(Vector2I.Zero);
+
+    /// <summary>The unit in a line, its cell less <paramref name="shift"/> -
+    /// the map's cell on a board in a sea (<see cref="BattleState.Shift"/>).</summary>
+    public string Say(Vector2I shift) => $"{Side} {Tag}#{Id} ({Cell.X - shift.X},{Cell.Y - shift.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
                                          + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "");
 }
 
@@ -73,6 +77,11 @@ public readonly record struct BattleEvent(BattleEventKind Kind, int Unit, Vector
 public sealed class BattleState
 {
     public BattleBoard Board = null!;
+    /// <summary>How far the map's cells moved on this board: the relief's sea
+    /// round it (<see cref="BoardMap.Moated"/>, <see cref="BoardMap.Shift"/>),
+    /// (0, 0) without one. The board and the units are in its cells;
+    /// <see cref="Say"/> speaks in the map's, as the bench prints them.</summary>
+    public Vector2I Shift;
     public List<BattleUnit> Units = new();
     public Camp Turn = Camp.Green;
     /// <summary>Player 1 (match.md, «Расстановка и первый ход»): the side
@@ -147,15 +156,15 @@ public sealed class BattleState
         if (Point is not null)
             t.Append($"point {Holder?.ToString() ?? "nobody"} holds, green {Score[0]}, brown {Score[1]}, since round {LastShift}\n");
         foreach (BattleUnit u in Units)
-            t.Append(u).Append('\n');
+            t.Append(u.Say(Shift)).Append('\n');
         for (int r = 0; r < Board.Rows; r++)
             for (int q = 0; q < Board.Columns; q++)
             {
                 var c = new Vector2I(q, r);
                 if (Board.CoverAt(c) != Cover.None && Board.CoverStateAt(c) != CoverState.Intact)
-                    t.Append($"{Board.CoverAt(c)} ({q},{r}) {Board.CoverStateAt(c)}\n");
+                    t.Append($"{Board.CoverAt(c)} ({q - Shift.X},{r - Shift.Y}) {Board.CoverStateAt(c)}\n");
                 if (Board.Smoked(c))
-                    t.Append($"smoke ({q},{r})\n");
+                    t.Append($"smoke ({q - Shift.X},{r - Shift.Y})\n");
             }
         return t.ToString();
     }

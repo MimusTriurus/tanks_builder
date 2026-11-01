@@ -46,7 +46,8 @@ public static class Ramming
         /// somebody - see <see cref="Vehicle.At"/>.</summary>
         Taken,
         /// <summary>It is higher than the target's own hex. Down is a fall and
-        /// is allowed; up wants a ramp, and a ram is not a ramp.</summary>
+        /// is allowed; up wants a ramp, and a ram is not a ramp. On slopes
+        /// (<see cref="IHexBoard.Slopes"/>) only more than a climb up is.</summary>
         Uphill,
         /// <summary>It is more than one level down. The rules describe a fall of
         /// one - hill to plain, plain to ravine or water - and nothing on any
@@ -193,7 +194,10 @@ public static class Ramming
         if (!TerrainRules.Drivable(field.FoundationAt(cell)))
             return Bar.Rock;
         int drop = field.LevelAt(from) - field.LevelAt(cell);
-        if (drop < 0)
+        // On slopes a level up is a step a tank drives, and a ram throws it
+        // there as well (the user's call, 2026-11-01); on ramps up wants a
+        // ramp, and a ram is not one.
+        if (drop < 0 && !(field.Slopes && -drop <= field.MaxClimb))
             return Bar.Uphill;
         if (drop > 1)
             return Bar.Cliff;

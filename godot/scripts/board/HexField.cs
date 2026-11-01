@@ -507,7 +507,7 @@ public sealed partial class HexField : Node2D, IHexBoard
     /// <see cref="MaxClimb"/> down, and any drop on to a floor that takes one
     /// (deep water: off the bank into the pond). Off by default, so a board
     /// that only lost its ramps - the harness's <c>--no-ramps</c> - falls as
-    /// it did. A departure from the GDD (field.md, "Рампа"), kept to the flag.
+    /// it did. The GDD's rule since 2026-11-01 (field.md, "Склон").
     /// </summary>
     public bool Slopes;
 

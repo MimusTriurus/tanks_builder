@@ -64,9 +64,11 @@ public sealed partial class Tank3DBench : Node3D
     private string _modelTag = "LTR";
     private string _mapName = "events";
     private bool _flat;
-    /// <summary><c>--relief</c>: the board as one smooth ground (BOT-11,
-    /// <see cref="Relief"/>) - for now its fields, to <c>out/relief/</c>.</summary>
-    private bool _reliefOn;
+    /// <summary>The board as one smooth ground (BOT-11, <see cref="Relief"/>),
+    /// its levels joined by slopes, no walls, in a sea: the board by default
+    /// since 2026-11-01 (the user's call, docs/relief.md). <c>--ramps</c>: the
+    /// old prisms, ramps and walls.</summary>
+    private bool _reliefOn = true;
 
     /// <summary>The rocks' looks on the relief (<c>--rock</c>, docs/rocks-plan.md):
     /// one look for every rock or a list dealt out in reading order, dressed
@@ -254,6 +256,12 @@ public sealed partial class Tank3DBench : Node3D
         if (BattleRun.Asked(OS.GetCmdlineUserArgs()))
         {
             GetTree().Quit(BattleRun.Main(OS.GetCmdlineUserArgs()));
+            return;
+        }
+        // --map-fair: is a duel map fair - a reading on the core, no scene (MapFair)
+        if (MapFair.Asked(OS.GetCmdlineUserArgs()))
+        {
+            GetTree().Quit(MapFair.Main(OS.GetCmdlineUserArgs()));
             return;
         }
         try
@@ -1485,7 +1493,10 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--wind" && more) _wind = F(args[++i], _wind);
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
+            // the relief is the board by default (the user's call, 2026-11-01):
+            // --relief is said for nothing, --ramps brings the prisms back
             else if (a == "--relief") _reliefOn = true;
+            else if (a == "--ramps") _reliefOn = false;
             // --rock mesa:ochre,yardang,moutonnee: the rocks' looks, dealt out
             // in reading order (RockStyles); the relief comes with them
             else if (a == "--rock" && more)
