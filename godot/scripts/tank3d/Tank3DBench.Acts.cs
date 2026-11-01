@@ -9,12 +9,17 @@ namespace TankSpriteTest;
 /// a match. GDD match.md «Структура хода» (U-22): the move, then two slots,
 /// one of each - the <b>attack</b> and the <b>bonus act</b>.
 /// <list type="bullet">
-/// <item><b>Two groups, each in its own frame</b> (the author's layout,
-/// 2026-10-31): the attack's - <b>Атака</b> 1, <b>Засада</b> 2 and, for a
-/// unit with the rounds, <b>Зажиг.</b> - and the bonus act's, numbered on
-/// from 3 in the order they stand. A spent slot's frame dims and its
-/// buttons stay, grey and off (2026-11-01; a tick and the slot's name stood
-/// in their place before).</item>
+/// <item><b>Three groups, each in its own frame</b> (the author's layout,
+/// 2026-10-31; the move's first since 2026-11-01): the move's - <b>Ход</b> 1 -,
+/// the attack's - <b>Атака</b> 2, <b>Засада</b> 3 and, for a unit with the
+/// rounds, <b>Зажиг.</b> - and the bonus act's, numbered on from 4 in the
+/// order they stand. A spent slot's frame dims and its buttons stay, grey
+/// and off (2026-11-01; a tick and the slot's name stood in their place
+/// before).</item>
+/// <item><b>Ход</b> - the move's mode, the one with no other on: pressed,
+/// every mode that takes the left button is put off (<see cref="MoveOn"/>),
+/// and the zone and the click are the move's again. Lit while it is so;
+/// grey once the unit may not move this turn (<c>MatchMayMove</c>).</item>
 /// <item><b>Атака</b> - a mode: the left button on a tank then fires as the
 /// right one does (<c>AimAt</c>), and an own unit is a target only so - by
 /// default ours are not fired on (<c>MatchAims</c>, <c>FriendOn</c>). The
@@ -33,15 +38,16 @@ namespace TankSpriteTest;
 /// <item><b>What may not be done is not there</b> (the author's choice, as
 /// with the roses): no <b>Тушить</b> on a hull that is not burning, no kit's
 /// button without the kit.</item>
-/// <item>Keys 1 to 9 press the buttons by their numbers; the roster's units
+/// <item>Keys 1 to 9 press the buttons by their numbers (1 the move's since
+/// 2026-11-01, the rest one on from before); the roster's units
 /// are F1 to F8 (the digits were theirs from 2026-10-30 to 2026-10-31).</item>
 /// </list>
 /// </summary>
 public sealed partial class Tank3DBench
 {
     private HBoxContainer? _acts;
-    private PanelContainer? _groupAttack, _groupBonus;
-    private Button? _actAttack, _actRam, _actDouse;
+    private PanelContainer? _groupMove, _groupAttack, _groupBonus;
+    private Button? _actMove, _actAttack, _actRam, _actDouse;
     /// <summary>«Атака» on: the left button on a tank fires, and ours may be fired on.</summary>
     private bool _attackMode;
     /// <summary>The bonus group's buttons in their order, and what each does
@@ -51,6 +57,8 @@ public sealed partial class Tank3DBench
     /// <summary>The slots and the bonus buttons shown, as last drawn: the
     /// frames and the numbers are redone when they change, not every frame.</summary>
     private int _slotsShown = -1, _bonusShown = -1;
+    /// <summary>The first bonus button's number: after «Ход», «Атака», «Засада».</summary>
+    private const int BonusKeyFirst = 4;
     /// <summary>A button's icon twice: as drawn, and grey for a spent slot.</summary>
     private sealed class ActArt
     {
@@ -71,8 +79,8 @@ public sealed partial class Tank3DBench
 
     private void BuildActs(CanvasLayer layer)
     {
-        // bottom centre (the author's layout, 2026-10-31): the attack's
-        // frame, a gap, the bonus act's
+        // bottom centre (the author's layout, 2026-10-31): the move's frame,
+        // the attack's, the bonus act's, a gap between
         _acts = new HBoxContainer
         {
             Name = "Acts",
@@ -83,13 +91,17 @@ public sealed partial class Tank3DBench
             Visible = false,
         };
         _acts.AddThemeConstantOverride("separation", 18);
+        HBoxContainer move;
+        (_groupMove, move) = Group();
+        // the move (2026-11-01): the other modes off, the click the move's
+        _actMove = ActButton(move, "move", "Ход", "1", toggle: true, MoveOn);
         HBoxContainer attack;
         (_groupAttack, attack) = Group();
         _attackAct = AttackToggle;
-        _actAttack = ActButton(attack, "attack", "Атака", "1", toggle: true, _attackAct);
+        _actAttack = ActButton(attack, "attack", "Атака", "2", toggle: true, _attackAct);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode
         _ambushAct = AmbushToggle;
-        _actAmbush = ActButton(attack, "ambush", AmbushText, "2", toggle: true, _ambushAct);
+        _actAmbush = ActButton(attack, "ambush", AmbushText, "3", toggle: true, _ambushAct);
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
         _actFiery = ActButton(attack, "incendiary", "Зажиг.", "", toggle: true, FieryToggle);
         HBoxContainer bonus;
@@ -274,8 +286,29 @@ public sealed partial class Tank3DBench
         _orderNote = _attackMode ? "атака: щёлкни по танку, свой тоже" : "атака выключена";
     }
 
+    /// <summary>«Ход»: every mode that takes the left button put off - the
+    /// attack's, the ambush's, the ram's, a bonus act's hex - so the zone and
+    /// the click are the move's. The incendiary round stays: it is the next
+    /// shot's, not the click's.</summary>
+    private void MoveOn()
+    {
+        if (MatchMoveWhy() is { Length: > 0 } why)
+        {
+            _orderNote = why;
+            return;
+        }
+        _attackMode = _ambushMode = _ramMode = _smokeMode = false;
+        _ambushPick = null;
+        _ramKey = "";
+        _gearMode = Gear.None;
+        _orderNote = "ход: щёлкни по гексу в зоне";
+    }
+
+    /// <summary>No mode that takes the left button is on: the click is the move's.</summary>
+    private bool MoveModeOn => !_attackMode && !_ambushMode && !_ramMode && !PickMode;
+
     /// <summary>Keys 1 to 9 in a match: the panel's buttons by their numbers -
-    /// 1 «Атака», 2 «Засада», 3 on the bonus acts shown. F1 to F8 take the
+    /// 1 «Ход», 2 «Атака», 3 «Засада», 4 on the bonus acts shown. F1 to F8 take the
     /// roster's units, top down, as a click on its icon (Tank3DBench.Roster).</summary>
     private void ActKey(Key key)
     {
@@ -290,11 +323,13 @@ public sealed partial class Tank3DBench
             return;
         int k = (int)(key - Key.Key1);
         // a grey button's key does nothing, as its click does not
-        if (k == 0 && _actAttack!.Visible && !_actAttack.Disabled)
+        if (k == 0 && !_actMove!.Disabled)
+            MoveOn();
+        else if (k == 1 && _actAttack!.Visible && !_actAttack.Disabled)
             _attackAct!();
-        else if (k == 1 && _actAmbush!.Visible && !_actAmbush.Disabled)
+        else if (k == 2 && _actAmbush!.Visible && !_actAmbush.Disabled)
             _ambushAct!();
-        for (int i = 0, shown = 2; k >= 2 && i < _bonusActs.Count; i++)
+        for (int i = 0, shown = BonusKeyFirst - 1; k >= BonusKeyFirst - 1 && i < _bonusActs.Count; i++)
             if (_bonusActs[i].Button.Visible && shown++ == k)
             {
                 if (!_bonusActs[i].Button.Disabled)
@@ -363,17 +398,20 @@ public sealed partial class Tank3DBench
         _acts.Visible = ours;
         if (!ours)
             return;
-        bool attack = !MatchShotSpent, bonus = !MatchBonusSpent;
-        int slots = (attack ? 1 : 0) | (bonus ? 2 : 0);
+        bool attack = !MatchShotSpent, bonus = !MatchBonusSpent, move = MatchMayMove;
+        int slots = (attack ? 1 : 0) | (bonus ? 2 : 0) | (move ? 4 : 0);
         if (slots != _slotsShown)
         {
             _slotsShown = slots;
+            GroupStyle(_groupMove!, move);
             GroupStyle(_groupAttack!, attack);
             GroupStyle(_groupBonus!, bonus);
         }
         // a spent slot keeps its buttons, grey and off (the author's note,
         // 2026-11-01): what the unit has stays in view, what it did is told
         // by the grey
+        ActOn(_actMove!, move);
+        _actMove!.SetPressedNoSignal(move && MoveModeOn);
         ActOn(_actAttack!, attack);
         ActOn(_actAmbush!, attack);
         ActOn(_actFiery!, attack);
@@ -393,7 +431,7 @@ public sealed partial class Tank3DBench
         _actWinch!.Visible = RigHas(Kit.Winch);
         _actWinch.SetPressedNoSignal(bonus && _gearMode == Gear.Winch);
         _actDouse!.Visible = Burning(_unitId);
-        // the numbers run over the bonus buttons shown, from 3
+        // the numbers run over the bonus buttons shown, from 4
         int shownMask = 0;
         for (int i = 0; i < _bonusActs.Count; i++)
             if (_bonusActs[i].Button.Visible)
@@ -401,7 +439,7 @@ public sealed partial class Tank3DBench
         if (shownMask != _bonusShown)
         {
             _bonusShown = shownMask;
-            for (int i = 0, n = 3; i < _bonusActs.Count; i++)
+            for (int i = 0, n = BonusKeyFirst; i < _bonusActs.Count; i++)
                 if (_bonusActs[i].Button.Visible)
                     ActLabel(_bonusActs[i].Button, _bonusActs[i].Text, n <= 9 ? $"{n++}" : "");
         }
