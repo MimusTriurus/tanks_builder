@@ -64,18 +64,22 @@ public sealed partial class Tank3DBench
     /// what its surfaces wore, to give back.</summary>
     private readonly Dictionary<TankModel, GhostDress> _deployDressed = new();
 
-    /// <summary>A model's surfaces as they were, and whether it wears the
-    /// taken one's ghost or the rest's.</summary>
+    /// <summary>A model's surfaces as they were, its ghost's fill (its ink
+    /// the next pass), and whether that is the taken one's or the rest's.</summary>
     private sealed class GhostDress
     {
         public required List<Dress> Kept;
+        public required ShaderMaterial Fill;
         public bool Taken;
     }
 
-    /// <summary>The ghosts' fills: the rest's, and the taken one's - firmer and
-    /// paler, since the selection's rim hangs on the surfaces' own ink, which
-    /// the ghost's dress replaces (Toon.Halo).</summary>
-    private ShaderMaterial? _deployFill, _deployFillTaken;
+    /// <summary>The ghost's fill for the taken one and the rest: the taken
+    /// firmer and paler.</summary>
+    private static void GhostFillFor(ShaderMaterial fill, bool taken)
+    {
+        fill.Param("tint", taken ? SelectionRing.Friendly.Lerp(Colors.White, 0.45f) : SelectionRing.Friendly);
+        fill.Param("alpha", taken ? 0.66f : GhostFirm);
+    }
 
     /// <summary>Every frame of placement: each of the placing side's models
     /// in the ghost's dress - the one on the rig too, which a take may have
@@ -94,30 +98,27 @@ public sealed partial class Tank3DBench
     {
         if (!IsInstanceValid(model))
             return;
-        if (_deployFill is null || _deployFillTaken is null)
-        {
-            // the move's ghost's look, firm: the cursor's own stays the faint one
-            var ink = new ShaderMaterial { Shader = GhostInkShader, RenderPriority = Stage3D.RingOrder + 2 };
-            _deployFill = new ShaderMaterial { Shader = GhostFillShader, RenderPriority = Stage3D.RingOrder + 1, NextPass = ink };
-            _deployFill.Param("tint", SelectionRing.Friendly);
-            _deployFill.Param("alpha", GhostFirm);
-            _deployFillTaken = new ShaderMaterial { Shader = GhostFillShader, RenderPriority = Stage3D.RingOrder + 1, NextPass = ink };
-            _deployFillTaken.Param("tint", SelectionRing.Friendly.Lerp(Colors.White, 0.45f));
-            _deployFillTaken.Param("alpha", 0.66f);
-        }
-        ShaderMaterial fill = taken ? _deployFillTaken : _deployFill;
         if (_deployDressed.TryGetValue(model, out GhostDress? was))
         {
-            // taken or let go since: the other fill
+            // taken or let go since: the other look
             if (was.Taken != taken)
             {
                 was.Taken = taken;
-                foreach (Dress d in was.Kept)
-                    if (IsInstanceValid(d.Mesh))
-                        d.Mesh.MaterialOverride = fill;
+                GhostFillFor(was.Fill, taken);
             }
             return;
         }
+        // The move's ghost's look, firm: the cursor's own stays the faint one.
+        // A pair to each model: the selection's rim (Toon.Halo) hangs after
+        // the ink pass it finds, and on an ink all the ghosts shared one hover
+        // rimmed them all (the author's note, 2026-11-01).
+        var ink = new ShaderMaterial { Shader = GhostInkShader, RenderPriority = Stage3D.RingOrder + 2 };
+        var fill = new ShaderMaterial { Shader = GhostFillShader, RenderPriority = Stage3D.RingOrder + 1, NextPass = ink };
+        GhostFillFor(fill, taken);
+        // a rim hung before the dress hangs on the model's own ink, which the
+        // dress hides: off, and hung afresh on the next need - on both inks
+        if (_halos.Remove(model, out Toon.Rim? rim))
+            rim?.Set(0.0f, SelectionRing.Friendly);
         var kept = new List<Dress>();
         foreach (Node n in model.FindChildren("*", "GeometryInstance3D", true, false))
             if (n is MeshInstance3D or MultiMeshInstance3D && n is GeometryInstance3D g)
@@ -126,7 +127,7 @@ public sealed partial class Tank3DBench
                 g.MaterialOverride = fill;
                 g.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
             }
-        _deployDressed[model] = new GhostDress { Kept = kept, Taken = taken };
+        _deployDressed[model] = new GhostDress { Kept = kept, Fill = fill, Taken = taken };
     }
 
     /// <summary>Every ghost dressed by placement given its own dress back.</summary>

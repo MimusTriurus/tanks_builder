@@ -43,8 +43,9 @@ namespace TankSpriteTest;
 public sealed partial class Tank3DBench
 {
     /// <summary>The rim's width past the ink, screen px: selected, under the
-    /// pointer.</summary>
-    private const float HaloChosen = 3.0f, HaloHover = 1.5f;
+    /// pointer - twice what they were, the hover's too thin to read (the
+    /// author's note, 2026-11-01).</summary>
+    private const float HaloChosen = 4.5f, HaloHover = 3.0f;
 
     // red where it gets in: the target under fire, and not the green of the tanks
     private static readonly Color AimPierce = new(0.93f, 0.24f, 0.20f);
@@ -587,6 +588,11 @@ public sealed partial class Tank3DBench
     {
         if (!_chosen || _aim is not null || RouteMoving || !_model.Turreted || _fate != Fate.Alive || dt <= 0.0f)
             return 0.0f;
+        // In placement nothing is aimed at: the turret back over the bow, and
+        // not after the own tank under the pointer - a ghost turned
+        // sideways stood so when let go (the author's note, 2026-11-01).
+        if (Deploying)
+            return Mathf.Clamp(-_model.Yaw / (Mathf.DegToRad(SlewDeg) * dt), -1.0f, 1.0f);
         Vector3 at;
         // «Засада» on: round to the axis being picked (Tank3DBench.Ambush)
         if (_ambushAxis is int axis)
