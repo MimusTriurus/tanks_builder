@@ -20,7 +20,7 @@ namespace TankSpriteTest;
 /// snapshot is of the unit alone. The move's own trail is left: the ruts fade
 /// by themselves.</item>
 /// </list>
-/// The button stands over «Конец хода», bottom right; Ctrl+Z.
+/// The button stands left of «Конец хода», bottom right; Backspace (and Ctrl+Z).
 /// </summary>
 public sealed partial class Tank3DBench
 {
@@ -38,7 +38,10 @@ public sealed partial class Tank3DBench
     private Button? _undoButton;
     private string _undoShown = "?";
 
-    private const string UndoText = "Отменить ход   Ctrl+Z";
+    /// <summary>The corner's two buttons, sides in the layout, px: «Конец хода»
+    /// the bigger (the author's note, 2026-11-01), and their icons.</summary>
+    private const float PassSide = 64.0f, UndoSide = 48.0f;
+    private const int PassIconPx = 40, UndoIconPx = 28;
 
     /// <summary>As <see cref="MatchMoved"/> marks the move: the unit as it set out.</summary>
     private void UndoSnap()
@@ -129,18 +132,18 @@ public sealed partial class Tank3DBench
 
     private void BuildUndo(CanvasLayer layer)
     {
-        // over «Конец хода», the same width: the turn's two buttons in the
-        // corner, clear of the acts in the bottom centre
+        // left of «Конец хода», smaller, their bottoms in line: the turn's two
+        // buttons in the corner, clear of the acts in the bottom centre
+        float right = -12.0f - PassSide - 10.0f;
         var undo = new Button
         {
-            Text = UndoText,
             AnchorLeft = 1.0f, AnchorRight = 1.0f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
-            OffsetLeft = -246.0f, OffsetRight = -12.0f, OffsetTop = -56.0f - 8.0f - 40.0f, OffsetBottom = -56.0f - 8.0f,
+            OffsetLeft = right - UndoSide, OffsetRight = right, OffsetTop = -12.0f - UndoSide, OffsetBottom = -12.0f,
             FocusMode = Control.FocusModeEnum.None,
             Disabled = true,
         };
-        undo.AddThemeFontSizeOverride("font_size", 15);
         undo.Pressed += UndoMove;
+        TurnButton(undo, "undo", UndoIconPx, "Backspace");
         layer.AddChild(undo);
         _undoButton = undo;
     }
@@ -150,8 +153,9 @@ public sealed partial class Tank3DBench
     private void UndoTick()
     {
         // the end of the turn beside it, greyed with the match over (Д6)
-        if (_passButton is not null && _passButton.Disabled != MatchOver)
-            _passButton.Disabled = MatchOver;
+        // ActOn: its icon greyed with it
+        if (_passButton is not null)
+            ActOn(_passButton, !MatchOver);
         if (_undoButton is null)
             return;
         // no move to take back before the first turn (Tank3DBench.Deploy)
@@ -160,7 +164,7 @@ public sealed partial class Tank3DBench
         if (ReferenceEquals(why, _undoShown))
             return;
         _undoShown = why;
-        _undoButton.Disabled = why.Length > 0;
-        _undoButton.TooltipText = why.Length > 0 ? why : "вернуть юнит туда, откуда он поехал";
+        // why it is grey - on its card (Tank3DBench.ActTips)
+        ActOn(_undoButton, why.Length == 0);
     }
 }

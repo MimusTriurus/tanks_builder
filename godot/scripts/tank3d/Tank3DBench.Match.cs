@@ -1006,15 +1006,16 @@ public sealed partial class Tank3DBench
         // Bottom right (2026-10-30, the author's choice): the turn's buttons
         // along the bottom, the acts by the card (Tank3DBench.Acts) and the
         // end of the turn in the far corner.
+        // An icon and no text (the author's note, 2026-11-01): the name, the
+        // key and what it does on its card under the pointer (Tank3DBench.ActTips).
         var pass = new Button
         {
-            Text = Deploying ? "В бой   Ctrl+Enter" : "Конец хода   Ctrl+Enter",
             AnchorLeft = 1.0f, AnchorRight = 1.0f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
-            OffsetLeft = -246.0f, OffsetRight = -12.0f, OffsetTop = -56.0f, OffsetBottom = -12.0f,
+            OffsetLeft = -12.0f - PassSide, OffsetRight = -12.0f, OffsetTop = -12.0f - PassSide, OffsetBottom = -12.0f,
             FocusMode = Control.FocusModeEnum.None,
         };
-        pass.AddThemeFontSizeOverride("font_size", 16);
         pass.Pressed += PassByHand;
+        TurnButton(pass, "endturn", PassIconPx, "Enter");
         layer.AddChild(pass);
         _passButton = pass;
         BuildUndo(layer);
@@ -1160,5 +1161,5 @@ public sealed partial class Tank3DBench
         + (!_hints ? "   F9 — подсказки"
             : "\n" + Roll() + "\n"
               + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   1 «Атака» — ЛКМ по танку, свой тоже   2 «Засада» — ЛКМ по гексу оси (MT: и по соседней)   3… доп. действия, Tab — таран, J — тушить   F1–F8 — танк ростера\n"
-              + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Ctrl+Z — отменить ход   Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F10 — замер кадра   F9 — скрыть");
+              + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Enter — конец хода (сперва подтверждает приказ)   Backspace — отменить ход   Ctrl+Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F10 — замер кадра   F9 — скрыть");
 }

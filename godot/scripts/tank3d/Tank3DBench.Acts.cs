@@ -65,6 +65,8 @@ public sealed partial class Tank3DBench
         public required Button Button;
         public required string Name;
         public Texture2D? On, Off;
+        /// <summary>Its side in the 1600 × 900 layout, px.</summary>
+        public int Px = ActIconPx;
     }
 
     /// <summary>Each button with an icon, and the pixels the icons are
@@ -143,13 +145,54 @@ public sealed partial class Tank3DBench
         Vector2I size = w.Size, layout = w.ContentScaleSize;
         float stretch = layout.X > 0 && layout.Y > 0
             ? Mathf.Min(size.X / (float)layout.X, size.Y / (float)layout.Y) : 1.0f;
-        int px = Mathf.Max(16, Mathf.RoundToInt(ActIconPx * stretch * w.ContentScaleFactor));
+        float k = stretch * w.ContentScaleFactor;
+        int px = Mathf.Max(16, Mathf.RoundToInt(ActIconPx * k));
         if (px == _actIconRaster)
             return;
         _actIconRaster = px;
         Log.Print($"tank3d: acts: icons at {px} px, window {size.X}x{size.Y}");
         foreach (ActArt art in _actIcons)
-            ActPaint(art, px);
+            ActPaint(art, Mathf.Max(16, Mathf.RoundToInt(art.Px * k)));
+    }
+
+    /// <summary>A button of the turn's corner («Конец хода», «Отменить ход»;
+    /// the author's note, 2026-11-01): its icon alone, <paramref name="px"/> on
+    /// a side, in the acts' box with a firmer rim; greyed as the acts are
+    /// (<see cref="ActOn"/>) and rasterised with them; its name, key and what
+    /// it does on its card (<see cref="TurnTipHook"/>). Without the icon on
+    /// disk it says its name.</summary>
+    private void TurnButton(Button b, string name, int px, string key)
+    {
+        var art = new ActArt { Button = b, Name = name, Px = px };
+        ActPaint(art, px);
+        if (b.Icon is null)
+            b.Text = name;
+        else
+        {
+            b.IconAlignment = HorizontalAlignment.Center;
+            b.AddThemeConstantOverride("icon_max_width", px);
+            _actIcons.Add(art);
+        }
+        ActStyle(b, 2);
+        TurnTipHook(b, name, key);
+    }
+
+    /// <summary>The acts' look on a button: the olive box, its rim
+    /// <paramref name="rim"/> px - pale under the pointer, the spent colour
+    /// pressed - and darker, dim, when it is off.</summary>
+    private static void ActStyle(Button b, int rim)
+    {
+        b.AddThemeStyleboxOverride("normal", ActBox(new Color(0.46f, 0.48f, 0.41f), rim));
+        b.AddThemeStyleboxOverride("hover", ActBox(CardPale, rim));
+        b.AddThemeStyleboxOverride("pressed", ActBox(CardSpend, 2));
+        b.AddThemeStyleboxOverride("hover_pressed", ActBox(CardSpend, 2));
+        // spent: the box darker and its rim dim, the key's number grey
+        StyleBoxFlat off = ActBox(SlotDim, rim);
+        off.BgColor = new Color(0.17f, 0.18f, 0.15f, 0.9f);
+        b.AddThemeStyleboxOverride("disabled", off);
+        b.AddThemeColorOverride("font_pressed_color", CardSpend);
+        b.AddThemeColorOverride("font_hover_pressed_color", CardSpend);
+        b.AddThemeColorOverride("font_disabled_color", SlotDim);
     }
 
     /// <summary>The icon of <paramref name="art"/> at <paramref name="px"/>,
@@ -298,17 +341,7 @@ public sealed partial class Tank3DBench
         ActTipHook(b, row, icon, name);
         b.AddThemeConstantOverride("icon_max_width", ActIconPx);
         b.AddThemeFontSizeOverride("font_size", b.Icon is null ? 16 : 14);
-        b.AddThemeStyleboxOverride("normal", ActBox(new Color(0.46f, 0.48f, 0.41f), 1));
-        b.AddThemeStyleboxOverride("hover", ActBox(CardPale, 1));
-        b.AddThemeStyleboxOverride("pressed", ActBox(CardSpend, 2));
-        b.AddThemeStyleboxOverride("hover_pressed", ActBox(CardSpend, 2));
-        // spent: the box darker and its rim dim, the key's number grey
-        StyleBoxFlat off = ActBox(SlotDim, 1);
-        off.BgColor = new Color(0.17f, 0.18f, 0.15f, 0.9f);
-        b.AddThemeStyleboxOverride("disabled", off);
-        b.AddThemeColorOverride("font_pressed_color", CardSpend);
-        b.AddThemeColorOverride("font_hover_pressed_color", CardSpend);
-        b.AddThemeColorOverride("font_disabled_color", SlotDim);
+        ActStyle(b, 1);
         b.Pressed += pressed;
         row.AddChild(b);
         if (b.Icon is not null)

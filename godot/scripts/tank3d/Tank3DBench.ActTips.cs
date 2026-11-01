@@ -28,13 +28,15 @@ public sealed partial class Tank3DBench
     private const float TipLeg = 30.0f, TipRise = 16.0f;
 
     /// <summary>A button's card: its icon's name (the text's key), the act's
-    /// name, its group.</summary>
+    /// name, its group - none for the corner's buttons (<see cref="TurnTipHook"/>),
+    /// which carry their key here.</summary>
     private sealed class ActTip
     {
         public required Button Button;
         public required string Icon;
         public required string Name;
-        public required GroupArt Group;
+        public GroupArt? Group;
+        public string Key = "";
     }
 
     /// <summary>Each group's art by its row of buttons (<see cref="Group"/>).</summary>
@@ -84,6 +86,35 @@ public sealed partial class Tank3DBench
         ["repair"] = "Свой подбитый танк рядом снова в бою.",
         ["winch"] = $"Танк в {Battle.WinchReach} гексах по оси подтягивается на гекс ближе — со всем, что этот гекс с ним сделает.",
         ["douse"] = "Потушить пожар на своём корпусе. Тратит доп. действие, выстрел остаётся.",
+        // the corner's buttons (TurnTipHook)
+        ["endturn"] = "Передать ход другой стороне. Чего юнит не сделал в этом ходу, то пропадает. "
+                      + "Если приказ ждёт подтверждения — клетка выбрана, ось засады наведена, — Enter сперва его подтверждает.",
+        ["ready"] = "Расстановка закончена: экран уходит другой стороне, а после её «В бой» начинается первый раунд.",
+        ["undo"] = "Вернуть юнит туда, откуда он поехал, с тем же курсом, — ход можно сделать заново. "
+                   + "Только пока после хода ничего не сделано и юнит цел. Ctrl+Backspace — партия заново.",
+    };
+
+    /// <summary>A corner button's card (Tank3DBench.Undo, Match): no group, the
+    /// card to the left of the button, its key given.</summary>
+    private void TurnTipHook(Button b, string icon, string key)
+    {
+        _actTips.Add(new ActTip { Button = b, Icon = icon, Name = icon, Key = key });
+        b.MouseEntered += () => _tipOver = b;
+        b.MouseExited += () =>
+        {
+            if (_tipOver == b)
+                _tipOver = null;
+        };
+    }
+
+    /// <summary>The name and text a card says: «Конец хода» is «В бой» in
+    /// placement.</summary>
+    private (string Name, string TextKey) TipWords(ActTip tip) => tip.Icon switch
+    {
+        "endturn" when Deploying => ("В бой", "ready"),
+        "endturn" => ("Конец хода", "endturn"),
+        "undo" => ("Отменить ход", "undo"),
+        _ => (tip.Name, tip.Icon),
     };
 
     private void BuildActTip(CanvasLayer layer)
@@ -123,7 +154,7 @@ public sealed partial class Tank3DBench
                 break;
             }
         }
-        if (tip is null || !_acts.Visible || !tip.Button.IsVisibleInTree())
+        if (tip is null || (tip.Group is not null && !_acts.Visible) || !tip.Button.IsVisibleInTree())
         {
             _tipShown = null;
             _tipWait = _tipUp = 0.0f;
@@ -141,6 +172,7 @@ public sealed partial class Tank3DBench
         {
             _tipWasOff = tip.Button.Disabled;
             _tipWhy = !_tipWasOff ? ""
+                : tip.Group is null ? (tip.Icon == "undo" ? UndoWhy() : "партия окончена")
                 : tip.Group.Shape == GroupShape.Diamond ? MatchMoveWhy()
                 : tip.Group.Shape == GroupShape.Circle ? MatchShotWhy(CellHere) is { Length: > 0 } s ? s : "атака этого хода уже сделана"
                 : "доп. действие этого хода уже сделано";
@@ -168,42 +200,66 @@ public sealed partial class Tank3DBench
         if (_actTip is not { } c || _peekBox is null || _tipShown is not { } tip)
             return;
         Font font = ThemeDB.FallbackFont;
-        string text = ActText.TryGetValue(tip.Icon, out string? t) ? t : "";
+        (string name, string textKey) = TipWords(tip);
+        string text = ActText.TryGetValue(textKey, out string? t) ? t : "";
         const float pad = 14.0f;
         float textW = TipW - 2.0f * pad;
         float textH = text.Length > 0 ? font.GetMultilineStringSize(text, HorizontalAlignment.Left, textW, 13).Y : 0.0f;
         float whyH = _tipWhy.Length > 0 ? font.GetMultilineStringSize(_tipWhy, HorizontalAlignment.Left, textW, 13).Y + 8.0f : 0.0f;
-        float h = 78.0f + textH + whyH + 10.0f;
+        // a corner button's card has no type line
+        float head = tip.Group is null ? 58.0f : 78.0f;
+        float h = head + textH + whyH + 10.0f;
 
-        // The leader, as the unit card's (PeekLeader): a dot on the icon's top
-        // right, a slant up and right past the frame - clear of the group's
-        // mark, which stands over the frame's middle - then straight up into
-        // the card, which stands over the knee, held on the screen.
         Rect2 b = tip.Button.GetGlobalRect();
-        var foot = new Vector2(b.End.X - 9.0f, b.Position.Y + 9.0f);
-        Vector2 knee = foot + new Vector2(TipLeg, -TipLeg);
-        float left = Mathf.Clamp(knee.X - TipW * 0.5f, 8.0f, Mathf.Max(8.0f, c.Size.X - TipW - 8.0f));
-        float top = Mathf.Max(8.0f, knee.Y - TipRise - h);
-        var box = new Rect2(left, top, TipW, h);
-        PeekLeader(c, foot, knee, new Vector2(knee.X, box.End.Y));
-        c.DrawStyleBox(_peekBox, box);
-        // the group's colour down the edge, as the side's on the unit's card
-        c.DrawRect(new Rect2(left + 1.0f, top + 8.0f, 3.0f, h - 16.0f), tip.Group.Ink);
+        float left, top;
+        if (tip.Group is { } group)
+        {
+            // The leader, as the unit card's (PeekLeader): a dot on the icon's top
+            // right, a slant up and right past the frame - clear of the group's
+            // mark, which stands over the frame's middle - then straight up into
+            // the card, which stands over the knee, held on the screen.
+            var foot = new Vector2(b.End.X - 9.0f, b.Position.Y + 9.0f);
+            Vector2 knee = foot + new Vector2(TipLeg, -TipLeg);
+            left = Mathf.Clamp(knee.X - TipW * 0.5f, 8.0f, Mathf.Max(8.0f, c.Size.X - TipW - 8.0f));
+            top = Mathf.Max(8.0f, knee.Y - TipRise - h);
+            PeekLeader(c, foot, knee, new Vector2(knee.X, top + h));
+            c.DrawStyleBox(_peekBox, new Rect2(left, top, TipW, h));
+            // the group's colour down the edge, as the side's on the unit's card
+            c.DrawRect(new Rect2(left + 1.0f, top + 8.0f, 3.0f, h - 16.0f), group.Ink);
+        }
+        else
+        {
+            // in the corner: the card over the button, its right edge on the
+            // button's - to the left the other button stands - the leader
+            // straight up out of the button's top
+            left = Mathf.Max(8.0f, b.End.X - TipW);
+            top = Mathf.Max(8.0f, b.Position.Y - TipRise - h);
+            float x0 = b.Position.X + b.Size.X * 0.5f;
+            var foot = new Vector2(x0, b.Position.Y + 6.0f);
+            PeekLeader(c, foot, new Vector2(x0, b.Position.Y - TipRise * 0.5f), new Vector2(x0, top + h));
+            c.DrawStyleBox(_peekBox, new Rect2(left, top, TipW, h));
+        }
 
         // the name, and the key on the right
-        c.DrawString(font, new Vector2(left + pad, top + 28.0f), tip.Name, HorizontalAlignment.Left, -1, 20, CardPale);
-        string key = ActKeyOf(tip.Button);
+        c.DrawString(font, new Vector2(left + pad, top + 28.0f), name, HorizontalAlignment.Left, -1, 20, CardPale);
+        string key = tip.Group is null ? tip.Key : ActKeyOf(tip.Button);
         if (key.Length > 0)
-            c.DrawString(font, new Vector2(left + TipW - pad - 80.0f, top + 26.0f), $"клавиша {key}",
-                         HorizontalAlignment.Right, 80.0f, 13, CardDim);
-        // the type: the group's shape and name in its colour
-        MarkAt(c, new Vector2(left + pad + 6.0f, top + 48.0f), tip.Group.Shape, tip.Group.Ink, true, 5.5f);
-        c.DrawString(font, new Vector2(left + pad + 18.0f, top + 53.0f), GroupName(tip.Group.Shape),
-                     HorizontalAlignment.Left, -1, 13, tip.Group.Ink);
-        c.DrawLine(new Vector2(left + 12.0f, top + 64.0f), new Vector2(left + TipW - 12.0f, top + 64.0f),
+        {
+            string says = $"клавиша {key}";
+            float w = font.GetStringSize(says, HorizontalAlignment.Left, -1, 13).X;
+            c.DrawString(font, new Vector2(left + TipW - pad - w, top + 26.0f), says, HorizontalAlignment.Left, -1, 13, CardDim);
+        }
+        float y = top + head;
+        if (tip.Group is { } g)
+        {
+            // the type: the group's shape and name in its colour
+            MarkAt(c, new Vector2(left + pad + 6.0f, top + 48.0f), g.Shape, g.Ink, true, 5.5f);
+            c.DrawString(font, new Vector2(left + pad + 18.0f, top + 53.0f), GroupName(g.Shape),
+                         HorizontalAlignment.Left, -1, 13, g.Ink);
+        }
+        c.DrawLine(new Vector2(left + 12.0f, y - 18.0f), new Vector2(left + TipW - 12.0f, y - 18.0f),
                    new Color(0.34f, 0.35f, 0.31f), 1.0f);
         // what it does; why it is grey
-        float y = top + 82.0f;
         if (text.Length > 0)
             c.DrawMultilineString(font, new Vector2(left + pad, y), text, HorizontalAlignment.Left, textW, 13, -1, CardPale);
         if (_tipWhy.Length > 0)

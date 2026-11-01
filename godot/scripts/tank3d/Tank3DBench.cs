@@ -2559,12 +2559,16 @@ public sealed partial class Tank3DBench : Node3D
                 // old sixty degrees an order
                 case Key.A: if (_lockCell is not null) FaceStep(left: true); else if (_chosen && (_spinOpen || SpinMay)) SpinStep(left: true); else if (_chosen) OrderTurn(left: true); return;
                 case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen && (_spinOpen || SpinMay)) SpinStep(left: false); else if (_chosen) OrderTurn(left: false); return;
-                // Ctrl+Enter in a match: the turn handed over (Tank3DBench.Match)
+                // Enter: an order waiting to be confirmed goes - the ambush's
+                // axis, the rose's pick, the fixed cell; with none, in a match,
+                // the turn handed over (the author's note, 2026-11-01; Ctrl+Enter
+                // hands it over always, as before)
                 case Key.Enter or Key.KpEnter:
                     if (Match && order.CtrlPressed) PassByHand();
                     else if (AmbushConfirm()) { }
                     else if (_spinOpen && _spinPick is int pick) SpinTo(pick);
-                    else Confirm();
+                    else if (_lockCell is not null) Confirm();
+                    else if (Match) PassByHand();
                     return;
                 // the fixed cell let go; an order in hand dropped; with none,
                 // the tank let go
@@ -2617,15 +2621,16 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
             return;
-        // Ctrl+Z in a match: the move taken back (Tank3DBench.Undo)
-        if (Match && key.Keycode == Key.Z && key.CtrlPressed)
+        // Backspace (and Ctrl+Z) in a match: the move taken back
+        // (Tank3DBench.Undo; the author's note, 2026-11-01)
+        if (Match && (key.Keycode == Key.Z ? key.CtrlPressed : key.Keycode == Key.Backspace && !key.CtrlPressed))
         {
             Execute(new Command(CommandKind.Undo));
             return;
         }
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
         // A match plays by the rules: the bench's keys that fire, strike, burn,
-        // knock out or reset the tank on the rig past them are off - Backspace
+        // knock out or reset the tank on the rig past them are off - Ctrl+Backspace
         // restarts the whole match instead (Tank3DBench.Match).
         if (Match && key.Keycode is Key.Space or (>= Key.Key1 and <= Key.Key9)
                 or Key.J or Key.K or Key.X or Key.T or Key.Backspace

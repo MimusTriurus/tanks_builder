@@ -20,7 +20,7 @@ namespace TankSpriteTest;
 /// homes' cells.</item>
 /// <item><b>The mouse.</b> The left button on an own tank takes it, on a cell
 /// of the zone sets the taken one there; the right button turns it toward the
-/// cell. Ctrl+Enter or the button - «В бой».</item>
+/// cell. Enter or the button - «В бой».</item>
 /// <item><b>The commands</b> (<c>Tank3DBench.Commands</c>):
 /// <c>place:ID:Q,R[:SIDE]</c> and <c>ready</c>; a pass is «В бой» too.</item>
 /// </list>
@@ -190,8 +190,6 @@ public sealed partial class Tank3DBench
         // straight down on the board, the side's own edge at the bottom of
         // the screen (the author's note, 2026-11-01) - at once, behind the curtain
         DeployLookDown(side);
-        if (_passButton is not null)
-            _passButton.Text = "В бой   Ctrl+Enter";
         // the toss said on the first curtain (Tank3DBench.Match)
         CurtainUp((side == _mt.First && _tossed ? $"Жребий: первыми ходят {SideName(side)}\n\n" : "")
                   + $"Расстановка: {SideName(side)}\n{(side == Side.Green ? "Коричневые" : "Зелёные")} не смотрят\n\nщелчок или Enter — начать");
@@ -369,8 +367,6 @@ public sealed partial class Tank3DBench
         _mt.Turn = _mt.First;
         if (_side != _mt.First && FirstReady(_mt.First) is { } first)
             TakeOver(first);
-        if (_passButton is not null)
-            _passButton.Text = "Конец хода   Ctrl+Enter";
         Banner($"В бой · раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
         // from straight down into the isometric view from the side to move, smoothly
         CameraTurnTo(IsoYawOf(_mt.Turn), Mathf.DegToRad(IsoPitchDeg));
@@ -570,7 +566,8 @@ public sealed partial class Tank3DBench
                 CurtainDown();
             return e is InputEventMouseButton or InputEventKey;
         }
-        if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Enter or Key.KpEnter } enter && enter.CtrlPressed)
+        // Enter, as the turn's end in the battle (with Ctrl, as before)
+        if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Enter or Key.KpEnter })
         {
             Execute(new Command(CommandKind.Ready));
             return true;

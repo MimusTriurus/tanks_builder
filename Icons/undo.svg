@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="clip-path-1">
+      <path d="M0 0 L64 0 L64 64 L0 64 Z"/>
+    </clipPath>
+  </defs>
+  <title>undo_2_circle</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <g id="undo_2_circle.svg" clip-path="url(#clip-path-1)">
+      <path id="r_arc_shadow" d="M33.5 17.5 C24.245 17.516 16.703 24.933 16.532 34.186 C16.361 43.44 23.624 51.13 32.872 51.487 C42.12 51.845 49.956 44.739 50.5 35.5" fill="none" stroke="#16130f" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path id="r_head_shadow" d="M50.5 20.5 L59.5 34.5 L41.5 34.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+      <path id="r_arc_ink" d="M31 15 C21.745 15.016 14.203 22.433 14.032 31.686 C13.861 40.94 21.124 48.63 30.372 48.987 C39.62 49.345 47.456 42.239 48 33" fill="none" stroke="#16130f" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path id="r_head_ink" d="M48 18 L57 32 L39 32 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+      <path id="r_arc" d="M31 15 C21.745 15.016 14.203 22.433 14.032 31.686 C13.861 40.94 21.124 48.63 30.372 48.987 C39.62 49.345 47.456 42.239 48 33" fill="none" stroke="#c9cfd3" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path id="r_head" d="M48 18 L57 32 L39 32 Z" fill="#c9cfd3"/>
+    </g>
+  </g>
+</svg>
