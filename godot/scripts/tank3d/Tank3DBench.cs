@@ -264,6 +264,12 @@ public sealed partial class Tank3DBench : Node3D
             GetTree().Quit(MapFair.Main(OS.GetCmdlineUserArgs()));
             return;
         }
+        // --fire-study: the roof against fire over the hulls (FireStudy)
+        if (FireStudy.Asked(OS.GetCmdlineUserArgs()))
+        {
+            GetTree().Quit(FireStudy.Main(OS.GetCmdlineUserArgs()));
+            return;
+        }
         try
         {
             await Building();
