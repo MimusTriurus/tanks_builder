@@ -1649,6 +1649,25 @@ public sealed partial class Tank3DBench : Node3D
                         if (!ActClick(new Vector2(x, y)))
                             OrderClick(new Vector2(x, y), false);
                 }
+                else if (what.StartsWith("mouse=", StringComparison.Ordinal))
+                {
+                    // mouse=X,Y: a real press and release of the left button at
+                    // that screen pixel, through Input - the GUI first, as the
+                    // hand's own does; tap= goes round it
+                    string[] xy = what[6..].Split(',');
+                    if (xy.Length == 2 && float.TryParse(xy[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
+                        && float.TryParse(xy[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float y))
+                    {
+                        var at = new Vector2(x, y);
+                        GetViewport().WarpMouse(at);
+                        foreach (bool down in new[] { true, false })
+                            Input.ParseInputEvent(new InputEventMouseButton
+                            {
+                                ButtonIndex = MouseButton.Left, Pressed = down, Position = at, GlobalPosition = at,
+                                ButtonMask = down ? MouseButtonMask.Left : 0,
+                            });
+                    }
+                }
                 else if (what.StartsWith("click=", StringComparison.Ordinal))
                 {
                     // click=Q,R: the left button where the camera shows that hex's

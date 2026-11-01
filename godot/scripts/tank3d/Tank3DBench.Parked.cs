@@ -208,6 +208,10 @@ public sealed partial class Tank3DBench
         // the turret and the gun stay where the last shot left them, both ways
         float wasYaw = _model.Yaw, wasElevation = _model.Elevation;
         _parked.Remove(next);
+        // the pointer's standing one is most likely this one, its rig freed
+        // below: TrackIn reads it before UnderTick looks again, and a throw
+        // there left _Process dead each frame after - no take by the mouse
+        _overParked = null;
         _side = next.Side;
         _unitId = next.Id;
         // The models change hands: the standing one goes on to the rig and the
