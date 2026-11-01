@@ -181,6 +181,8 @@ public sealed partial class Tank3DBench
             AmbushZone(mesh);
             // «Дым», «Мина», «Ремонт», «Лебёдка» on: the hexes it may be done on, in amber
             PickZone(mesh);
+            // the placement's zone, as the move's is drawn (Tank3DBench.Deploy)
+            DeployZoneDraw(mesh);
             _courseInk?.QueueRedraw();
             return;
         }

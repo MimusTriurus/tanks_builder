@@ -39,11 +39,7 @@ public sealed partial class Tank3DBench
 
     private Control? _curtain;
     private Label? _curtainSays;
-    private MeshInstance3D? _deployMark, _deployFreeMark;
     private readonly List<Vector2I> _deployCells = new();
-    /// <summary>The zone split each frame: the cells the tank on the rig may
-    /// be set on, and the rest - its own, another's, water, a ramp, rock.</summary>
-    private readonly List<Vector2I> _deployFree = new(), _deployBusy = new();
     /// <summary>The rose's arrow under the pointer: the side the ghost shows
     /// the tank turned to, on its own cell.</summary>
     private int? _deployArrow;
@@ -368,10 +364,6 @@ public sealed partial class Tank3DBench
         CurtainDown();
         DeployShow(null);
         _deployCells.Clear();
-        if (_deployMark is not null)
-            CellMarks(_deployMark, _deployCells, default, default);
-        if (_deployFreeMark is not null)
-            CellMarks(_deployFreeMark, _deployCells, default, default);
         // DeployTick runs no more: what it kept up is put away here
         DeployPanelTick();
         _mt.Turn = _mt.First;
@@ -394,19 +386,6 @@ public sealed partial class Tank3DBench
     {
         if (_field is not null && _tile is not null && !_noUi)
         {
-            _deployMark ??= CellMarker("Deploy");
-            _deployFreeMark ??= CellMarker("DeployFree");
-            Color ink = SideInk(_deploy!.Value);
-            // the cells the tank on the rig may go to lit, the rest of the
-            // zone only rimmed (2026-11-01): where it may stand is seen
-            // before the click, not learnt from a refusal
-            _deployFree.Clear();
-            _deployBusy.Clear();
-            if (!_curtainUp)
-                for (int i = 0; i < _deployCells.Count; i++)
-                    (DeployFree(_deployCells[i]) ? _deployFree : _deployBusy).Add(_deployCells[i]);
-            CellMarks(_deployMark, _deployBusy, new Color(ink, 0.05f), new Color(ink, 0.45f));
-            CellMarks(_deployFreeMark, _deployFree, new Color(ink, 0.26f), new Color(ink, 0.90f));
             DeployDressTick();
             DeployCarryTick();
             DeployGhost();
@@ -414,6 +393,40 @@ public sealed partial class Tank3DBench
         DeployPanelTick();
         PointDraw();
         CommandsTick(busy);
+    }
+
+    /// <summary>
+    /// The zone, from <c>CourseTick</c> as a bonus act's hexes are
+    /// (<c>PickZone</c>): drawn as the move's zone - one rim round the whole
+    /// of it, on the relief stood off the hexes' edges (<c>ZoneGap</c>) - in
+    /// the side's colour (the author's note, 2026-11-01: each hex rimmed on
+    /// its own did not read as one zone). Under the curtain, none.
+    /// </summary>
+    private void DeployZoneDraw(ImmediateMesh mesh)
+    {
+        if (_deploy is not Side side || _curtainUp || _field is null || _tile is null || _deployCells.Count == 0)
+            return;
+        _zoneFill.Clear();
+        _zoneFill.AddRange(_deployCells);
+        Color ink = SideInk(side);
+        if (_relief is not null)
+        {
+            ReliefZoneShow(ink);
+            return;
+        }
+        Vector2[] corner = Corners();
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        var tint = new Color(ink, ZoneTone);
+        foreach (Vector2I cell in _zoneFill)
+            ZoneCell(mesh, tint, cell, corner);
+        ZoneBand(corner, 1);
+        var line = new Color(ink, 0.95f);
+        for (int i = 0; i < _band.Count; i++)
+        {
+            mesh.SurfaceSetColor(line);
+            mesh.SurfaceAddVertex(_band[i]);
+        }
+        mesh.SurfaceEnd();
     }
 
     /// <summary>The ghost, after <c>CourseTick</c> has put it away: on the
