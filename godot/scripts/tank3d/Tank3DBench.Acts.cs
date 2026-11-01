@@ -96,18 +96,18 @@ public sealed partial class Tank3DBench
         {
             Name = "Acts",
             AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 1.0f, AnchorBottom = 1.0f,
-            OffsetTop = -12.0f - 60.0f - 4.0f - KeyRowPx, OffsetBottom = -12.0f,
+            OffsetTop = -12.0f - MarkRowPx - 4.0f - 60.0f - 4.0f - KeyRowPx, OffsetBottom = -12.0f,
             GrowHorizontal = Control.GrowDirection.Both,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Visible = false,
         };
         _acts.AddThemeConstantOverride("separation", 18);
         HBoxContainer move;
-        (_groupMove, move) = Group();
+        (_groupMove, move) = Group(GroupShape.Diamond, MoveInk);
         // the move (2026-11-01): the other modes off, the click the move's
         _actMove = ActButton(move, "move", "Ход", "1", toggle: true, MoveOn);
         HBoxContainer attack;
-        (_groupAttack, attack) = Group();
+        (_groupAttack, attack) = Group(GroupShape.Circle, AttackInk);
         _attackAct = AttackToggle;
         _actAttack = ActButton(attack, "attack", "Атака", "2", toggle: true, _attackAct);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode
@@ -116,7 +116,7 @@ public sealed partial class Tank3DBench
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
         _actFiery = ActButton(attack, "incendiary", "Зажиг.", "", toggle: true, FieryToggle);
         HBoxContainer bonus;
-        (_groupBonus, bonus) = Group();
+        (_groupBonus, bonus) = Group(GroupShape.Triangle, PickInk);
         // a tank or the wall ahead (Д5): a mode, the click says which
         _actRam = BonusButton(bonus, "ram", "Таран", toggle: true, RamToggle);
         // the grenade (Д8, Tank3DBench.Smoke): a mode
@@ -170,13 +170,48 @@ public sealed partial class Tank3DBench
         art.Button.Icon = art.Button.Disabled ? art.Off : art.On;
     }
 
-    /// <summary>A slot's frame: its buttons in a row, and under the frame the
-    /// row their key caps stand in.</summary>
-    private (PanelContainer, HBoxContainer) Group()
+    /// <summary>A group's mark over its frame, as Baldur's Gate 3 marks its
+    /// action, bonus action and the rest (the author's choice, 2026-11-01).</summary>
+    private enum GroupShape { Diamond, Circle, Triangle }
+
+    /// <summary>A group's frame and its mark: the shape, the colour - its zone's
+    /// on the board - and whether its slot is to be had.</summary>
+    private sealed class GroupArt
+    {
+        public required Control Mark;
+        public required GroupShape Shape;
+        public required Color Ink;
+        public bool Open = true;
+    }
+
+    private readonly Dictionary<PanelContainer, GroupArt> _groupArt = new();
+
+    /// <summary>The move's group: the move zone's blue, lighter - its own ink
+    /// is dark for a mark on the panel's black.</summary>
+    private static readonly Color MoveInk = new(0.31f, 0.61f, 0.91f);
+    private static readonly Color MarkLine = new(0.086f, 0.075f, 0.059f);
+    private static readonly Color MarkSpent = new(0.23f, 0.24f, 0.20f);
+    /// <summary>The mark's row over the frames, px; the mark straddles the frame's top edge.</summary>
+    private const float MarkRowPx = 8.0f;
+
+    /// <summary>A slot's frame: its mark over it, its buttons in a row, and
+    /// under the frame the row their key caps stand in.</summary>
+    private (PanelContainer, HBoxContainer) Group(GroupShape shape, Color ink)
     {
         var column = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         column.AddThemeConstantOverride("separation", 4);
+        // the mark: drawn about the frame's top edge, so over the frame (ZIndex)
+        var mark = new Control
+        {
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            CustomMinimumSize = new Vector2(0.0f, MarkRowPx),
+            ZIndex = 1,
+        };
+        column.AddChild(mark);
         var frame = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        var art = new GroupArt { Mark = mark, Shape = shape, Ink = ink };
+        _groupArt[frame] = art;
+        mark.Draw += () => MarkDraw(art);
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         row.AddThemeConstantOverride("separation", 6);
         frame.AddChild(row);
@@ -317,14 +352,49 @@ public sealed partial class Tank3DBench
         return box;
     }
 
-    /// <summary>A group's frame: pale while its slot is to be had, dim once spent.</summary>
-    private static void GroupStyle(PanelContainer frame, bool open)
+    /// <summary>A group's frame: in its colour while its slot is to be had,
+    /// dim once spent; its mark filled, or a hollow grey one.</summary>
+    private void GroupStyle(PanelContainer frame, bool open)
     {
-        StyleBoxFlat box = ActBox(open ? CardPale : SlotDim, open ? 2 : 1);
+        GroupArt art = _groupArt[frame];
+        StyleBoxFlat box = ActBox(open ? art.Ink : SlotDim, open ? 2 : 1);
         box.BgColor = new Color(0.08f, 0.085f, 0.075f, 0.55f);
         box.SetCornerRadiusAll(12);
         box.ContentMarginLeft = box.ContentMarginRight = box.ContentMarginTop = box.ContentMarginBottom = 6.0f;
         frame.AddThemeStyleboxOverride("panel", box);
+        art.Open = open;
+        art.Mark.QueueRedraw();
+    }
+
+    /// <summary>The group's mark, centred on its frame's top edge: the shape in
+    /// the group's colour round a dark rim, as the icons are inked; spent - a
+    /// grey rim round the panel's dark. Allocates only when redrawn - on a
+    /// change of the slot.</summary>
+    private static void MarkDraw(GroupArt art)
+    {
+        Control c = art.Mark;
+        // the frame's top edge: the mark's row, then the column's separation
+        var mid = new Vector2(c.Size.X * 0.5f, c.Size.Y + 4.0f);
+        Color rim = art.Open ? MarkLine : SlotDim, fill = art.Open ? art.Ink : MarkSpent;
+        const float r = 7.5f, ink = 2.5f;
+        if (art.Shape == GroupShape.Circle)
+        {
+            c.DrawCircle(mid, r + ink, rim, true, -1.0f, true);
+            c.DrawCircle(mid, r, fill, true, -1.0f, true);
+            return;
+        }
+        Vector2[] unit = art.Shape == GroupShape.Diamond
+            ? new[] { new Vector2(0.0f, -1.15f), new Vector2(1.15f, 0.0f), new Vector2(0.0f, 1.15f), new Vector2(-1.15f, 0.0f) }
+            : new[] { new Vector2(0.0f, -1.2f), new Vector2(1.15f, 0.85f), new Vector2(-1.15f, 0.85f) };
+        var outer = new Vector2[unit.Length];
+        var inner = new Vector2[unit.Length];
+        for (int i = 0; i < unit.Length; i++)
+        {
+            outer[i] = mid + unit[i] * (r + ink * 1.6f);
+            inner[i] = mid + unit[i] * r;
+        }
+        c.DrawColoredPolygon(outer, rim);
+        c.DrawColoredPolygon(inner, fill);
     }
 
     /// <summary>«Атака» on or off: on, the left button on a tank fires, and an
