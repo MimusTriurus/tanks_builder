@@ -595,6 +595,12 @@ public sealed partial class Tank3DBench
             at = Centre(o);
         else if (_overParked is { } p)
             at = p.Rig.GlobalPosition + Vector3.Up * (0.45f * p.Model.Size.Y * p.Model.PixelsPerUnit);
+        // «Атака» on (the author's note, 2026-11-01): after the pointer over
+        // the board, wherever it is - not over the own hull, where the bearing
+        // spins
+        else if (AttackZoneOn && PickAt(GetViewport().GetMousePosition()) is (var point, false, false)
+                 && Flat(point - _rig.GlobalPosition).Length() > 0.5f * HexWidth)
+            at = point;
         else
             return 0.0f;
         float yaw = BoreOff(_model, _rig, at);

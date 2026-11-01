@@ -277,13 +277,105 @@ public sealed partial class Tank3DBench
             return;
         }
         _attackMode = !_attackMode;
+        // the zone searched afresh each time the mode comes on
+        _attackFound = false;
         if (_attackMode)
         {
             _ramMode = _smokeMode = _ambushMode = false;
             _ambushPick = null;
             _gearMode = Gear.None;
+            // a cell the player fixed for the move is let go: the click is the
+            // attack's now (the bench's firing post is its own, Tank3DBench.Post)
+            if (!_postLock)
+                Unlock();
         }
         _orderNote = _attackMode ? "атака: щёлкни по танку, свой тоже" : "атака выключена";
+    }
+
+    // --- the attack's zone ----------------------------------------------------------
+
+    /// <summary>The attack's zone ink: orange - between the ambush's red and the bonus acts' amber.</summary>
+    private static readonly Color AttackInk = new(1.0f, 0.47f, 0.12f);
+    private readonly List<Vector2I> _attackCells = new();
+    private (Vector2I Here, int Reach, int Smoke, int Unit) _attackKey;
+    private bool _attackFound;
+
+    /// <summary>«Атака» on in a match: the move's zone gives way to this one
+    /// (the author's note, 2026-11-01). The firing post stays - a target off
+    /// the axes still shows its way and ghost (Tank3DBench.Post).</summary>
+    private bool AttackZoneOn => _attackMode && Match && !MatchShotSpent;
+
+    /// <summary>
+    /// With «Атака» on, in place of the move's zone, drawn as it is but
+    /// orange: the hexes the gun may fire at from where it stands - every axis
+    /// out of the own hex, each hex asked of the rules the shot is
+    /// (<see cref="ShotWhy"/>'s: the distance's gates, <see cref="LaneShut"/>,
+    /// a wall on the axis), an axis given up past the first hex its lane is
+    /// shut before. Searched again when the hex, the board's tanks, the smoke
+    /// or the unit change, not every frame.
+    /// </summary>
+    private void AttackZone(ImmediateMesh mesh)
+    {
+        var key = (CellHere, _reachVersion, _smokeLeft.Count, _unitId);
+        if (!_attackFound || key != _attackKey)
+        {
+            _attackKey = key;
+            _attackFound = true;
+            AttackCells();
+        }
+        _zoneFill.Clear();
+        _zoneFill.AddRange(_attackCells);
+        // on the relief as the move's zone is: off the hexes' edges
+        if (_relief is not null)
+        {
+            ReliefZoneShow(AttackInk);
+            return;
+        }
+        if (_attackCells.Count == 0)
+            return;
+        Vector2[] corner = Corners();
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        var tint = new Color(AttackInk, ZoneTone);
+        foreach (Vector2I cell in _zoneFill)
+            ZoneCell(mesh, tint, cell, corner);
+        ZoneBand(corner, 1);
+        var line = new Color(AttackInk, 0.95f);
+        for (int i = 0; i < _band.Count; i++)
+        {
+            mesh.SurfaceSetColor(line);
+            mesh.SurfaceAddVertex(_band[i]);
+        }
+        mesh.SurfaceEnd();
+    }
+
+    private void AttackCells()
+    {
+        _attackCells.Clear();
+        if (_field is null)
+            return;
+        Vector2I here = CellHere;
+        foreach (int axis in HexField.EdgeHeadings)
+        {
+            Vector2I at = here;
+            for (int k = 1; k <= 32; k++)
+            {
+                Vector2I next = HexField.Step(at, axis);
+                if (next == at || !_field.InBounds(next))
+                    break;
+                // a gun's round goes into a standing wall on the axis (a
+                // destroyer's through its first brick one); the bomb goes over
+                if (!_profile.Lobs && WallOnAxis(here, axis, k, passOne: WallPass(here, next)) is not null)
+                    break;
+                bool tank = UnitOn(next) is not null;
+                string shut = LaneShut(here, next, out Vector2I? stop);
+                if (shut.Length > 0 && stop != next)
+                    break;
+                if (shut.Length == 0 && Gunnery.MayTarget(_profile.Lobs, k, tank) == Gunnery.Distance.Fits)
+                    _attackCells.Add(next);
+                at = next;
+            }
+        }
+        Log.Print($"tank3d: attack zone from {MapAt(here)}: {_attackCells.Count} hexes");
     }
 
     /// <summary>«Ход»: every mode that takes the left button put off - the

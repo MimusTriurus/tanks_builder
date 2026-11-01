@@ -215,7 +215,17 @@ public sealed partial class Tank3DBench
             }
         }
         Vector2 mouse = GetViewport().GetMousePosition();
-        if (_lockCell is null && (fresh || mouse != _hoverMouse))
+        // «Атака» on: no way under the pointer - a click on a hex is no move
+        // there; the firing post's fixed cell still has its way (Tank3DBench.Post)
+        bool attack = AttackZoneOn;
+        if (attack && _lockCell is null)
+        {
+            _hoverCell = null;
+            _ways.Clear();
+            // the way under the pointer found again once the mode is off
+            _hoverMouse = new Vector2(float.NaN, float.NaN);
+        }
+        else if (_lockCell is null && (fresh || mouse != _hoverMouse))
         {
             _hoverMouse = mouse;
             Vector2I? cell = _hoverFixed;
@@ -233,14 +243,17 @@ public sealed partial class Tank3DBench
             }
         }
 
-        if (_relief is not null)
+        // «Атака» on: the hexes the gun reaches from here in place of the move's (Tank3DBench.Acts)
+        if (attack)
+            AttackZone(mesh);
+        else if (_relief is not null)
             ReliefZone(_reach!);
         // an empty surface is an engine error: on the relief the zone is
         // its own mesh, and with no way shown there is nothing here
-        if (_relief is null || _ways.Count > 0)
+        if ((_relief is null && !attack) || _ways.Count > 0)
         {
             mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-            if (_relief is null)
+            if (_relief is null && !attack)
                 Zone(mesh, _reach!);
             if (_ways.Count > 0)
                 Ribbon(mesh, _ways[_wayIx % _ways.Count]);
@@ -270,6 +283,8 @@ public sealed partial class Tank3DBench
             else
                 _courseNote = $"путь {shown.Spent} из {_reach!.Budget}{tab}; щелчок — выбрать клетку";
         }
+        else if (attack)
+            _courseNote = $"атака с места: гексов на осях огня {_attackCells.Count}; цель вне осей — наведи, покажет позицию";
         else
             _courseNote = $"{_reach!.Budget} шагов, клеток в досягаемости {_reach.Cells.Count}";
         // where and with which plate the enemy's ambushes meet it (Tank3DBench.Ambush)
