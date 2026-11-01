@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>concrete_4_hex</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="c1_shadow" data-name="c1 shadow" d="M17.123 41.447 L36.582 21.988 C40.231 18.339 45.4 17.427 47.833 18.643 L49.657 20.467 C50.873 22.9 49.961 28.069 46.312 31.718 L26.853 51.177 L24.42 51.177 L17.123 43.88 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="c4_left_shadow" data-name="c4 left shadow" d="M23.37 15.896 L18.821 15.896 L7.654 35.252 L18.821 54.608 L36.606 54.608 L34.951 49.314 L28.334 45.178 L31.642 38.561 L27.506 33.598 L21.716 26.98 L25.852 21.19 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="c4_right_shadow" data-name="c4 right shadow" d="M32.394 14.392 L50.179 14.392 L61.346 33.748 L50.179 53.104 L45.63 53.104 L43.975 47.81 L37.358 43.674 L40.666 37.057 L36.53 32.094 L30.74 25.476 L34.876 19.686 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="c4_left_ink" data-name="c4 left ink" d="M20.87 13.396 L16.321 13.396 L5.154 32.752 L16.321 52.108 L34.106 52.108 L32.451 46.814 L25.834 42.678 L29.142 36.061 L25.006 31.098 L19.216 24.48 L23.352 18.69 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="c4_right_ink" data-name="c4 right ink" d="M29.894 11.892 L47.679 11.892 L58.846 31.248 L47.679 50.604 L43.13 50.604 L41.475 45.31 L34.858 41.174 L38.166 34.557 L34.03 29.594 L28.24 22.976 L32.376 17.186 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="c4_left" data-name="c4 left" d="M20.87 13.396 L16.321 13.396 L5.154 32.752 L16.321 52.108 L34.106 52.108 L32.451 46.814 L25.834 42.678 L29.142 36.061 L25.006 31.098 L19.216 24.48 L23.352 18.69 Z" fill="#9a958c"/>
+    <path id="c4_right" data-name="c4 right" d="M29.894 11.892 L47.679 11.892 L58.846 31.248 L47.679 50.604 L43.13 50.604 L41.475 45.31 L34.858 41.174 L38.166 34.557 L34.03 29.594 L28.24 22.976 L32.376 17.186 Z" fill="#9a958c"/>
+    <path id="c1_ink" data-name="c1 ink" d="M14.973 39.297 L34.432 19.838 C38.081 16.189 43.25 15.277 45.683 16.493 L47.507 18.317 C48.723 20.75 47.811 25.919 44.162 29.568 L24.703 49.027 L22.27 49.027 L14.973 41.73 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="c1_body" data-name="c1 body" d="M14.973 39.297 L34.432 19.838 C38.081 16.189 43.25 15.277 45.683 16.493 L47.507 18.317 C48.723 20.75 47.811 25.919 44.162 29.568 L24.703 49.027 L22.27 49.027 L14.973 41.73 Z" fill="#6b7550"/>
+    <path id="c1_nose" data-name="c1 nose" d="M35.77 18.743 C39.176 16.067 43.554 15.581 45.683 16.493 L47.507 18.317 C48.419 20.446 47.933 24.824 45.257 28.23 Z" fill="#4a5054"/>
+    <path id="c1_band" data-name="c1 band" d="M17.405 36.865 L20.142 34.128 L29.872 43.858 L27.135 46.595 Z" fill="#ffb02e"/>
+    <path id="c1_seams" data-name="c1 seams" d="M36.014 18.986 L45.014 27.986 M17.77 37.23 L26.77 46.23 M20.507 34.493 L29.507 43.493" fill="none" stroke="#16130f" stroke-width="1.4" stroke-miterlimit="10"/>
+    <path id="c1_body_lit" data-name="c1 body lit" d="M23.304 34.858 L36.074 22.088 M17.405 41.122 L18.622 39.905" fill="none" stroke="#a7b07f" stroke-width="1.6" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="c1_nose_lit" data-name="c1 nose lit" d="M38.568 19.108 C40.878 17.77 43.068 17.284 44.71 17.588" fill="none" stroke="#8e969b" stroke-width="1.6" stroke-linecap="round" stroke-miterlimit="10"/>
+  </g>
+</svg>

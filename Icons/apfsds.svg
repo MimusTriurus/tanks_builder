@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>apfsds_3_sabot</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="a3_shadow" data-name="a3 shadow" d="M52.885 16.115 L45.389 19.934 L25.59 39.733 L11.873 40.157 L8.337 43.692 L16.752 48.571 L20.429 52.248 L25.308 60.663 L28.843 57.127 L29.267 43.41 L49.066 23.611 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="a3_petal_up_shadow" data-name="a3 petal up shadow" d="M28.277 33.934 L38.475 17.858 L35.077 15.389 L26.055 29.848 Z" fill="#16130f" stroke="#16130f" stroke-width="4" stroke-linejoin="round"/>
+    <path id="a3_petal_dn_shadow" data-name="a3 petal dn shadow" d="M35.066 40.723 L51.142 30.525 L53.611 33.923 L39.152 42.945 Z" fill="#16130f" stroke="#16130f" stroke-width="4" stroke-linejoin="round"/>
+    <path id="a3_petal_up_ink" data-name="a3 petal up ink" d="M25.777 31.434 L35.975 15.358 L32.577 12.889 L23.555 27.348 Z" fill="#16130f" stroke="#16130f" stroke-width="4" stroke-linejoin="round"/>
+    <path id="a3_petal_dn_ink" data-name="a3 petal dn ink" d="M32.566 38.223 L48.642 28.025 L51.111 31.423 L36.652 40.445 Z" fill="#16130f" stroke="#16130f" stroke-width="4" stroke-linejoin="round"/>
+    <path id="a3_petal_up" data-name="a3 petal up" d="M25.777 31.434 L35.975 15.358 L32.577 12.889 L23.555 27.348 Z" fill="#8a9a5b"/>
+    <path id="a3_petal_dn" data-name="a3 petal dn" d="M32.566 38.223 L48.642 28.025 L51.111 31.423 L36.652 40.445 Z" fill="#8a9a5b"/>
+    <path id="a3_ink" data-name="a3 ink" d="M50.385 13.615 L42.889 17.434 L23.09 37.233 L9.373 37.657 L5.837 41.192 L14.252 46.071 L17.929 49.748 L22.808 58.163 L26.343 54.627 L26.767 40.91 L46.566 21.111 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="a3_rod" data-name="a3 rod" d="M50.385 13.615 L42.889 17.434 L23.09 37.233 L9.373 37.657 L5.837 41.192 L14.252 46.071 L17.929 49.748 L22.808 58.163 L26.343 54.627 L26.767 40.91 L46.566 21.111 Z" fill="#aeb4b8"/>
+    <path id="a3_fins" data-name="a3 fins" d="M23.09 37.233 L9.373 37.657 L5.837 41.192 L14.252 46.071 Z M26.767 40.91 L26.343 54.627 L22.808 58.163 L17.929 49.748 Z" fill="#ffb02e"/>
+    <path id="a3_fin_mid" data-name="a3 fin mid" d="M16.444 47.556 L24.222 39.778" fill="none" stroke="#16130f" stroke-width="1.4" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="a3_nose" data-name="a3 nose" d="M50.385 13.615 L42.889 17.434 L46.566 21.111 Z" fill="#e3e7e9"/>
+    <path id="a3_lit" data-name="a3 lit" d="M25.495 36.808 L43.172 19.131" fill="none" stroke="#e3e7e9" stroke-width="1.3" stroke-linecap="round" stroke-miterlimit="10"/>
+  </g>
+</svg>
