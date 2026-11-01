@@ -490,7 +490,7 @@ public sealed partial class Tank3DBench
         _smokeMode = false;
         _fieryMode = _fiery = false;
         _gearMode = Gear.None;
-        _ambushMode = false;
+        _ambushMode = _attackMode = false;
         _ambushPick = null;
         _matchNote = "";
         CancelOrder();
@@ -679,12 +679,14 @@ public sealed partial class Tank3DBench
     /// протаранить"). The line of fire, the ram's and the blast's previews
     /// come up on an own unit as on an enemy, and the right button fires at
     /// it or rams it; the left one still takes it (<c>OrderClick</c>). It
-    /// used to want Ctrl held (2026-10-28) and wants nothing now
-    /// (2026-10-29, the author's note). True when it now is the target.
+    /// used to want Ctrl held (2026-10-28), then nothing (2026-10-29); now
+    /// an own unit is a target only with «Атака» or the ram on - by default
+    /// ours are not fired on (the author's note, 2026-10-31; Tank3DBench.Acts).
+    /// True when it now is the target.
     /// </summary>
     private bool MatchAims(Parked p)
     {
-        if (!Match || p.Fate == Fate.Destroyed)
+        if (!Match || p.Fate == Fate.Destroyed || p.Side == _side && !_attackMode && !_ramMode)
             return false;
         MakeTarget(p);
         return _other is { } o && ReferenceEquals(o.Model, p.Model);
@@ -1145,6 +1147,6 @@ public sealed partial class Tank3DBench
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "")
         + (!_hints ? "   F9 — подсказки"
             : "\n" + Roll() + "\n"
-              + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран   «Засада» — ЛКМ по гексу оси (MT: и по соседней)   F1–F5, 1–5 — танк ростера\n"
+              + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   1 «Атака» — ЛКМ по танку, свой тоже   2 «Засада» — ЛКМ по гексу оси (MT: и по соседней)   3… доп. действия, Tab — таран, J — тушить   F1–F8 — танк ростера\n"
               + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Ctrl+Z — отменить ход   Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F10 — замер кадра   F9 — скрыть");
 }

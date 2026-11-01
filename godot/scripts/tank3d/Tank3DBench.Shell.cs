@@ -108,6 +108,8 @@ public sealed partial class Tank3DBench
         MatchFired();
         // the incendiary round (Tank3DBench.Incendiary)
         bool fiery = FieryLaunch();
+        // «Атака» is spent with the round (Tank3DBench.Acts)
+        _attackMode = false;
         if (_shadowAim is Vector2I aim)
             ShadowAct($"fire{(fiery ? " incendiary" : "")} at {MapAt(aim)}", s => Battle.Fire(s, aim, fiery));
         // a destroyer's round laid past a hull goes through it (HullPass)
@@ -609,6 +611,12 @@ public sealed partial class Tank3DBench
         Vector2I cell = onTank && _other is { } t ? OtherCell(t) : _field.FlatCellAt(Board(point));
         if (_rules)
         {
+            // ours are fired on only with «Атака» chosen (Tank3DBench.Acts)
+            if (Match && !_attackMode && !_ramMode && FriendOn(cell))
+            {
+                _orderNote = "по своему — только через «Атака» (1)";
+                return;
+            }
             // the ram, when its preview is up (Tank3DBench.RamPlan)
             if (!RamOrder(cell))
                 ShotOrder(cell);

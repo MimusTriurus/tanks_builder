@@ -1698,7 +1698,7 @@ public sealed partial class Tank3DBench : Node3D
                     _spinHeld = (int)F(what[11..], 90);
                 else if (what.StartsWith("spin-to=", StringComparison.Ordinal))
                     SpinTo((int)F(what[8..], 90));
-                // act=ram|ambush|smoke|fiery|mine|repair|winch|off: the action panel's modes (Tank3DBench.Acts)
+                // act=attack|ram|ambush|smoke|fiery|mine|repair|winch|off: the action panel's modes (Tank3DBench.Acts)
                 else if (what.StartsWith("act=", StringComparison.Ordinal))
                 {
                     Gear gear = what[4..] switch { "mine" => Gear.Mine, "repair" => Gear.Repair, "winch" => Gear.Winch, _ => Gear.None };
@@ -1712,6 +1712,8 @@ public sealed partial class Tank3DBench : Node3D
                         AmbushToggle();
                     if ((what[4..] == "smoke") != _smokeMode)
                         SmokeToggle();
+                    if ((what[4..] == "attack") != _attackMode)
+                        AttackToggle();
                 }
                 // cmd=KIND[:Q,R][:SIDE]: a command, as the AI will give it (Tank3DBench.Commands)
                 else if (what.StartsWith("cmd=", StringComparison.Ordinal))
@@ -2429,6 +2431,7 @@ public sealed partial class Tank3DBench : Node3D
                 case Key.Escape:
                     // the ram (Tank3DBench.RamPlan) off first
                     if (_spinPick is not null || _spinPinned) SpinLetGo();
+                    else if (_attackMode) AttackToggle();
                     else if (_ambushMode) AmbushToggle();
                     else if (_smokeMode) SmokeToggle();
                     else if (_fieryMode) FieryToggle();
@@ -2470,7 +2473,7 @@ public sealed partial class Tank3DBench : Node3D
         // A match plays by the rules: the bench's keys that fire, strike, burn,
         // knock out or reset the tank on the rig past them are off - Backspace
         // restarts the whole match instead (Tank3DBench.Match).
-        if (Match && key.Keycode is Key.Space or Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5
+        if (Match && key.Keycode is Key.Space or (>= Key.Key1 and <= Key.Key9)
                 or Key.J or Key.K or Key.X or Key.T or Key.Backspace
                 or (>= Key.F1 and <= Key.F8))
         {
@@ -2479,7 +2482,7 @@ public sealed partial class Tank3DBench : Node3D
             // J, the bench's fire, puts the unit's fire out (Tank3DBench.Blast)
             else if (key.Keycode == Key.J)
                 Execute(new Command(CommandKind.Douse));
-            // 1 to 5, the bench's hits, and F1 to F8 take the roster's units
+            // 1 to 9, the bench's hits, press the action panel's buttons and F1 to F8 take the roster's units
             // (Tank3DBench.Acts); the hints, the overlay and Edit move to F9-F11
             else
                 ActKey(key.Keycode);

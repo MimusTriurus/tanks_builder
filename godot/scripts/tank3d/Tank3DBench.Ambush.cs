@@ -497,7 +497,7 @@ public sealed partial class Tank3DBench
         if (_ambushMode)
             _gearMode = Gear.None;
         if (_ambushMode)
-            _ramMode = false;
+            _ramMode = _attackMode = false;
         _orderNote = !_ambushMode ? "засада выключена"
             : _profile.WatchesSector ? "засада: наведи на ось и щёлкни, затем соседнюю — сектор, или ту же — одна ось"
             : _profile.Turreted ? "засада: наведи на ось и щёлкни"

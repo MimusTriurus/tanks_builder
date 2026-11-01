@@ -14,28 +14,34 @@ namespace TankSpriteTest;
 /// <c>UnderTick</c>) - the right button there is the shot. In a match its
 /// colour says whether there is one (the author's note, 2026-10-30): red on
 /// an enemy the chosen tank can shoot, from here or after its move, orange
-/// on one of ours it can - friendly fire - and grey on any it cannot: out of
-/// reach (<c>_inReach</c>, the same reading as the red or grey outline), the
-/// attack spent, or no tank chosen. Outside a match, red.</item>
-/// <item>The system's arrow everywhere else.</item>
+/// on one of ours it can - friendly fire, with «Атака» on only - and grey on
+/// any it cannot: out of reach (<c>_inReach</c>, the same reading as the red
+/// or grey outline), the attack spent, or no tank chosen. Outside a match,
+/// red. With «Атака» on (Tank3DBench.Acts) the grey one off a target too:
+/// the mode is the left button's meaning, as the ram's.</item>
+/// <item><b>The bench's own arrow</b> everywhere else (the author's note,
+/// 2026-10-31: the system's one stood apart from the drawn HUD).</item>
 /// </list>
-/// The pictures are <c>assets/Images/Cursors/{attack,attack_ally,attack_off,ram}_{32,64}.png</c>,
+/// The pictures are <c>assets/Images/Cursors/{arrow,attack,attack_ally,attack_off,ram}_{32,64}.png</c>,
 /// read off disk like the rest of the art (<see cref="AssetRoot.Cursors"/>);
-/// the 64 px ones on a screen past 120 dpi. Hotspot in the centre of all.
-/// A missing file leaves the arrow, and says so once.
+/// the 64 px ones on a screen past 120 dpi. Hotspot in the centre, the
+/// arrow's at its tip. A missing file leaves the system's arrow, and says so once.
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum Pointer { Arrow, Attack, AttackAlly, AttackOff, Ram }
+    private enum Pointer { System, Arrow, Attack, AttackAlly, AttackOff, Ram }
 
-    private Texture2D? _cursorAttack, _cursorAttackAlly, _cursorAttackOff, _cursorRam;
-    private Vector2 _cursorSpot;
-    private Pointer _pointer = Pointer.Arrow;
+    private Texture2D? _cursorArrow, _cursorAttack, _cursorAttackAlly, _cursorAttackOff, _cursorRam;
+    private Vector2 _cursorSpot, _arrowSpot;
+    private Pointer _pointer = Pointer.System;
 
     private void BuildCursors()
     {
         int px = DisplayServer.ScreenGetDpi() > 120 ? 64 : 32;
         _cursorSpot = new Vector2(px / 2, px / 2);
+        // the arrow's tip, (3, 2) of its 32
+        _arrowSpot = new Vector2(3, 2) * (px / 32);
+        _cursorArrow = CursorArt("arrow", px);
         _cursorAttack = CursorArt("attack", px);
         _cursorAttackAlly = CursorArt("attack_ally", px);
         _cursorAttackOff = CursorArt("attack_off", px);
@@ -59,19 +65,22 @@ public sealed partial class Tank3DBench
     {
         Pointer want = _ramMode ? Pointer.Ram
             : _overTarget && _fate == Fate.Alive && !RamRunning ? Reticle()
+            : _attackMode ? Pointer.AttackOff
             : Pointer.Arrow;
         if (want == _pointer)
             return;
         _pointer = want;
         Texture2D? art = want switch
         {
+            Pointer.Arrow => _cursorArrow,
             Pointer.Attack => _cursorAttack,
             Pointer.AttackAlly => _cursorAttackAlly,
             Pointer.AttackOff => _cursorAttackOff,
             Pointer.Ram => _cursorRam,
             _ => null,
         };
-        Input.SetCustomMouseCursor(art, Input.CursorShape.Arrow, art is null ? Vector2.Zero : _cursorSpot);
+        Vector2 spot = art is null ? Vector2.Zero : want == Pointer.Arrow ? _arrowSpot : _cursorSpot;
+        Input.SetCustomMouseCursor(art, Input.CursorShape.Arrow, spot);
     }
 
     /// <summary>The reticle's colour on the target under the pointer: red, an
@@ -85,12 +94,12 @@ public sealed partial class Tank3DBench
         return o.Side == _side ? Pointer.AttackAlly : Pointer.Attack;
     }
 
-    /// <summary>The arrow back, on the way out: a custom pointer outlives the
-    /// scene that set it.</summary>
+    /// <summary>The system's arrow back, on the way out: a custom pointer
+    /// outlives the scene that set it.</summary>
     private void CursorReset()
     {
-        if (_pointer != Pointer.Arrow)
+        if (_pointer != Pointer.System)
             Input.SetCustomMouseCursor(null);
-        _pointer = Pointer.Arrow;
+        _pointer = Pointer.System;
     }
 }

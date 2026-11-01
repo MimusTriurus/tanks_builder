@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Default pointer: an arrow, hotspot at its tip (3,2). Dark outline first, then the
+       offset shadow, the pale body and its lit left half. -->
+  <defs>
+    <path id="arrow" d="M3 2L3 24.5L8.6 19.4L12.4 28.2L16.6 26.4L12.8 17.8L20.4 17.6Z"/>
+    <clipPath id="clip"><use href="#arrow"/></clipPath>
+  </defs>
+  <use href="#arrow" transform="translate(1.6 1.6)" fill="#16130f" stroke="#16130f" stroke-width="2.6" stroke-linejoin="round"/>
+  <use href="#arrow" fill="#16130f" stroke="#16130f" stroke-width="2.6" stroke-linejoin="round"/>
+  <use href="#arrow" fill="#d9cfb6"/>
+  <rect x="0" y="0" width="9.4" height="32" fill="#f6efdc" clip-path="url(#clip)"/>
+</svg>

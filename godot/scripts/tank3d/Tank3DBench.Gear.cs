@@ -286,7 +286,7 @@ public sealed partial class Tank3DBench
         {
             _ramMode = false;
             _smokeMode = false;
-            _ambushMode = false;
+            _ambushMode = _attackMode = false;
         }
         _orderNote = _gearMode switch
         {
