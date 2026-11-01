@@ -20,7 +20,9 @@ namespace TankSpriteTest;
 /// <item><b>Two clicks.</b> The first on a cell in reach fixes it and opens
 /// the rose; the second on it, or Enter, gives the order - which cannot be
 /// taken back (GDD match.md). A click on another cell in reach fixes that one
-/// instead; ESC lets the cell go, then as before.</item>
+/// instead; ESC lets the cell go, then as before. A cell with no turn left
+/// on it - the rose empty - is ordered by the first click
+/// (<see cref="RoseHasTurn"/>, 2026-11-01).</item>
 /// <item><b>The rose</b> - up to five arrows toward the sides but the one the way
 /// arrives facing (that turn is none), none where the
 /// budget runs out or the cell ends the move (<see cref="Steps.Reach.TurnTo"/>).
@@ -445,6 +447,20 @@ void fragment() {
         for (int k = 1; k < 6; k++)
             if (FaceTo(((from + (left ? 60 : -60) * k) % 360 + 360) % 360))
                 return;
+    }
+
+    /// <summary>Whether the fixed cell's rose has a disc on any of its ways:
+    /// none - the move spends the budget, or the cell ends it - and there is
+    /// nothing for the second click to choose (the author's note, 2026-11-01).</summary>
+    private bool RoseHasTurn()
+    {
+        if (_reach is null)
+            return false;
+        for (int w = 0; w < _ways.Count; w++)
+            foreach (int side in HexField.EdgeHeadings)
+                if (side != _ways[w].End.Heading && _reach.TurnTo(_ways[w], side) is not null)
+                    return true;
+        return false;
     }
 
     /// <summary>The side the way arrives facing: its disc is not drawn - the

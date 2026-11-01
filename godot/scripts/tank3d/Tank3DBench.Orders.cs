@@ -636,13 +636,20 @@ public sealed partial class Tank3DBench
         }
         // A cell in reach takes two clicks: the first fixes it and shows the
         // ghost and the rose, the second on it orders the move
-        // (Tank3DBench.Ghost). Out of reach the order says why not.
+        // (Tank3DBench.Ghost). With no turn left there - the move spends the
+        // budget, or the cell ends it - the rose is empty and the first click
+        // is the order (the author's note, 2026-11-01). Out of reach the
+        // order says why not.
         if (CourseShown && _reach is { } reach && reach.Reaches(cell))
         {
             if (_lockCell == cell)
                 Confirm();
             else
+            {
                 Lock(cell);
+                if (!RoseHasTurn())
+                    Confirm();
+            }
             return;
         }
         OrderTo(cell);
