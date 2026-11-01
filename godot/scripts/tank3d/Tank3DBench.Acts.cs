@@ -12,8 +12,9 @@ namespace TankSpriteTest;
 /// <item><b>Two groups, each in its own frame</b> (the author's layout,
 /// 2026-10-31): the attack's - <b>Атака</b> 1, <b>Засада</b> 2 and, for a
 /// unit with the rounds, <b>Зажиг.</b> - and the bonus act's, numbered on
-/// from 3 in the order they stand. A spent slot's frame dims and holds only
-/// a tick and its name.</item>
+/// from 3 in the order they stand. A spent slot's frame dims and its
+/// buttons stay, grey and off (2026-11-01; a tick and the slot's name stood
+/// in their place before).</item>
 /// <item><b>Атака</b> - a mode: the left button on a tank then fires as the
 /// right one does (<c>AimAt</c>), and an own unit is a target only so - by
 /// default ours are not fired on (<c>MatchAims</c>, <c>FriendOn</c>). The
@@ -40,7 +41,6 @@ public sealed partial class Tank3DBench
 {
     private HBoxContainer? _acts;
     private PanelContainer? _groupAttack, _groupBonus;
-    private Label? _spentAttack, _spentBonus;
     private Button? _actAttack, _actRam, _actDouse;
     /// <summary>«Атака» on: the left button on a tank fires, and ours may be fired on.</summary>
     private bool _attackMode;
@@ -51,9 +51,17 @@ public sealed partial class Tank3DBench
     /// <summary>The slots and the bonus buttons shown, as last drawn: the
     /// frames and the numbers are redone when they change, not every frame.</summary>
     private int _slotsShown = -1, _bonusShown = -1;
-    /// <summary>Each button and its icon's name, and the pixels the icons are
+    /// <summary>A button's icon twice: as drawn, and grey for a spent slot.</summary>
+    private sealed class ActArt
+    {
+        public required Button Button;
+        public required string Name;
+        public Texture2D? On, Off;
+    }
+
+    /// <summary>Each button with an icon, and the pixels the icons are
     /// rasterised at now: the stretch of the window, redone when it changes.</summary>
-    private readonly List<(Button Button, string Icon)> _actIcons = new();
+    private readonly List<ActArt> _actIcons = new();
     private int _actIconRaster;
 
     private static readonly Color SlotDim = new(0.42f, 0.43f, 0.40f);
@@ -76,7 +84,7 @@ public sealed partial class Tank3DBench
         };
         _acts.AddThemeConstantOverride("separation", 18);
         HBoxContainer attack;
-        (_groupAttack, attack, _spentAttack) = Group("✓  Атака");
+        (_groupAttack, attack) = Group();
         _attackAct = AttackToggle;
         _actAttack = ActButton(attack, "attack", "Атака", "1", toggle: true, _attackAct);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode
@@ -85,7 +93,7 @@ public sealed partial class Tank3DBench
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
         _actFiery = ActButton(attack, "incendiary", "Зажиг.", "", toggle: true, FieryToggle);
         HBoxContainer bonus;
-        (_groupBonus, bonus, _spentBonus) = Group("✓  Доп. действие");
+        (_groupBonus, bonus) = Group();
         // a tank or the wall ahead (Д5): a mode, the click says which
         _actRam = BonusButton(bonus, "ram", "Таран", toggle: true, RamToggle);
         // the grenade (Д8, Tank3DBench.Smoke): a mode
@@ -115,32 +123,53 @@ public sealed partial class Tank3DBench
             return;
         _actIconRaster = px;
         Log.Print($"tank3d: acts: icons at {px} px, window {size.X}x{size.Y}");
-        foreach ((Button b, string icon) in _actIcons)
-            if (ActIcon(icon, px) is { } tex)
-                b.Icon = tex;
+        foreach (ActArt art in _actIcons)
+            ActPaint(art, px);
     }
 
-    /// <summary>A slot's frame: its buttons in a row, and the tick shown in
-    /// their place once the slot is spent.</summary>
-    private (PanelContainer, HBoxContainer, Label) Group(string spent)
+    /// <summary>The icon of <paramref name="art"/> at <paramref name="px"/>,
+    /// both ways, and the one its button's state wants put on it.</summary>
+    private static void ActPaint(ActArt art, int px)
+    {
+        if (ActImage(art.Name, px) is not { } image)
+            return;
+        art.On = ImageTexture.CreateFromImage(image);
+        // grey: the brightness kept low and flat, a little see-through - the
+        // shape still reads, the colour that says "to be had" is gone
+        for (int y = 0; y < image.GetHeight(); y++)
+            for (int x = 0; x < image.GetWidth(); x++)
+            {
+                Color c = image.GetPixel(x, y);
+                float l = 0.22f + 0.45f * (0.3f * c.R + 0.59f * c.G + 0.11f * c.B);
+                image.SetPixel(x, y, new Color(l, l, l, c.A * 0.8f));
+            }
+        art.Off = ImageTexture.CreateFromImage(image);
+        art.Button.Icon = art.Button.Disabled ? art.Off : art.On;
+    }
+
+    /// <summary>A slot's frame: its buttons in a row.</summary>
+    private (PanelContainer, HBoxContainer) Group()
     {
         var frame = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         row.AddThemeConstantOverride("separation", 6);
-        var label = new Label
-        {
-            Text = spent,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            CustomMinimumSize = new Vector2(0.0f, 44.0f),
-            Visible = false,
-        };
-        label.AddThemeFontSizeOverride("font_size", 16);
-        label.AddThemeColorOverride("font_color", SlotDim);
-        row.AddChild(label);
         frame.AddChild(row);
         _acts!.AddChild(frame);
-        return (frame, row, label);
+        return (frame, row);
+    }
+
+    /// <summary>A button on or off: off - its slot spent - it is grey and
+    /// does nothing. Changes it only when its state does.</summary>
+    private void ActOn(Button b, bool on)
+    {
+        if (b.Disabled != on)
+            return;
+        b.Disabled = !on;
+        if (!on)
+            b.SetPressedNoSignal(false);
+        for (int i = 0; i < _actIcons.Count; i++)
+            if (_actIcons[i].Button == b)
+                b.Icon = on ? _actIcons[i].On : _actIcons[i].Off;
     }
 
     private Button BonusButton(HBoxContainer row, string icon, string name, bool toggle, System.Action pressed)
@@ -156,11 +185,12 @@ public sealed partial class Tank3DBench
     {
         var b = new Button
         {
-            Icon = ActIcon(icon, ActIconPx),
             ToggleMode = toggle,
             FocusMode = Control.FocusModeEnum.None,
             CustomMinimumSize = new Vector2(0.0f, 48.0f),
         };
+        var art = new ActArt { Button = b, Name = icon };
+        ActPaint(art, ActIconPx);
         ActLabel(b, name, key);
         b.AddThemeConstantOverride("icon_max_width", ActIconPx);
         b.AddThemeFontSizeOverride("font_size", b.Icon is null ? 16 : 14);
@@ -168,12 +198,17 @@ public sealed partial class Tank3DBench
         b.AddThemeStyleboxOverride("hover", ActBox(CardPale, 1));
         b.AddThemeStyleboxOverride("pressed", ActBox(CardSpend, 2));
         b.AddThemeStyleboxOverride("hover_pressed", ActBox(CardSpend, 2));
+        // spent: the box darker and its rim dim, the key's number grey
+        StyleBoxFlat off = ActBox(SlotDim, 1);
+        off.BgColor = new Color(0.17f, 0.18f, 0.15f, 0.9f);
+        b.AddThemeStyleboxOverride("disabled", off);
         b.AddThemeColorOverride("font_pressed_color", CardSpend);
         b.AddThemeColorOverride("font_hover_pressed_color", CardSpend);
+        b.AddThemeColorOverride("font_disabled_color", SlotDim);
         b.Pressed += pressed;
         row.AddChild(b);
         if (b.Icon is not null)
-            _actIcons.Add((b, icon));
+            _actIcons.Add(art);
         return b;
     }
 
@@ -187,7 +222,7 @@ public sealed partial class Tank3DBench
 
     /// <summary>The act's icon, <c>Icons/&lt;name&gt;.svg</c> rasterised
     /// <paramref name="px"/> on a side; null with no file.</summary>
-    private static Texture2D? ActIcon(string name, int px)
+    private static Image? ActImage(string name, int px)
     {
         string path = $"{AssetRoot.Icons}/{name}.svg";
         if (!System.IO.File.Exists(path))
@@ -196,8 +231,7 @@ public sealed partial class Tank3DBench
             return null;
         }
         var image = new Image();
-        return image.LoadSvgFromString(System.IO.File.ReadAllText(path), px / 64.0f) == Error.Ok
-            ? ImageTexture.CreateFromImage(image) : null;
+        return image.LoadSvgFromString(System.IO.File.ReadAllText(path), px / 64.0f) == Error.Ok ? image : null;
     }
 
     private static StyleBoxFlat ActBox(Color rim, int width)
@@ -212,14 +246,13 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>A group's frame: pale while its slot is to be had, dim once spent.</summary>
-    private static void GroupStyle(PanelContainer frame, Label spent, bool open)
+    private static void GroupStyle(PanelContainer frame, bool open)
     {
         StyleBoxFlat box = ActBox(open ? CardPale : SlotDim, open ? 2 : 1);
         box.BgColor = new Color(0.08f, 0.085f, 0.075f, 0.55f);
         box.SetCornerRadiusAll(12);
         box.ContentMarginLeft = box.ContentMarginRight = box.ContentMarginTop = box.ContentMarginBottom = 6.0f;
         frame.AddThemeStyleboxOverride("panel", box);
-        spent.Visible = !open;
     }
 
     /// <summary>«Атака» on or off: on, the left button on a tank fires, and an
@@ -256,14 +289,16 @@ public sealed partial class Tank3DBench
         if (_acts is not { Visible: true })
             return;
         int k = (int)(key - Key.Key1);
-        if (k == 0 && _actAttack!.Visible)
+        // a grey button's key does nothing, as its click does not
+        if (k == 0 && _actAttack!.Visible && !_actAttack.Disabled)
             _attackAct!();
-        else if (k == 1 && _actAmbush!.Visible)
+        else if (k == 1 && _actAmbush!.Visible && !_actAmbush.Disabled)
             _ambushAct!();
         for (int i = 0, shown = 2; k >= 2 && i < _bonusActs.Count; i++)
             if (_bonusActs[i].Button.Visible && shown++ == k)
             {
-                _bonusActs[i].Act();
+                if (!_bonusActs[i].Button.Disabled)
+                    _bonusActs[i].Act();
                 return;
             }
     }
@@ -333,26 +368,31 @@ public sealed partial class Tank3DBench
         if (slots != _slotsShown)
         {
             _slotsShown = slots;
-            GroupStyle(_groupAttack!, _spentAttack!, attack);
-            GroupStyle(_groupBonus!, _spentBonus!, bonus);
+            GroupStyle(_groupAttack!, attack);
+            GroupStyle(_groupBonus!, bonus);
         }
-        _actAttack!.Visible = attack;
-        _actAttack.SetPressedNoSignal(_attackMode);
-        _actAmbush!.Visible = attack;
-        _actAmbush.SetPressedNoSignal(_ambushMode);
-        _actFiery!.Visible = attack && RigBurns;
-        _actFiery.SetPressedNoSignal(_fieryMode);
-        _actRam!.Visible = bonus;
-        _actRam.SetPressedNoSignal(_ramMode);
-        _actSmoke!.Visible = bonus && RigSmokes;
-        _actSmoke.SetPressedNoSignal(_smokeMode);
-        _actMine!.Visible = bonus && RigHas(Kit.MineLayer);
-        _actMine.SetPressedNoSignal(_gearMode == Gear.Mine);
-        _actRepair!.Visible = bonus && RigHas(Kit.RepairKit);
-        _actRepair.SetPressedNoSignal(_gearMode == Gear.Repair);
-        _actWinch!.Visible = bonus && RigHas(Kit.Winch);
-        _actWinch.SetPressedNoSignal(_gearMode == Gear.Winch);
-        _actDouse!.Visible = bonus && Burning(_unitId);
+        // a spent slot keeps its buttons, grey and off (the author's note,
+        // 2026-11-01): what the unit has stays in view, what it did is told
+        // by the grey
+        ActOn(_actAttack!, attack);
+        ActOn(_actAmbush!, attack);
+        ActOn(_actFiery!, attack);
+        for (int i = 0; i < _bonusActs.Count; i++)
+            ActOn(_bonusActs[i].Button, bonus);
+        _actAttack!.SetPressedNoSignal(attack && _attackMode);
+        _actAmbush!.SetPressedNoSignal(attack && _ambushMode);
+        _actFiery!.Visible = RigBurns;
+        _actFiery.SetPressedNoSignal(attack && _fieryMode);
+        _actRam!.SetPressedNoSignal(bonus && _ramMode);
+        _actSmoke!.Visible = RigSmokes;
+        _actSmoke.SetPressedNoSignal(bonus && _smokeMode);
+        _actMine!.Visible = RigHas(Kit.MineLayer);
+        _actMine.SetPressedNoSignal(bonus && _gearMode == Gear.Mine);
+        _actRepair!.Visible = RigHas(Kit.RepairKit);
+        _actRepair.SetPressedNoSignal(bonus && _gearMode == Gear.Repair);
+        _actWinch!.Visible = RigHas(Kit.Winch);
+        _actWinch.SetPressedNoSignal(bonus && _gearMode == Gear.Winch);
+        _actDouse!.Visible = Burning(_unitId);
         // the numbers run over the bonus buttons shown, from 3
         int shownMask = 0;
         for (int i = 0; i < _bonusActs.Count; i++)
