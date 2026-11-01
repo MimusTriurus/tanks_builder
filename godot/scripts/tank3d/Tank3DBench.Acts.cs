@@ -106,6 +106,7 @@ public sealed partial class Tank3DBench
         (_groupMove, move) = Group(GroupShape.Diamond, MoveInk);
         // the move (2026-11-01): the other modes off, the click the move's
         _actMove = ActButton(move, "move", "Ход", "1", toggle: true, MoveOn);
+        MoveBadgeBuild(_actMove);
         HBoxContainer attack;
         (_groupAttack, attack) = Group(GroupShape.Circle, AttackInk);
         _attackAct = AttackToggle;
@@ -646,6 +647,7 @@ public sealed partial class Tank3DBench
         // 2026-11-01): what the unit has stays in view, what it did is told
         // by the grey
         ActOn(_actMove!, move);
+        MoveBadgeTick(move);
         _actMove!.SetPressedNoSignal(move && MoveModeOn);
         ActOn(_actAttack!, attack);
         ActOn(_actAmbush!, attack);
@@ -685,5 +687,73 @@ public sealed partial class Tank3DBench
                 if (_bonusActs[i].Button.Visible)
                     ActLabel(_bonusActs[i].Button, _bonusActs[i].Text, n <= 9 ? $"{n++}" : "");
         }
+    }
+
+    // --- the move's budget on its icon ---------------------------------------------
+
+    /// <summary>The badge's radius and how far its middle sits in from the
+    /// button's bottom right corner, px.</summary>
+    private const float BadgeR = 9.5f, BadgeIn = 5.0f;
+
+    /// <summary>A budget cut below the speed - the turn begun in mud or a wood.</summary>
+    private static readonly Color BadgeCut = new(0.93f, 0.62f, 0.18f);
+
+    private Control? _moveBadge;
+    /// <summary>What the badge shows: the steps, cut, road, spent - redrawn
+    /// when it changes, not every frame.</summary>
+    private int _badgeSteps = -1;
+    private bool _badgeCut, _badgeRoad, _badgeOff;
+    private string _badgeText = "";
+
+    /// <summary>The move's budget on its icon (the author's note, 2026-11-01):
+    /// the steps this turn has in a disc on the button's bottom right corner,
+    /// in the group's blue; cut by mud or a wood, amber; a road's step in it,
+    /// a ring of the blue round the disc; the move spent, the disc grey with 0.</summary>
+    private void MoveBadgeBuild(Button b)
+    {
+        _moveBadge = new Control { Name = "MoveBadge", MouseFilter = Control.MouseFilterEnum.Ignore, ZIndex = 1 };
+        _moveBadge.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _moveBadge.Draw += MoveBadgeDraw;
+        b.AddChild(_moveBadge);
+    }
+
+    /// <summary>Every frame, from <c>ActsTick</c>: the budget asked, the badge
+    /// redrawn only when what it says changes.</summary>
+    private void MoveBadgeTick(bool move)
+    {
+        if (_moveBadge is null)
+            return;
+        int speed = _profile.Steps;
+        int budget = _reach is not null && _reach.Start.Cell == CellHere ? _reach.Budget : speed;
+        int plain = _reach is not null && _reach.Start.Cell == CellHere ? _reach.Plain : budget;
+        int steps = move ? budget : 0;
+        bool cut = move && plain < speed, road = move && budget > plain, off = !move;
+        if (steps == _badgeSteps && cut == _badgeCut && road == _badgeRoad && off == _badgeOff)
+            return;
+        _badgeSteps = steps;
+        _badgeCut = cut;
+        _badgeRoad = road;
+        _badgeOff = off;
+        _badgeText = steps.ToString();
+        _moveBadge.QueueRedraw();
+    }
+
+    private void MoveBadgeDraw()
+    {
+        if (_moveBadge is not { } c || _badgeSteps < 0)
+            return;
+        var mid = new Vector2(c.Size.X - BadgeIn, c.Size.Y - BadgeIn);
+        Color fill = _badgeOff ? MarkSpent : _badgeCut ? BadgeCut : MoveInk;
+        // the ink's rim first, as the group's mark is drawn (MarkAt)
+        c.DrawCircle(mid, BadgeR + 1.5f, MarkLine);
+        c.DrawCircle(mid, BadgeR, fill);
+        if (_badgeRoad)
+            c.DrawArc(mid, BadgeR + 3.0f, 0.0f, Mathf.Tau, 24, MoveInk, 1.5f, true);
+        Font font = ThemeDB.FallbackFont;
+        const int size = 13;
+        float w = font.GetStringSize(_badgeText, HorizontalAlignment.Left, -1, size).X;
+        float ascent = font.GetAscent(size), descent = font.GetDescent(size);
+        c.DrawString(font, new Vector2(mid.X - w * 0.5f, mid.Y + (ascent - descent) * 0.5f), _badgeText,
+                     HorizontalAlignment.Left, -1, size, _badgeOff ? SlotDim : MarkLine);
     }
 }
