@@ -271,6 +271,8 @@ public sealed partial class Tank3DBench
             // opaque: a curtain one sees the board through is no curtain
             Color = new Color(0.07f, 0.08f, 0.09f),
             MouseFilter = Control.MouseFilterEnum.Stop,
+            // over the action panel's group marks, which stand over their frames (ZIndex 1)
+            ZIndex = 10,
             Visible = false,
         };
         curtain.SetAnchorsPreset(Control.LayoutPreset.FullRect);

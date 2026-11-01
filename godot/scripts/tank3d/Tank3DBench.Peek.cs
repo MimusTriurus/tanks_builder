@@ -86,7 +86,8 @@ public sealed partial class Tank3DBench
         TankModel? was = _peekModel;
         _peekModel = null;
         _peekRig = null;
-        if (_overParked is { } p && p.Fate != Fate.Destroyed)
+        // a hidden rig has no card: the other side in the placement (Tank3DBench.Deploy)
+        if (_overParked is { } p && p.Fate != Fate.Destroyed && p.Rig.Visible)
         {
             // the class off the lineup when the tag changes: its lookup
             // allocates, and this runs every frame of a hover

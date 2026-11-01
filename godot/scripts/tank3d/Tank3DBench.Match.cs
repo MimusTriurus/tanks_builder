@@ -686,7 +686,8 @@ public sealed partial class Tank3DBench
     /// </summary>
     private bool MatchAims(Parked p)
     {
-        if (!Match || p.Fate == Fate.Destroyed || p.Side == _side && !_attackMode && !_ramMode)
+        // none in the placement: there is nothing to fire at, and the hidden side is not to be found by the pointer
+        if (!Match || Deploying || p.Fate == Fate.Destroyed || p.Side == _side && !_attackMode && !_ramMode)
             return false;
         MakeTarget(p);
         return _other is { } o && ReferenceEquals(o.Model, p.Model);

@@ -167,7 +167,8 @@ public sealed partial class Tank3DBench
         Parked? best = null;
         float near = float.MaxValue;
         foreach (Parked p in _parked)
-            if (Drawn(p.Rig, p.Model, screen) is float d && d < near)
+            // a hidden rig is not there: the other side in the placement (Tank3DBench.Deploy)
+            if (p.Rig.Visible && Drawn(p.Rig, p.Model, screen) is float d && d < near)
             {
                 near = d;
                 best = p;
