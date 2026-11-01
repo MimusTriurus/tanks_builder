@@ -48,8 +48,9 @@ public sealed partial class Tank3DBench
         /// <summary>Its side and its fate in a match (Tank3DBench.Match).</summary>
         public Side Side;
         public Fate Fate = Fate.Alive;
-        /// <summary>The turret and the gun as the unit left them, radians: a
-        /// unit handed back after its shot keeps them laid where they were.</summary>
+        /// <summary>The turret and the gun as they stand, radians - coming home
+        /// once the unit is let go (<see cref="ParkedTurretsTick"/>), but for
+        /// one in ambush.</summary>
         public float Yaw, Elevation;
     }
 
@@ -323,4 +324,51 @@ public sealed partial class Tank3DBench
     /// <summary>The cells a route keeps off - the standing tanks', a destroyed
     /// one's not (docs/gdd/states.md, «Уничтожен»).</summary>
     private IEnumerable<Vector2I> ParkedCells => _parked.Where(p => p.Fate != Fate.Destroyed).Select(p => p.Cell);
+
+    /// <summary>How fast a standing unit's turret comes home, of the slew's.</summary>
+    private const float HomeSlew = 0.5f;
+
+    /// <summary>
+    /// Every frame of a match: the units not on the rig with their turret and
+    /// gun back in the travel position - over the bow, level - at half the
+    /// slew (the author's note, 2026-11-01: a unit let go kept the gun laid
+    /// where it last looked, and the board was a hedgehog of turrets turned
+    /// every way). Not one in ambush: its gun is laid on the axis it watches
+    /// (Tank3DBench.Ambush), and that is the picture of the ambush; nor one
+    /// knocked out or destroyed, whose turret hangs as it fell. The target
+    /// standing in (<see cref="_other"/>) too. No allocation.
+    /// </summary>
+    private void ParkedTurretsTick(float dt)
+    {
+        if (dt <= 0.0f)
+            return;
+        float yawStep = Mathf.DegToRad(SlewDeg * HomeSlew) * dt, elevStep = Mathf.DegToRad(ElevDeg) * dt;
+        for (int i = 0; i < _parked.Count; i++)
+        {
+            Parked p = _parked[i];
+            if (p.Fate != Fate.Alive || _ambush.ContainsKey(p.Id) || !IsInstanceValid(p.Model))
+                continue;
+            if (TurretHome(p.Model, yawStep, elevStep))
+            {
+                p.Yaw = p.Model.Yaw;
+                p.Elevation = p.Model.Elevation;
+            }
+        }
+        if (_other is { Unit: true, Fate: Fate.Alive } o && !_ambush.ContainsKey(o.Id) && IsInstanceValid(o.Model))
+            TurretHome(o.Model, yawStep, elevStep);
+    }
+
+    /// <summary>A step of <paramref name="model"/>'s turret and gun toward
+    /// home; true when it moved.</summary>
+    private static bool TurretHome(TankModel model, float yawStep, float elevStep)
+    {
+        float yaw = model.Turreted ? model.Yaw : 0.0f;
+        if (Mathf.Abs(yaw) < 1e-4f && Mathf.Abs(model.Elevation) < 1e-4f)
+            return false;
+        if (model.Turreted)
+            model.Yaw = Mathf.MoveToward(Mathf.Wrap(model.Yaw, -Mathf.Pi, Mathf.Pi), 0.0f, yawStep);
+        model.Elevation = Mathf.MoveToward(model.Elevation, 0.0f, elevStep);
+        model.Apply();
+        return true;
+    }
 }

@@ -757,6 +757,24 @@ public sealed partial class Tank3DBench
         _turnT = 0.0f;
     }
 
+    /// <summary>
+    /// The turn handed over (<c>HandOver</c>; the author's note, 2026-11-01):
+    /// the view round, smoothly, so the side to move has its own units
+    /// nearest the screen - half a turn when it looks from the other side's
+    /// half of the board (green's edge is at the bottom of the screen at yaw
+    /// 0, brown's at 180), nothing when it already looks from this one's. The
+    /// step the player turned it to is kept, mirrored; the pitch too.
+    /// </summary>
+    private void ViewToSide(Side side)
+    {
+        float yaw = _turnT >= 0.0f ? _turnYawTo : YawStep(_orbitYaw);
+        float home = side == Side.Brown ? Mathf.Pi : 0.0f;
+        if (Mathf.Abs(Mathf.Wrap(yaw - home, -Mathf.Pi, Mathf.Pi)) <= 0.5f * Mathf.Pi + 1e-3f)
+            return;
+        float pitch = Mathf.Asin(Squash) + (_turnT >= 0.0f ? _turnPitchTo : _orbitPitch);
+        CameraTurnTo(yaw + Mathf.Pi, pitch);
+    }
+
     /// <summary>Every frame of a match (<c>MatchTick</c>): the turn along; the
     /// middle button or Home ends it.</summary>
     private void CameraTurnTick(float dt)

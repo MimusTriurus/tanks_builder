@@ -513,12 +513,15 @@ public sealed partial class Tank3DBench
             if (FirstReady(_mt.Turn) is { } next)
             {
                 TakeOver(next);
+                // the view round to the side to move (Tank3DBench.Deploy)
+                ViewToSide(_mt.Turn);
                 Banner($"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
                 Log.Print($"tank3d: match: round {_mt.Round}, {SideName(_mt.Turn)} to move, {_modelTag} on {MapAt(CellHere)}");
                 return;
             }
             if (_side == _mt.Turn && _fate == Fate.Alive)
             {
+                ViewToSide(_mt.Turn);
                 Banner($"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
                 return;
             }
@@ -606,6 +609,8 @@ public sealed partial class Tank3DBench
         RollTick();
         // the view's turn from placement into battle (Tank3DBench.Deploy)
         CameraTurnTick(dt);
+        // the units let go, their turrets home (Tank3DBench.Parked)
+        ParkedTurretsTick(dt);
         bool busy = MatchBusy;
         // the placement before the first turn (Tank3DBench.Deploy): nothing of a turn yet
         if (Deploying)
