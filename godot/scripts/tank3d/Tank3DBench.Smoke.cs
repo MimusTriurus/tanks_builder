@@ -81,6 +81,8 @@ public sealed partial class Tank3DBench
         ShadowAct($"smoke on {MapAt(cell)}", s => Battle.Smoke(s, cell));
         _mt.Bonus = true;
         _smokeMode = false;
+        // the mode's «щёлкни по соседнему гексу» said its say
+        _orderNote = "";
         _field!.SetSmoke(cell, true);
         _smokeLeft[cell] = SmokeRounds;
         SmokeCloudAt(cell);

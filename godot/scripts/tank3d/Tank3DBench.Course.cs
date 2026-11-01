@@ -122,7 +122,9 @@ public sealed partial class Tank3DBench
         _course is not null && _field is not null && _tile is not null && _rules && _chosen
         && _fate == Fate.Alive && !RouteMoving && _turnGoal is null && !RamRunning && MatchMayMove
         // «Засада» on: the turn ends in the ambush, so there is no move to show (Tank3DBench.Ambush)
-        && !_ambushMode;
+        && !_ambushMode
+        // a bonus act's hex being picked: its hexes instead (Tank3DBench.Gear, PickZone)
+        && !PickMode;
 
     /// <summary>The way the click on <paramref name="cell"/> orders: the one
     /// shown, if it is to that cell.</summary>
@@ -177,6 +179,8 @@ public sealed partial class Tank3DBench
             GhostTick(null);
             // «Засада» on: the hexes its axes watch instead, in red (Tank3DBench.Ambush)
             AmbushZone(mesh);
+            // «Дым», «Мина», «Ремонт», «Лебёдка» on: the hexes it may be done on, in amber
+            PickZone(mesh);
             _courseInk?.QueueRedraw();
             return;
         }

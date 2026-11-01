@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace TankSpriteTest;
@@ -19,6 +20,8 @@ namespace TankSpriteTest;
 /// </list>
 /// A button each in the bonus act's group, for a unit with that kit, then a
 /// click on the hex; or <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>.
+/// While one is on - or «Дым» - the hexes it may be done on are drawn in
+/// place of the move's zone (<see cref="PickZone"/>).
 /// Not yet: the cable itself is not drawn.
 /// </summary>
 public sealed partial class Tank3DBench
@@ -60,6 +63,84 @@ public sealed partial class Tank3DBench
     };
 
     private bool RigHas(Kit k) => (KitOf(_unitId) & k) != 0;
+
+    /// <summary>A bonus act on a hex being picked: «Дым» or a kit's.</summary>
+    private bool PickMode => _smokeMode || _gearMode != Gear.None;
+
+    /// <summary>The picking zone's ink: the bonus act's amber, as its icons'.</summary>
+    private static readonly Color PickInk = new(1.0f, 0.69f, 0.18f);
+
+    /// <summary>The hexes the act being picked would be done on, as last
+    /// found, and what they were found for: the mode, the cell, the reach's
+    /// search (the board's tanks) - asking the rules of each hex builds the
+    /// core's state, so not every frame.</summary>
+    private readonly List<Vector2I> _pickCells = new();
+    private (bool Smoke, Gear Gear, Vector2I Here, int Reach) _pickKey;
+    private bool _pickFound;
+
+    /// <summary>
+    /// With «Дым», «Мина», «Ремонт» or «Лебёдка» on (the author's note,
+    /// 2026-11-01): the move's zone gone (<c>CourseShown</c>) and, drawn as it
+    /// is but amber, the hexes the act may be done on now - each asked of the
+    /// same rules a click is (<see cref="SmokeWhy"/>, <see cref="GearWhy"/>):
+    /// the six beside, or for the winch the six <see cref="Battle.WinchReach"/>
+    /// out along the axes. None to be had - nothing drawn, and a click says why.
+    /// </summary>
+    private void PickZone(ImmediateMesh mesh)
+    {
+        if (!PickMode || !Match || _field is null || _tile is null || !_chosen || _fate != Fate.Alive)
+        {
+            _pickFound = false;
+            return;
+        }
+        var key = (_smokeMode, _gearMode, CellHere, _reachVersion);
+        if (!_pickFound || key != _pickKey)
+        {
+            _pickKey = key;
+            _pickFound = true;
+            PickCells();
+        }
+        if (_pickCells.Count == 0)
+            return;
+        _zoneFill.Clear();
+        _zoneFill.AddRange(_pickCells);
+        Vector2[] corner = Corners();
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        var tint = new Color(PickInk, ZoneTone);
+        foreach (Vector2I cell in _zoneFill)
+            ZoneCell(mesh, tint, cell, corner);
+        ZoneBand(corner, 1);
+        var line = new Color(PickInk, 0.95f);
+        for (int i = 0; i < _band.Count; i++)
+        {
+            mesh.SurfaceSetColor(line);
+            mesh.SurfaceAddVertex(_band[i]);
+        }
+        mesh.SurfaceEnd();
+    }
+
+    private void PickCells()
+    {
+        _pickCells.Clear();
+        int reach = !_smokeMode && _gearMode == Gear.Winch ? Battle.WinchReach : 1;
+        foreach (int axis in HexField.EdgeHeadings)
+        {
+            // the hex `reach` out along the axis, if the board has it
+            Vector2I at = CellHere;
+            int k = 0;
+            for (; k < reach; k++)
+            {
+                Vector2I next = HexField.Step(at, axis);
+                if (next == at || !_field!.InBounds(next))
+                    break;
+                at = next;
+            }
+            if (k < reach)
+                continue;
+            if ((_smokeMode ? SmokeWhy(at) : GearWhy(_gearMode, at)).Length == 0)
+                _pickCells.Add(at);
+        }
+    }
 
     private static string? GearAct(Gear g, BattleState s, Vector2I cell) => g switch
     {
@@ -121,6 +202,7 @@ public sealed partial class Tank3DBench
         ShadowAct($"{g.ToString().ToLowerInvariant()} {MapAt(cell)}", s => GearAct(g, s, cell));
         _mt.Bonus = true;
         _gearMode = Gear.None;
+        _orderNote = "";
         for (int i = was; i < st.Events.Count; i++)
         {
             BattleEvent e = st.Events[i];
