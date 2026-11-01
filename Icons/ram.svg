@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>ram_2_arrow_burst</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="r2_star_shadow" data-name="r2 star shadow" d="M46.973 15.634 L48.523 25.912 L58.588 23.323 L52.417 31.686 L61.366 36.973 L51.088 38.523 L53.677 48.588 L45.314 42.417 L40.027 51.366 L38.477 41.088 L28.412 43.677 L34.583 35.314 L25.634 30.027 L35.912 28.477 L33.323 18.412 L41.686 24.583 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="r2_star_ink" data-name="r2 star ink" d="M44.473 13.134 L46.023 23.412 L56.088 20.823 L49.917 29.186 L58.866 34.473 L48.588 36.023 L51.177 46.088 L42.814 39.917 L37.527 48.866 L35.977 38.588 L25.912 41.177 L32.083 32.814 L23.134 27.527 L33.412 25.977 L30.823 15.912 L39.186 22.083 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-linejoin="round"/>
+    <path id="r2_star" data-name="r2 star" d="M44.473 13.134 L46.023 23.412 L56.088 20.823 L49.917 29.186 L58.866 34.473 L48.588 36.023 L51.177 46.088 L42.814 39.917 L37.527 48.866 L35.977 38.588 L25.912 41.177 L32.083 32.814 L23.134 27.527 L33.412 25.977 L30.823 15.912 L39.186 22.083 Z" fill="#ffb02e"/>
+    <path id="r2_star_core" data-name="r2 star core" d="M43.524 18.013 L44.651 25.484 L51.968 23.602 L47.482 29.681 L53.987 33.524 L46.516 34.651 L48.398 41.968 L42.319 37.482 L38.476 43.987 L37.349 36.516 L30.032 38.398 L34.518 32.319 L28.013 28.476 L35.484 27.349 L33.602 20.032 L39.681 24.518 Z" fill="#ffe9a8"/>
+    <path id="r2_arrow_shadow" data-name="r2 arrow shadow" d="M4.5 26.5 L23.5 26.5 L23.5 17.5 L39.5 33.5 L23.5 49.5 L23.5 40.5 L4.5 40.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="r2_arrow_ink" data-name="r2 arrow ink" d="M2 24 L21 24 L21 15 L37 31 L21 47 L21 38 L2 38 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="r2_arrow" data-name="r2 arrow" d="M2 24 L21 24 L21 15 L37 31 L21 47 L21 38 L2 38 Z" fill="#e2d6b8"/>
+    <path id="r2_arrow_lit" data-name="r2 arrow lit" d="M2 24 L21 24 L21 15 L29 23 L29 31 L2 31 Z" fill="#fbf5e6"/>
+  </g>
+</svg>

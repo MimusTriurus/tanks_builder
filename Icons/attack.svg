@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>attack_4_hit</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="a4_ring_shadow" data-name="a4 ring shadow" d="M14.5 33.5 C14.5 23.007 23.007 14.5 33.5 14.5 C43.993 14.5 52.5 23.007 52.5 33.5 C52.5 43.993 43.993 52.5 33.5 52.5 C23.007 52.5 14.5 43.993 14.5 33.5 Z" fill="none" stroke="#16130f" stroke-width="9" stroke-miterlimit="10"/>
+    <path id="a4_ticks_shadow" data-name="a4 ticks shadow" d="M33.5 5.5 L33.5 11.5 M33.5 55.5 L33.5 61.5 M5.5 33.5 L11.5 33.5 M55.5 33.5 L61.5 33.5" fill="none" stroke="#16130f" stroke-width="9" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="a4_burst_shadow" data-name="a4 burst shadow" d="M36.171 19.757 L37.088 28.08 L45.107 25.671 L39.87 32.204 L47.243 36.171 L38.92 37.088 L41.329 45.107 L34.796 39.87 L30.829 47.243 L29.912 38.92 L21.893 41.329 L27.13 34.796 L19.757 30.829 L28.08 29.912 L25.671 21.893 L32.204 27.13 Z" fill="#16130f" stroke="#16130f" stroke-width="4" stroke-linejoin="round"/>
+    <path id="a4_ring_ink" data-name="a4 ring ink" d="M12 31 C12 20.507 20.507 12 31 12 C41.493 12 50 20.507 50 31 C50 41.493 41.493 50 31 50 C20.507 50 12 41.493 12 31 Z" fill="none" stroke="#16130f" stroke-width="9" stroke-miterlimit="10"/>
+    <path id="a4_ticks_ink" data-name="a4 ticks ink" d="M31 3 L31 9 M31 53 L31 59 M3 31 L9 31 M53 31 L59 31" fill="none" stroke="#16130f" stroke-width="9" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="a4_burst_ink" data-name="a4 burst ink" d="M33.671 17.257 L34.588 25.58 L42.607 23.171 L37.37 29.704 L44.743 33.671 L36.42 34.588 L38.829 42.607 L32.296 37.37 L28.329 44.743 L27.412 36.42 L19.393 38.829 L24.63 32.296 L17.257 28.329 L25.58 27.412 L23.171 19.393 L29.704 24.63 Z" fill="#16130f" stroke="#16130f" stroke-width="4" stroke-linejoin="round"/>
+    <path id="a4_ring" data-name="a4 ring" d="M12 31 C12 20.507 20.507 12 31 12 C41.493 12 50 20.507 50 31 C50 41.493 41.493 50 31 50 C20.507 50 12 41.493 12 31 Z" fill="none" stroke="#ff4433" stroke-width="4.2" stroke-miterlimit="10"/>
+    <path id="a4_ticks" data-name="a4 ticks" d="M31 3 L31 9 M31 53 L31 59 M3 31 L9 31 M53 31 L59 31" fill="none" stroke="#ff4433" stroke-width="4.2" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="a4_burst" data-name="a4 burst" d="M33.671 17.257 L34.588 25.58 L42.607 23.171 L37.37 29.704 L44.743 33.671 L36.42 34.588 L38.829 42.607 L32.296 37.37 L28.329 44.743 L27.412 36.42 L19.393 38.829 L24.63 32.296 L17.257 28.329 L25.58 27.412 L23.171 19.393 L29.704 24.63 Z" fill="#ffb02e"/>
+    <path id="a4_burst_core" data-name="a4 burst core" d="M31.431 22.638 L31.987 26.998 L36.218 25.806 L33.528 29.282 L37.362 31.431 L33.002 31.987 L34.194 36.218 L30.718 33.528 L28.569 37.362 L28.013 33.002 L23.782 34.194 L26.472 30.718 L22.638 28.569 L26.998 28.013 L25.806 23.782 L29.282 26.472 Z" fill="#ffe9a8"/>
+  </g>
+</svg>

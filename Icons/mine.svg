@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>mine_5_plus</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="m_shadow" data-name="m shadow" d="M7.5 36.5 C7.5 31.529 17.35 27.5 29.5 27.5 C41.65 27.5 51.5 31.529 51.5 36.5 L51.5 44.5 C51.5 49.471 41.65 53.5 29.5 53.5 C17.35 53.5 7.5 49.471 7.5 44.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="m_ink" data-name="m ink" d="M5 34 C5 29.029 14.85 25 27 25 C39.15 25 49 29.029 49 34 L49 42 C49 46.971 39.15 51 27 51 C14.85 51 5 46.971 5 42 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="m_side" data-name="m side" d="M5 34 C5 29.029 14.85 25 27 25 C39.15 25 49 29.029 49 34 L49 42 C49 46.971 39.15 51 27 51 C14.85 51 5 46.971 5 42 Z" fill="#4c5538"/>
+    <path id="m_side_lit" data-name="m side lit" d="M7 44.5 C13.667 48.167 20.333 50.2 27 50.6" fill="none" stroke="#6f7a52" stroke-width="1.6" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="m_top" data-name="m top" d="M5 34 C5 29.029 14.85 25 27 25 C39.15 25 49 29.029 49 34 C49 38.971 39.15 43 27 43 C14.85 43 5 38.971 5 34 Z" fill="#6f7a52"/>
+    <path id="m_ring" data-name="m ring" d="M12 34 C12 30.686 18.716 28 27 28 C35.284 28 42 30.686 42 34 C42 37.314 35.284 40 27 40 C18.716 40 12 37.314 12 34 Z" fill="none" stroke="#4c5538" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path id="m_lit" data-name="m lit" d="M9 33.5 C11 29.967 15 27.667 21 26.6" fill="none" stroke="#a9b47c" stroke-width="1.8" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="m_fuze_ink" data-name="m fuze ink" d="M21.5 30 C21.5 28.73 23.962 27.7 27 27.7 C30.038 27.7 32.5 28.73 32.5 30 L32.5 33.5 C32.5 34.77 30.038 35.8 27 35.8 C23.962 35.8 21.5 34.77 21.5 33.5 Z" fill="#16130f" stroke="#16130f" stroke-width="2.6" stroke-linejoin="round"/>
+    <path id="m_fuze_side" data-name="m fuze side" d="M21.5 30 L32.5 30 L32.5 33.5 L21.5 33.5 Z" fill="#a8261a"/>
+    <path id="m_fuze_top" data-name="m fuze top" d="M21.5 30 C21.5 28.73 23.962 27.7 27 27.7 C30.038 27.7 32.5 28.73 32.5 30 C32.5 31.27 30.038 32.3 27 32.3 C23.962 32.3 21.5 31.27 21.5 30 Z" fill="#ff4433"/>
+    <path id="p_badge_shadow" data-name="p badge shadow" d="M46.5 16.5 C46.5 12.082 50.082 8.5 54.5 8.5 C58.918 8.5 62.5 12.082 62.5 16.5 C62.5 20.918 58.918 24.5 54.5 24.5 C50.082 24.5 46.5 20.918 46.5 16.5 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-miterlimit="10"/>
+    <path id="p_badge_ink" data-name="p badge ink" d="M44 14 C44 9.582 47.582 6 52 6 C56.418 6 60 9.582 60 14 C60 18.418 56.418 22 52 22 C47.582 22 44 18.418 44 14 Z" fill="#16130f" stroke="#16130f" stroke-width="4.5" stroke-miterlimit="10"/>
+    <path id="p_badge" data-name="p badge" d="M44 14 C44 9.582 47.582 6 52 6 C56.418 6 60 9.582 60 14 C60 18.418 56.418 22 52 22 C47.582 22 44 18.418 44 14 Z" fill="#ffb02e"/>
+    <path id="p_plus" data-name="p plus" d="M52 9.5 L52 18.5 M47.5 14 L56.5 14" fill="none" stroke="#16130f" stroke-width="3.2" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="fuze_glint_5" data-name="fuze glint 5" d="M23.5 29.4 C23.5 28.903 24.395 28.5 25.5 28.5 C26.605 28.5 27.5 28.903 27.5 29.4 C27.5 29.897 26.605 30.3 25.5 30.3 C24.395 30.3 23.5 29.897 23.5 29.4 Z" fill="#ffb09e"/>
+  </g>
+</svg>

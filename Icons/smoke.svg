@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>smoke_2_cloud</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="s2_shadow_a" data-name="s2 shadow a" d="M7.5 40.5 C7.5 35.529 11.529 31.5 16.5 31.5 C21.471 31.5 25.5 35.529 25.5 40.5 C25.5 45.471 21.471 49.5 16.5 49.5 C11.529 49.5 7.5 45.471 7.5 40.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_shadow_b" data-name="s2 shadow b" d="M15.5 30.5 C15.5 23.873 20.873 18.5 27.5 18.5 C34.127 18.5 39.5 23.873 39.5 30.5 C39.5 37.127 34.127 42.5 27.5 42.5 C20.873 42.5 15.5 37.127 15.5 30.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_shadow_c" data-name="s2 shadow c" d="M32.5 32.5 C32.5 26.977 36.977 22.5 42.5 22.5 C48.023 22.5 52.5 26.977 52.5 32.5 C52.5 38.023 48.023 42.5 42.5 42.5 C36.977 42.5 32.5 38.023 32.5 32.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_shadow_base" data-name="s2 shadow base" d="M17 38.5 L50 38.5 C53.59 38.5 56.5 41.41 56.5 45 L56.5 45 C56.5 48.59 53.59 51.5 50 51.5 L17 51.5 C13.41 51.5 10.5 48.59 10.5 45 L10.5 45 C10.5 41.41 13.41 38.5 17 38.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_ink_a" data-name="s2 ink a" d="M5 38 C5 33.029 9.029 29 14 29 C18.971 29 23 33.029 23 38 C23 42.971 18.971 47 14 47 C9.029 47 5 42.971 5 38 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_ink_b" data-name="s2 ink b" d="M13 28 C13 21.373 18.373 16 25 16 C31.627 16 37 21.373 37 28 C37 34.627 31.627 40 25 40 C18.373 40 13 34.627 13 28 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_ink_c" data-name="s2 ink c" d="M30 30 C30 24.477 34.477 20 40 20 C45.523 20 50 24.477 50 30 C50 35.523 45.523 40 40 40 C34.477 40 30 35.523 30 30 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_ink_base" data-name="s2 ink base" d="M14.5 36 L47.5 36 C51.09 36 54 38.91 54 42.5 L54 42.5 C54 46.09 51.09 49 47.5 49 L14.5 49 C10.91 49 8 46.09 8 42.5 L8 42.5 C8 38.91 10.91 36 14.5 36 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="s2_a" data-name="s2 a" d="M5 38 C5 33.029 9.029 29 14 29 C18.971 29 23 33.029 23 38 C23 42.971 18.971 47 14 47 C9.029 47 5 42.971 5 38 Z" fill="#c9c3b5"/>
+    <path id="s2_b" data-name="s2 b" d="M13 28 C13 21.373 18.373 16 25 16 C31.627 16 37 21.373 37 28 C37 34.627 31.627 40 25 40 C18.373 40 13 34.627 13 28 Z" fill="#c9c3b5"/>
+    <path id="s2_c" data-name="s2 c" d="M30 30 C30 24.477 34.477 20 40 20 C45.523 20 50 24.477 50 30 C50 35.523 45.523 40 40 40 C34.477 40 30 35.523 30 30 Z" fill="#c9c3b5"/>
+    <path id="s2_base" data-name="s2 base" d="M14.5 36 L47.5 36 C51.09 36 54 38.91 54 42.5 L54 42.5 C54 46.09 51.09 49 47.5 49 L14.5 49 C10.91 49 8 46.09 8 42.5 L8 42.5 C8 38.91 10.91 36 14.5 36 Z" fill="#c9c3b5"/>
+    <path id="s2_shade" data-name="s2 shade" d="M12.75 43.5 L49.25 43.5 C50.769 43.5 52 44.731 52 46.25 L52 46.25 C52 47.769 50.769 49 49.25 49 L12.75 49 C11.231 49 10 47.769 10 46.25 L10 46.25 C10 44.731 11.231 43.5 12.75 43.5 Z" fill="#a39d8f"/>
+    <path id="s2_lit" data-name="s2 lit" d="M17 27 C18 22.667 20.667 20.167 25 19.5 M33.5 28 C34.5 25 36.667 23.333 40 23 M8.5 37 C9.5 34.333 11.333 32.667 14 32" fill="none" stroke="#f1ede3" stroke-width="2.2" stroke-linecap="round" stroke-miterlimit="10"/>
+  </g>
+</svg>
