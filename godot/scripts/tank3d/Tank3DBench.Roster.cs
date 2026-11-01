@@ -28,7 +28,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private const float RosterLeft = 12.0f, RosterTop = 64.0f, RosterIcon = 76.0f, RosterGap = 8.0f;
+    private const float RosterLeft = 12.0f, RosterIcon = 76.0f, RosterGap = 8.0f;
     /// <summary>How long the pointer rests on an icon before its card shows, s.</summary>
     private const float RosterDwell = 0.4f;
     /// <summary>The card stands this far right of the column.</summary>
@@ -87,7 +87,7 @@ public sealed partial class Tank3DBench
         _roster = new Control
         {
             Name = "Roster",
-            Position = new Vector2(RosterLeft, RosterTop),
+            Position = new Vector2(RosterLeft, 0.0f),
             Size = new Vector2(RosterIcon, 5 * (RosterIcon + RosterGap)),
             MouseFilter = Control.MouseFilterEnum.Stop,
         };
@@ -117,6 +117,10 @@ public sealed partial class Tank3DBench
             for (int j = i; j > 0 && _rosterSlots[j - 1].Order > _rosterSlots[j].Order; j--)
                 (_rosterSlots[j - 1], _rosterSlots[j]) = (_rosterSlots[j], _rosterSlots[j - 1]);
         _roster.Size = new Vector2(RosterIcon, Math.Max(1, _rosterCount) * (RosterIcon + RosterGap));
+        // the column on the screen's middle, as many icons as it has (the
+        // author's note, 2026-11-01; it stood at the top under the HUD's lines)
+        float column = Math.Max(1, _rosterCount) * (RosterIcon + RosterGap) - RosterGap;
+        _roster.Position = new Vector2(RosterLeft, Mathf.Round((_roster.GetViewportRect().Size.Y - column) * 0.5f));
 
         int over = _rosterHeld;
         if (over < 0 && _roster.GetGlobalRect().HasPoint(GetViewport().GetMousePosition()))
@@ -265,8 +269,9 @@ public sealed partial class Tank3DBench
             return;
         RosterSlot u = _rosterSlots[shown];
         float rowMid = shown * (RosterIcon + RosterGap) + RosterIcon * 0.5f;
-        float top = Mathf.Clamp(rowMid - 26.0f, -RosterTop + 8.0f,
-                                Mathf.Max(-RosterTop + 8.0f, c.GetViewportRect().Size.Y - RosterTop - PeekH - 8.0f));
+        float above = c.Position.Y;
+        float top = Mathf.Clamp(rowMid - 26.0f, -above + 8.0f,
+                                Mathf.Max(-above + 8.0f, c.GetViewportRect().Size.Y - above - PeekH - 8.0f));
         var card = new Rect2(RosterIcon + RosterCardOff, top, PeekW, PeekH);
         // a short leader from the icon into the card's title
         c.DrawLine(new Vector2(RosterIcon + 2.0f, rowMid), new Vector2(card.Position.X, rowMid), PeekShade, 4.0f);

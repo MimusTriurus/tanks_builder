@@ -178,18 +178,35 @@ public sealed partial class Tank3DBench
         DeployShow(side);
         _deployCells.Clear();
         _deployCells.AddRange(DeployZone(side));
-        // the view over the zone, not over the tank on the rig: a side
-        // stood in a corner kept the zone half off the screen (2026-11-01)
+        // straight down on the board, the side's own edge at the bottom of
+        // the screen (the author's note, 2026-11-01) - at once, behind the curtain
+        DeployLookDown(side);
+        // the view over the zone across, not over the tank on the rig: a side
+        // stood in a corner kept the zone half off the screen (2026-11-01);
+        // up and down, the board's own edge just over the placement's panel,
+        // the rest of the map over it (the author's note, the same day)
         if (_deployCells.Count > 0)
         {
             Vector3 mid = Vector3.Zero;
             for (int i = 0; i < _deployCells.Count; i++)
                 mid += CellMiddle(_deployCells[i]);
-            GlideTo(mid / _deployCells.Count);
+            mid /= _deployCells.Count;
+            if (BoardGround() is { } board)
+            {
+                // the own edge: the plan's far side from the board's middle in
+                // the view's down (green look along -Z, brown along +Z)
+                float edge = side == Side.Brown ? board.Plan.Position.Y : board.Plan.End.Y;
+                float down = side == Side.Brown ? -1.0f : 1.0f;
+                float h = Mathf.Max(GetViewport().GetVisibleRect().Size.Y, 1.0f);
+                // at the fit the zoom is the one FrameCamera takes at this angle
+                if (_zoomFit)
+                    _zoom = FitZoom();
+                // the ground the screen's lower half spans, less the panel's strip
+                float half = (0.5f - DeployEdgePx / h) * (h / _zoom) / Mathf.Sin(Mathf.DegToRad(DeployPitchDeg));
+                mid.Z = edge - down * half;
+            }
+            GlideTo(mid);
         }
-        // straight down on the board, the side's own edge at the bottom of
-        // the screen (the author's note, 2026-11-01) - at once, behind the curtain
-        DeployLookDown(side);
         // the toss said on the first curtain (Tank3DBench.Match)
         CurtainUp((side == _mt.First && _tossed ? $"Жребий: первыми ходят {SideName(side)}\n\n" : "")
                   + $"Расстановка: {SideName(side)}\n{(side == Side.Green ? "Коричневые" : "Зелёные")} не смотрят\n\nщелчок или Enter — начать");
@@ -717,6 +734,10 @@ public sealed partial class Tank3DBench
     /// <summary>Straight down, short of the pole, where the yaw stops meaning
     /// anything, degrees above the ground.</summary>
     private const float DeployPitchDeg = 89.5f;
+    /// <summary>The side's own edge of the board this far over the screen's
+    /// bottom in placement, px in the layout: just over the placement's panel
+    /// (<see cref="BuildDeployPanel"/>, its top about 76 px up).</summary>
+    private const float DeployEdgePx = 90.0f;
     /// <summary>How long the view takes from straight down into the battle's, s.</summary>
     private const float CameraTurnTime = 1.4f;
 
