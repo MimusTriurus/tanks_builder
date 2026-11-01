@@ -22,9 +22,13 @@ namespace TankSpriteTest;
 /// hex picks the axis (Tank3DBench.Ambush). <b>Зажиг.</b> (Д8) - the next
 /// shot is incendiary (Tank3DBench.Incendiary), no key.</item>
 /// <item>The bonus acts: <b>Таран</b> - a mode (Tab too), the left button on
-/// a tank then rams it, own ones too; <b>Тушить</b> - at once (J too,
-/// <see cref="Douse"/>); <b>Таран стены</b>, the kit's <b>Дым</b>,
-/// <b>Мина</b>, <b>Ремонт</b>, <b>Лебёдка</b> (Д5, Д8).</item>
+/// a tank then rams it, own ones too, and on the hex past the wall the hull
+/// faces rams the wall (Д5; one act, one button since 2026-11-01);
+/// <b>Тушить</b> - at once (J too, <see cref="Douse"/>); the kit's
+/// <b>Дым</b>, <b>Мина</b>, <b>Ремонт</b>, <b>Лебёдка</b> (Д8).</item>
+/// <item><b>A button is an icon</b> (2026-11-01): the act's picture from
+/// <c>Icons/</c> and its key's number beside it, the name in the tooltip;
+/// without the picture on disk the button says the name, as before.</item>
 /// <item><b>What may not be done is not there</b> (the author's choice, as
 /// with the roses): no <b>Тушить</b> on a hull that is not burning, no kit's
 /// button without the kit.</item>
@@ -37,7 +41,7 @@ public sealed partial class Tank3DBench
     private HBoxContainer? _acts;
     private PanelContainer? _groupAttack, _groupBonus;
     private Label? _spentAttack, _spentBonus;
-    private Button? _actAttack, _actRam, _actDouse, _actRamWall;
+    private Button? _actAttack, _actRam, _actDouse;
     /// <summary>«Атака» on: the left button on a tank fires, and ours may be fired on.</summary>
     private bool _attackMode;
     /// <summary>The bonus group's buttons in their order, and what each does
@@ -47,8 +51,15 @@ public sealed partial class Tank3DBench
     /// <summary>The slots and the bonus buttons shown, as last drawn: the
     /// frames and the numbers are redone when they change, not every frame.</summary>
     private int _slotsShown = -1, _bonusShown = -1;
+    /// <summary>Each button and its icon's name, and the pixels the icons are
+    /// rasterised at now: the stretch of the window, redone when it changes.</summary>
+    private readonly List<(Button Button, string Icon)> _actIcons = new();
+    private int _actIconRaster;
 
     private static readonly Color SlotDim = new(0.42f, 0.43f, 0.40f);
+    /// <summary>The icon's side on a button in the 1600 × 900 layout, px; on
+    /// screen it is this times the window's stretch (<see cref="ActIconsFit"/>).</summary>
+    private const int ActIconPx = 36;
 
     private void BuildActs(CanvasLayer layer)
     {
@@ -67,25 +78,46 @@ public sealed partial class Tank3DBench
         HBoxContainer attack;
         (_groupAttack, attack, _spentAttack) = Group("✓  Атака");
         _attackAct = AttackToggle;
-        _actAttack = ActButton(attack, "Атака   1", toggle: true, _attackAct);
+        _actAttack = ActButton(attack, "attack", "Атака", "1", toggle: true, _attackAct);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode
         _ambushAct = AmbushToggle;
-        _actAmbush = ActButton(attack, AmbushText + "   2", toggle: true, _ambushAct);
+        _actAmbush = ActButton(attack, "ambush", AmbushText, "2", toggle: true, _ambushAct);
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
-        _actFiery = ActButton(attack, "Зажиг.", toggle: true, FieryToggle);
+        _actFiery = ActButton(attack, "incendiary", "Зажиг.", "", toggle: true, FieryToggle);
         HBoxContainer bonus;
         (_groupBonus, bonus, _spentBonus) = Group("✓  Доп. действие");
-        _actRam = BonusButton(bonus, "Таран", toggle: true, RamToggle);
-        // the wall ahead rammed through (Д5)
-        _actRamWall = BonusButton(bonus, "Таран стены", toggle: false, () => Execute(new Command(CommandKind.RamWall, Side: HullSide())));
+        // a tank or the wall ahead (Д5): a mode, the click says which
+        _actRam = BonusButton(bonus, "ram", "Таран", toggle: true, RamToggle);
         // the grenade (Д8, Tank3DBench.Smoke): a mode
-        _actSmoke = BonusButton(bonus, "Дым", toggle: true, SmokeToggle);
+        _actSmoke = BonusButton(bonus, "smoke", "Дым", toggle: true, SmokeToggle);
         // the kit's acts on a hex (Д8, Tank3DBench.Gear): modes
-        _actMine = BonusButton(bonus, "Мина", toggle: true, () => GearToggle(Gear.Mine));
-        _actRepair = BonusButton(bonus, "Ремонт", toggle: true, () => GearToggle(Gear.Repair));
-        _actWinch = BonusButton(bonus, "Лебёдка", toggle: true, () => GearToggle(Gear.Winch));
-        _actDouse = BonusButton(bonus, "Тушить", toggle: false, () => Execute(new Command(CommandKind.Douse)));
+        _actMine = BonusButton(bonus, "mine", "Мина", toggle: true, () => GearToggle(Gear.Mine));
+        _actRepair = BonusButton(bonus, "repair", "Ремонт", toggle: true, () => GearToggle(Gear.Repair));
+        _actWinch = BonusButton(bonus, "winch", "Лебёдка", toggle: true, () => GearToggle(Gear.Winch));
+        _actDouse = BonusButton(bonus, "douse", "Тушить", toggle: false, () => Execute(new Command(CommandKind.Douse)));
         layer.AddChild(_acts);
+        ActIconsFit();
+        GetTree().Root.SizeChanged += ActIconsFit;
+    }
+
+    /// <summary>The icons rasterised at the pixels they take on screen: the
+    /// panel is laid out at 1600 × 900 and stretched with the window
+    /// (<c>canvas_items</c>), so a raster of the layout's 36 would be blown up
+    /// soft in a bigger window. Redone only when the size in pixels changes.</summary>
+    private void ActIconsFit()
+    {
+        Window w = GetWindow();
+        Vector2I size = w.Size, layout = w.ContentScaleSize;
+        float stretch = layout.X > 0 && layout.Y > 0
+            ? Mathf.Min(size.X / (float)layout.X, size.Y / (float)layout.Y) : 1.0f;
+        int px = Mathf.Max(16, Mathf.RoundToInt(ActIconPx * stretch * w.ContentScaleFactor));
+        if (px == _actIconRaster)
+            return;
+        _actIconRaster = px;
+        Log.Print($"tank3d: acts: icons at {px} px, window {size.X}x{size.Y}");
+        foreach ((Button b, string icon) in _actIcons)
+            if (ActIcon(icon, px) is { } tex)
+                b.Icon = tex;
     }
 
     /// <summary>A slot's frame: its buttons in a row, and the tick shown in
@@ -111,24 +143,28 @@ public sealed partial class Tank3DBench
         return (frame, row, label);
     }
 
-    private Button BonusButton(HBoxContainer row, string text, bool toggle, System.Action pressed)
+    private Button BonusButton(HBoxContainer row, string icon, string name, bool toggle, System.Action pressed)
     {
-        Button b = ActButton(row, text, toggle, pressed);
-        _bonusActs.Add((b, text, pressed));
+        Button b = ActButton(row, icon, name, "", toggle, pressed);
+        _bonusActs.Add((b, name, pressed));
         return b;
     }
 
-    private static Button ActButton(HBoxContainer row, string text, bool toggle, System.Action pressed)
+    /// <summary>A button: the act's icon and its key, or its name and key
+    /// when the icon is not on disk.</summary>
+    private Button ActButton(HBoxContainer row, string icon, string name, string key, bool toggle, System.Action pressed)
     {
         var b = new Button
         {
-            Text = text,
+            Icon = ActIcon(icon, ActIconPx),
             ToggleMode = toggle,
             FocusMode = Control.FocusModeEnum.None,
-            CustomMinimumSize = new Vector2(104.0f, 44.0f),
+            CustomMinimumSize = new Vector2(0.0f, 48.0f),
         };
-        b.AddThemeFontSizeOverride("font_size", 16);
-        b.AddThemeStyleboxOverride("normal", ActBox(new Color(0.34f, 0.35f, 0.31f), 1));
+        ActLabel(b, name, key);
+        b.AddThemeConstantOverride("icon_max_width", ActIconPx);
+        b.AddThemeFontSizeOverride("font_size", b.Icon is null ? 16 : 14);
+        b.AddThemeStyleboxOverride("normal", ActBox(new Color(0.46f, 0.48f, 0.41f), 1));
         b.AddThemeStyleboxOverride("hover", ActBox(CardPale, 1));
         b.AddThemeStyleboxOverride("pressed", ActBox(CardSpend, 2));
         b.AddThemeStyleboxOverride("hover_pressed", ActBox(CardSpend, 2));
@@ -136,15 +172,42 @@ public sealed partial class Tank3DBench
         b.AddThemeColorOverride("font_hover_pressed_color", CardSpend);
         b.Pressed += pressed;
         row.AddChild(b);
+        if (b.Icon is not null)
+            _actIcons.Add((b, icon));
         return b;
+    }
+
+    /// <summary>What a button says: the key beside the icon and the name in
+    /// the tooltip, or the name and the key without the icon.</summary>
+    private static void ActLabel(Button b, string name, string key)
+    {
+        b.Text = b.Icon is not null ? key : key.Length > 0 ? $"{name}   {key}" : name;
+        b.TooltipText = key.Length > 0 ? $"{name} ({key})" : name;
+    }
+
+    /// <summary>The act's icon, <c>Icons/&lt;name&gt;.svg</c> rasterised
+    /// <paramref name="px"/> on a side; null with no file.</summary>
+    private static Texture2D? ActIcon(string name, int px)
+    {
+        string path = $"{AssetRoot.Icons}/{name}.svg";
+        if (!System.IO.File.Exists(path))
+        {
+            Log.Print($"tank3d: acts: no {path}, the button says its name");
+            return null;
+        }
+        var image = new Image();
+        return image.LoadSvgFromString(System.IO.File.ReadAllText(path), px / 64.0f) == Error.Ok
+            ? ImageTexture.CreateFromImage(image) : null;
     }
 
     private static StyleBoxFlat ActBox(Color rim, int width)
     {
-        var box = new StyleBoxFlat { BgColor = new Color(0.08f, 0.085f, 0.075f, 0.9f), BorderColor = rim };
+        // a mid olive, not the black of the frames: the icons' ink and shadow
+        // are near-black and vanished on it (2026-11-01)
+        var box = new StyleBoxFlat { BgColor = new Color(0.27f, 0.29f, 0.23f, 0.95f), BorderColor = rim };
         box.SetBorderWidthAll(width);
         box.SetCornerRadiusAll(8);
-        box.ContentMarginLeft = box.ContentMarginRight = 14.0f;
+        box.ContentMarginLeft = box.ContentMarginRight = 8.0f;
         return box;
     }
 
@@ -218,6 +281,14 @@ public sealed partial class Tank3DBench
             return true;
         if (!Match || !_ramMode && !_attackMode)
             return false;
+        // the ram on the hex past the wall the hull faces: the wall's (Д5)
+        if (_ramMode && WallAhead && PickAt(screen) is (var point, false, false)
+            && _field!.FlatCellAt(Board(point)) == HexField.Step(CellHere, HullSide()))
+        {
+            _ramMode = false;
+            Execute(new Command(CommandKind.RamWall, Side: HullSide()));
+            return true;
+        }
         // the tank at the click itself made the target: a click from --do has
         // no pointer over it
         if (ParkedAt(screen) is { } standing)
@@ -273,7 +344,6 @@ public sealed partial class Tank3DBench
         _actFiery.SetPressedNoSignal(_fieryMode);
         _actRam!.Visible = bonus;
         _actRam.SetPressedNoSignal(_ramMode);
-        _actRamWall!.Visible = bonus && WallAhead;
         _actSmoke!.Visible = bonus && RigSmokes;
         _actSmoke.SetPressedNoSignal(_smokeMode);
         _actMine!.Visible = bonus && RigHas(Kit.MineLayer);
@@ -293,7 +363,7 @@ public sealed partial class Tank3DBench
             _bonusShown = shownMask;
             for (int i = 0, n = 3; i < _bonusActs.Count; i++)
                 if (_bonusActs[i].Button.Visible)
-                    _bonusActs[i].Button.Text = n <= 9 ? $"{_bonusActs[i].Text}   {n++}" : _bonusActs[i].Text;
+                    ActLabel(_bonusActs[i].Button, _bonusActs[i].Text, n <= 9 ? $"{n++}" : "");
         }
     }
 }

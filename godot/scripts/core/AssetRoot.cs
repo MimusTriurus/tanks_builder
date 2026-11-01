@@ -100,6 +100,13 @@ internal static class AssetRoot
     /// its <c>_32</c>/<c>_64</c> PNGs (<c>Tank3DBench.Cursor</c>).</summary>
     internal static readonly string Cursors = Repo + "/assets/Images/Cursors";
 
+    /// <summary>The action panel's icons: one per act, <c>attack</c>,
+    /// <c>ambush</c>, <c>incendiary</c>, <c>ram</c>, <c>smoke</c>, <c>mine</c>,
+    /// <c>repair</c>, <c>winch</c>, <c>douse</c> - each a <c>.svg</c>, its
+    /// <c>_64</c>/<c>_128</c> PNGs and the VectorCraft source with the variants
+    /// (<c>Tank3DBench.Acts</c>).</summary>
+    internal static readonly string Icons = Repo + "/Icons";
+
     /// <summary>The bench's own settings files - <c>panel.json</c>,
     /// <c>terrain.json</c>, <c>classes.json</c> and the rest: <c>godot/data</c>,
     /// read off disk so an edit lands on the next run.</summary>

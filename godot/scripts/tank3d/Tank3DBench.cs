@@ -1655,7 +1655,11 @@ public sealed partial class Tank3DBench : Node3D
                     // middle - the mouse's own path, PickAt and all.
                     string[] qr = what[6..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        OrderClick(_camera.UnprojectPosition(CellWorld(MapCell(q, r))), false);
+                    {
+                        Vector2 at = _camera.UnprojectPosition(CellWorld(MapCell(q, r)));
+                        if (!ActClick(at))
+                            OrderClick(at, false);
+                    }
                 }
                 // roster-hover=N: the pointer held on the roster's N-th icon, from 1;
                 // roster-click=N: a click on it (Tank3DBench.Roster)

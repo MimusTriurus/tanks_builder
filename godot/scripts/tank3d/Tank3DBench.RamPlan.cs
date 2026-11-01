@@ -312,7 +312,9 @@ public sealed partial class Tank3DBench
             _gearMode = Gear.None;
         if (_ramMode)
             _ambushMode = _attackMode = false;
-        _orderNote = _ramMode ? "таран: наведи на танк, свой тоже" : "таран выключен";
+        _orderNote = !_ramMode ? "таран выключен"
+            : WallAhead ? "таран: наведи на танк, свой тоже, или щёлкни за стену"
+            : "таран: наведи на танк, свой тоже";
     }
 
     // --- the picture -------------------------------------------------------------
