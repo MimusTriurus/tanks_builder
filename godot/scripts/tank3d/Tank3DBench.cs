@@ -314,7 +314,9 @@ public sealed partial class Tank3DBench : Node3D
         await Loading.Stage(this, "panels", 0.9f);
         var layer = new CanvasLayer();
         AddChild(layer);
-        _hud = new Label { Position = new Vector2(12, 8), Modulate = new Color(1, 1, 1, 0.85f), Visible = !_noUi };
+        // the status and controls text, top left: off the screen, F1 (F9 in a
+        // match) shows it as a readout for debugging
+        _hud = new Label { Position = new Vector2(12, 8), Modulate = new Color(1, 1, 1, 0.85f), Visible = false };
         layer.AddChild(_hud);
         // under the panel, which is drawn after it
         BuildCourse(layer);
@@ -2327,12 +2329,17 @@ public sealed partial class Tank3DBench : Node3D
         }
         Prof.Scope hud = Prof.Measure("hud");
         // Rebuilt only when what it says changed: built every frame it was
-        // 6 KB a frame of strings for a text that stood still (BOT-3).
-        int stamp = HudStamp();
-        if (stamp != _hudStamp)
+        // 6 KB a frame of strings for a text that stood still (BOT-3). Off the
+        // screen it is not built at all.
+        _hud.Visible = _hints && !_noUi;
+        if (_hud.Visible)
         {
-            _hudStamp = stamp;
-            HudText();
+            int stamp = HudStamp();
+            if (stamp != _hudStamp)
+            {
+                _hudStamp = stamp;
+                HudText();
+            }
         }
         hud.Dispose();
         bench.Dispose();
@@ -2652,7 +2659,8 @@ public sealed partial class Tank3DBench : Node3D
             // in a match: the ram on or off (Tank3DBench.RamPlan)
             case Key.Tab: if (Match) RamToggle(); else if (!NextWay()) _panel?.Flip(); break;
             case Key.Home: FollowTank(); break;
-            // in a match: both sides' line and the controls (Tank3DBench.Match)
+            // the status and controls text on and off (HudText; in a match
+            // with both sides' line, Tank3DBench.Match)
             case Key.F1: _hints = !_hints; break;
             case Key.F9 when Match: _hints = !_hints; break;
             case Key.F10 when Match: TogglePerf(); break;
