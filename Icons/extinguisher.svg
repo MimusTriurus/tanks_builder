@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>extinguisher_6_bottle_plus</title>
+  <g transform="translate(-6 0)">
+  <path id="hose_shadow" d="M 33 14 C 47 14 48 30 45 40" transform="translate(2.5 2.5)" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="neck_shadow" d="M 25 10 L 33 10 L 33 19 L 25 19 Z" transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="lever_shadow" d="M 24 10 L 38 6" transform="translate(2.5 2.5)" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="body_shadow" d="M 24 18 L 34 18 C 37.3138 18 40 20.6862 40 24 L 40 52 C 40 55.3138 37.3138 58 34 58 L 24 58 C 20.6862 58 18 55.3138 18 52 L 18 24 C 18 20.6862 20.6862 18 24 18 Z" transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="hose_ink" d="M 33 14 C 47 14 48 30 45 40" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="neck_ink" d="M 25 10 L 33 10 L 33 19 L 25 19 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="lever_ink" d="M 24 10 L 38 6" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="body_ink" d="M 24 18 L 34 18 C 37.3138 18 40 20.6862 40 24 L 40 52 C 40 55.3138 37.3138 58 34 58 L 24 58 C 20.6862 58 18 55.3138 18 52 L 18 24 C 18 20.6862 20.6862 18 24 18 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="hose" d="M 33 14 C 47 14 48 30 45 40" fill="none" stroke="#5d6468" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="neck" d="M 25 10 L 33 10 L 33 19 L 25 19 Z" fill="#5d6468"/>
+  <path id="lever" d="M 24 10 L 38 6" fill="none" stroke="#aeb4b8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="body" d="M 24 18 L 34 18 C 37.3138 18 40 20.6862 40 24 L 40 52 C 40 55.3138 37.3138 58 34 58 L 24 58 C 20.6862 58 18 55.3138 18 52 L 18 24 C 18 20.6862 20.6862 18 24 18 Z" fill="#ff4433"/>
+  <path id="band" d="M 18 26 L 40 26 L 40 30 L 18 30 Z" fill="#a8261a"/>
+  <path id="body_lit" d="M 22 32 L 22 52" fill="none" stroke="#ffb09e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="p_shadow" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="p_ink" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="p" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " fill="#ffb02e"/>
+  <path id="p_plus" d="M 45.05 50.00 L 54.95 50.00 M 50.00 45.05 L 50.00 54.95 " fill="none" stroke="#16130f" stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+</svg>

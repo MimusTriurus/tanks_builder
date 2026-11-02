@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>wide_tracks_6_hex_print</title>
+  <g transform="translate(32 32) scale(0.93) translate(-32 -32)">
+  <path id="hx_shadow" d="M 17.5 7.618 L 44.5 7.618 L 58 31 L 44.5 54.382 L 17.5 54.382 L 4 31 Z" transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="hx_ink" d="M 17.5 7.618 L 44.5 7.618 L 58 31 L 44.5 54.382 L 17.5 54.382 L 4 31 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="hx" d="M 17.5 7.618 L 44.5 7.618 L 58 31 L 44.5 54.382 L 17.5 54.382 L 4 31 Z" fill="#8a6a45"/>
+  <path id="hx_lit" d="M 18.5 10.5 L 43.5 10.5" fill="none" stroke="#c9a77a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="pv15" d="M 17 20 L 31 14 L 45 20" fill="none" stroke="#3f2d1d" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="ph15" d="M 19 17 L 31 12" fill="none" stroke="#c9a77a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="pv24" d="M 17 29 L 31 23 L 45 29" fill="none" stroke="#3f2d1d" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="ph24" d="M 19 26 L 31 21" fill="none" stroke="#c9a77a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="pv33" d="M 17 38 L 31 32 L 45 38" fill="none" stroke="#3f2d1d" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="ph33" d="M 19 35 L 31 30" fill="none" stroke="#c9a77a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="pv42" d="M 17 47 L 31 41 L 45 47" fill="none" stroke="#3f2d1d" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="ph42" d="M 19 44 L 31 39" fill="none" stroke="#c9a77a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="p_shadow" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="p_ink" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="p" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " fill="#ffb02e"/>
+  <path id="p_plus" d="M 45.05 50.00 L 54.95 50.00 M 50.00 45.05 L 50.00 54.95 " fill="none" stroke="#16130f" stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+</svg>

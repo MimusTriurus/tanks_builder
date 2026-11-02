@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <title>ambush_stabilizer_6_ambush_plus</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="b5_ring_ink" data-name="b5 ring ink" d="M12 31 C12 20.507 20.507 12 31 12 C41.493 12 50 20.507 50 31 C50 41.493 41.493 50 31 50 C20.507 50 12 41.493 12 31 Z" fill="none" stroke="#16130f" stroke-width="9" stroke-miterlimit="10"/>
+    <path id="b5_ring_ink-2" data-name="b5 ring ink" d="M14.5 33.5 C14.5 23.007 23.007 14.5 33.5 14.5 C43.993 14.5 52.5 23.007 52.5 33.5 C52.5 43.993 43.993 52.5 33.5 52.5 C23.007 52.5 14.5 43.993 14.5 33.5 Z" fill="none" stroke="#16130f" stroke-width="9" stroke-miterlimit="10"/>
+    <path id="b5_ticks_ink" data-name="b5 ticks ink" d="M31 4 L31 10 M31 52 L31 58 M4 31 L10 31 M52 31 L58 31" fill="none" stroke="#16130f" stroke-width="9" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_ticks_ink-2" data-name="b5 ticks ink" d="M33.5 6.5 L33.5 12.5 M33.5 54.5 L33.5 60.5 M6.5 33.5 L12.5 33.5 M54.5 33.5 L60.5 33.5" fill="none" stroke="#16130f" stroke-width="9" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_glass_ink" data-name="b5 glass ink" d="M24 20 L38 20 C38 24.667 35.667 28.333 31 31 C35.667 33.667 38 37.333 38 42 L24 42 C24 37.333 26.333 33.667 31 31 C26.333 28.333 24 24.667 24 20 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="b5_glass_ink-2" data-name="b5 glass ink" d="M26.5 22.5 L40.5 22.5 C40.5 27.167 38.167 30.833 33.5 33.5 C38.167 36.167 40.5 39.833 40.5 44.5 L26.5 44.5 C26.5 39.833 28.833 36.167 33.5 33.5 C28.833 30.833 26.5 27.167 26.5 22.5 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="b5_caps_ink" data-name="b5 caps ink" d="M21.5 18.5 L40.5 18.5 M21.5 43.5 L40.5 43.5" fill="none" stroke="#16130f" stroke-width="8" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_caps_ink-2" data-name="b5 caps ink" d="M24 21 L43 21 M24 46 L43 46" fill="none" stroke="#16130f" stroke-width="8" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_ring" data-name="b5 ring" d="M12 31 C12 20.507 20.507 12 31 12 C41.493 12 50 20.507 50 31 C50 41.493 41.493 50 31 50 C20.507 50 12 41.493 12 31 Z" fill="none" stroke="#ff4433" stroke-width="4.2" stroke-miterlimit="10"/>
+    <path id="b5_ticks" data-name="b5 ticks" d="M31 4 L31 10 M31 52 L31 58 M4 31 L10 31 M52 31 L58 31" fill="none" stroke="#ff4433" stroke-width="4.2" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_glass" data-name="b5 glass" d="M24 20 L38 20 C38 24.667 35.667 28.333 31 31 C35.667 33.667 38 37.333 38 42 L24 42 C24 37.333 26.333 33.667 31 31 C26.333 28.333 24 24.667 24 20 Z" fill="#d9ecf0"/>
+    <path id="b5_sand_top" data-name="b5 sand top" d="M26 23.5 L36 23.5 C35.333 26.167 33.667 28.333 31 30 C28.333 28.333 26.667 26.167 26 23.5 Z" fill="#ffb02e"/>
+    <path id="b5_sand_bottom" data-name="b5 sand bottom" d="M25.4 41.6 C29.133 36.867 32.867 36.867 36.6 41.6 Z" fill="#ffb02e"/>
+    <path id="b5_sand_stream" data-name="b5 sand stream" d="M31 30.5 L31 37" fill="none" stroke="#ffb02e" stroke-width="1.4" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_caps" data-name="b5 caps" d="M21.5 18.5 L40.5 18.5 M21.5 43.5 L40.5 43.5" fill="none" stroke="#b8682c" stroke-width="3.6" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="b5_glass_glint" data-name="b5 glass glint" d="M26 21.5 C26.333 23.833 27.333 25.833 29 27.5" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="p_shadow" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="p_ink" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="p" d="M 59.00 50.00 C 59.00 54.97 54.97 59.00 50.00 59.00 C 45.03 59.00 41.00 54.97 41.00 50.00 C 41.00 45.03 45.03 41.00 50.00 41.00 C 54.97 41.00 59.00 45.03 59.00 50.00 Z " fill="#ffb02e"/>
+    <path id="p_plus" d="M 45.05 50.00 L 54.95 50.00 M 50.00 45.05 L 50.00 54.95 " fill="none" stroke="#16130f" stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+</svg>
