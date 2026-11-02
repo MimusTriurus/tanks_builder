@@ -270,6 +270,12 @@ public sealed partial class Tank3DBench : Node3D
             GetTree().Quit(FireStudy.Main(OS.GetCmdlineUserArgs()));
             return;
         }
+        // --range-study: how far the guns kill, and what a range would take (RangeStudy)
+        if (RangeStudy.Asked(OS.GetCmdlineUserArgs()))
+        {
+            GetTree().Quit(RangeStudy.Main(OS.GetCmdlineUserArgs()));
+            return;
+        }
         try
         {
             await Building();
