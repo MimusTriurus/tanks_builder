@@ -216,8 +216,11 @@ public sealed class Relief
     public const float DuneLift = 0.5f, DuneLength = 1.5f;
 
     /// <summary>The fields of a filled board, its <see cref="HexField.Atlas"/>
-    /// set. Null without one - there is no hex size to raster by.</summary>
-    public static Relief? Build(HexField field, int seed = 11, RockStyles? rocks = null)
+    /// set. Null without one - there is no hex size to raster by.
+    /// <paramref name="berms"/>: the cells a bunker stands on, dug in
+    /// (<see cref="Pads"/>).</summary>
+    public static Relief? Build(HexField field, int seed = 11, RockStyles? rocks = null,
+                                IReadOnlySet<Vector2I>? berms = null)
     {
         if (field.Atlas is null)
             return null;
@@ -245,12 +248,13 @@ public sealed class Relief
         int nx = (int)Mathf.Ceil((frame.Size.X + 2 * pad) / cell) + 1;
         int ny = (int)Mathf.Ceil((frame.Size.Y + 2 * pad) / cell) + 1;
         var f = new Relief(nx, ny, x0, z0, cell, squash) { Frame = frame };
-        f.Fill(field, r, seed, rocks);
+        f.Fill(field, r, seed, rocks, berms);
         f.Seconds = (Time.GetTicksUsec() - t0) / 1e6f;
         return f;
     }
 
-    private void Fill(HexField field, float r, int seed, RockStyles? rocks)
+    private void Fill(HexField field, float r, int seed, RockStyles? rocks,
+                      IReadOnlySet<Vector2I>? berms)
     {
         int n = Nx * Ny;
         float lift = field.Lift;
@@ -447,7 +451,7 @@ public sealed class Relief
         Dunes(lift, r, rocks?.Wind ?? RockClimate.DefaultWind, seed);
         // after every stage that shapes the dry ground, before the water
         // reads it: a pad is dry, and its shoulder must not move a shore
-        float[]? foot = Pads(field, r);
+        float[]? foot = Pads(field, r, berms);
 
         FillWater(field);
         Carve(lift, r);
@@ -477,6 +481,16 @@ public sealed class Relief
     /// <summary>How deep a hollow a wall's foot is shaded as, 0-1 of
     /// <see cref="HollowInk"/>: the occlusion where masonry meets the ground.</summary>
     public const float FootInk = 0.75f;
+
+    /// <summary>A bunker's bank (<see cref="Pads"/>): how high against its
+    /// wall and how far out it runs, in circumradii of ground. Under the
+    /// slit's sill (0.40 R) with room, about two thirds of a level.</summary>
+    public const float BermLift = 0.3f, BermWide = 0.5f;
+
+    /// <summary>How far the bank runs on under the bunker's own wall, in
+    /// circumradii: past where the leaning face stands at the bank's height
+    /// (about 0.09 R in), short of the floor a tank stands on.</summary>
+    public const float BermIn = 0.12f;
 
     /// <summary>
     /// Whether a cell is a pad (BOT-12, docs/walls-relief-plan.md): masonry -
@@ -510,8 +524,16 @@ public sealed class Relief
     /// shoulder runs parallel to the sides. Two pads side by side on different
     /// levels keep each its own height up to the side between them: a sheer
     /// step (<see cref="BoardRules.PadStep"/>). Null with no pad.
+    ///
+    /// <b>A bunker is dug in</b> (<paramref name="berms"/>, the caponiers the
+    /// bunker model stands on): a bank of earth <see cref="BermLift"/> high
+    /// against each standing side, out over <see cref="BermWide"/> on the
+    /// neighbours, none at the gate. The bunker itself cannot sink or shrink:
+    /// a tank drives into it and fires through its slit at 0.40-0.80 R, so
+    /// the ground comes up to it instead (the user's catch, 2026-11-02: a grey
+    /// block standing on the lawn). The floor inside stays flat.
     /// </summary>
-    private float[]? Pads(HexField field, float r)
+    private float[]? Pads(HexField field, float r, IReadOnlySet<Vector2I>? berms)
     {
         var pads = new Dictionary<Vector2I, (Vector2 Centre, float Top, int Sides)>();
         for (int q = 0; q < field.Columns; q++)
@@ -538,6 +560,8 @@ public sealed class Relief
         }
         float side = r * 0.8660254f;
         float core = side + PadLip * r, shoulder = PadShoulder * r, wide = FootWide * r;
+        // ground px of height, as the screen's lift px the raster holds
+        float bermLift = BermLift * r * field.RiseFactor;
         float[] earth = Look[LookOf(Soil.Earth)];
         var foot = new float[Height.Length];
         for (int j = 0; j < Ny; j++)
@@ -548,7 +572,7 @@ public sealed class Relief
                 if (own.X < 0)
                     continue;
                 var at = new Vector2(X0 + i * Cell, Z0 + j * Cell);
-                float weight = 0.0f, top = 0.0f, shade = 0.0f;
+                float weight = 0.0f, top = 0.0f, shade = 0.0f, berm = 0.0f;
                 // its own cell first, so on a side between two pads the
                 // point keeps its own and the step is sheer
                 for (int k = -1; k < ways.Length; k++)
@@ -568,6 +592,32 @@ public sealed class Relief
                             nearest = w;
                         }
                     }
+                    // a bunker's bank, never on another pad. Under its own
+                    // wall it runs on in a little (BermIn), where the leaning
+                    // face meets it: stopped at the side, the bank's crest
+                    // and the floor met between two raster points, and the
+                    // wall's foot came out a saw
+                    if (berms is not null && berms.Contains(c) && (own == c || !pads.ContainsKey(own)))
+                    {
+                        if (dist <= side)
+                        {
+                            if ((pad.Sides & bits[nearest]) != 0)
+                                berm = Mathf.Max(berm, Mathf.SmoothStep(side - BermIn * r, side - (BermIn - 0.04f) * r, dist));
+                        }
+                        else
+                        {
+                            for (int w = 0; w < ways.Length; w++)
+                            {
+                                if ((pad.Sides & bits[w]) == 0)
+                                    continue;
+                                Vector2 rel = d - ways[w] * side;
+                                var along = new Vector2(-ways[w].Y, ways[w].X);
+                                float t = Mathf.Clamp(rel.Dot(along), -0.5f * r, 0.5f * r);
+                                float gap = (rel - along * t).Length();
+                                berm = Mathf.Max(berm, 1.0f - Mathf.SmoothStep(0.0f, BermWide * r, gap));
+                            }
+                        }
+                    }
                     float wt = dist <= core ? 1.0f : 1.0f - Mathf.SmoothStep(core, core + shoulder, dist);
                     if (wt > weight)
                     {
@@ -581,10 +631,10 @@ public sealed class Relief
                         shade = Mathf.Max(shade, 1.0f - Mathf.SmoothStep(FootFull * r * scale, wide * scale, Mathf.Abs(off)));
                     }
                 }
-                if (weight <= 0.0f && shade <= 0.0f)
+                if (weight <= 0.0f && shade <= 0.0f && berm <= 0.0f)
                     continue;
                 if (!field.IsWater(own) && field.FoundationAt(own) != Foundation.Rock)
-                    Height[p] = Mathf.Lerp(Height[p], top, weight);
+                    Height[p] = Mathf.Lerp(Height[p], top, weight) + berm * bermLift;
                 earth[p] = Mathf.Max(earth[p], shade);
                 foot[p] = shade;
             }

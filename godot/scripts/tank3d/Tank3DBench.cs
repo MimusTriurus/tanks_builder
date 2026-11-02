@@ -1214,7 +1214,13 @@ public sealed partial class Tank3DBench : Node3D
         }
         _iceBuilt = rocks?.Ice ?? map.Climate.Ice;
         _windBuilt = rocks?.Wind ?? map.Climate.Wind;
-        _relief = Relief.Build(_field!, rocks: rocks);
+        // the bunkers dug in (Relief.Pads): every capon whose model stands
+        var berms = new HashSet<Vector2I>();
+        if (_show.Walls && _show.Bunkers)
+            foreach (Vector2I cell in map.Walled())
+                if (map.MasonryAt(cell)?.Kind == Masonry.Sort.Capon)
+                    berms.Add(cell);
+        _relief = Relief.Build(_field!, rocks: rocks, berms: berms);
         if (_relief is null)
             return;
         foreach (RockGroup g in _relief.Rocks)

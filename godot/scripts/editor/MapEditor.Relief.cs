@@ -78,7 +78,7 @@ public sealed partial class MapEditor
                       + "|" + (looks is null ? "" : new string(looks))
                       + "|" + string.Join(";", roads)
                       + "|" + _edit.Climate + "|"
-                      + string.Join(";", _edit.Walled().Select(c => $"{c.X},{c.Y},{_edit.MasonryAt(c)?.Edges}")) + "|"
+                      + string.Join(";", _edit.Walled().Select(c => $"{c.X},{c.Y},{_edit.MasonryAt(c)?.Edges},{_edit.MasonryAt(c)?.Kind}")) + "|"
                       + string.Join(";", rocking.OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
                                                 .Select(kv => $"{kv.Key}{kv.Value}"));
         if (want == _reliefAs)
@@ -116,7 +116,12 @@ public sealed partial class MapEditor
             return;
         }
 
-        _relief = Relief.Build(_board, rocks: rocks);
+        // the bunkers dug in (Relief.Pads), on the ring's cells
+        var berms = new HashSet<Vector2I>();
+        foreach (Vector2I walled in _edit.Walled())
+            if (_edit.MasonryAt(walled)?.Kind == Masonry.Sort.Capon)
+                berms.Add(walled + ring.Shift);
+        _relief = Relief.Build(_board, rocks: rocks, berms: berms);
         Vector2 offset = _board.FlatAnchor(ring.Shift) - _field.FlatAnchor(Vector2I.Zero);
         Relief? relief = _relief;
         _board.Surface = relief is null ? null : relief.HeightAt;
