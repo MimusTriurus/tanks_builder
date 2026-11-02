@@ -109,7 +109,7 @@ dotnet build
 ([docs/events.md](docs/events.md)); `res://scenes/legacy/Wood.tscn`,
 `res://scenes/legacy/Wall.tscn`, `res://scenes/legacy/Relief.tscn`, `res://scenes/Relief3D.tscn`, `res://scenes/Editor.tscn`;
 `res://scenes/Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md));
-`res://scenes/Match3D.tscn` — партия на нём: две стороны (зелёные и коричневые), по танку на спавн, на доске 10 × 10, по умолчанию учебная расстановка `drill10` (рикошет, взрыв в кучке), ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»);
+`res://scenes/Match3D.tscn` — партия на нём: две стороны (зелёные и коричневые), по танку на спавн, на доске 10 × 10, по умолчанию учебная расстановка `drill10` (рикошет, взрыв в кучке), ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»); с `-- --quick` — быстрый бой против ИИ: лобби и сборка отряда на бюджет перед расстановкой (там же, «Быстрый бой против ИИ»);
 `res://scenes/Tree3D.tscn` — модели деревьев генератора на объёмной доске: лесной пожар, падение от тарана и четыре способа травы ([docs/props.md](docs/props.md), «Tree3D»).
 `--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели, а
 не класс ([docs/architecture.md](docs/architecture.md)).

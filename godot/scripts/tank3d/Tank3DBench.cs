@@ -300,6 +300,9 @@ public sealed partial class Tank3DBench : Node3D
         // The board's tile first: the camera's angle, the board's size and the
         // effects' pools all come off it, and none of them follows the tank.
         _tile = LoadTile("MTP");
+        // the quick battle's lobby and build, before the board they choose (Tank3DBench.Quick)
+        if (Quick && Match)
+            await QuickScreens();
 
         GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
         BuildWorld();
@@ -1468,6 +1471,10 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--map" && more) { _mapName = args[++i]; _mapNamed = true; }
             // the bench as a game, two sides of five (Tank3DBench.Match; Match3D.tscn sets it)
             else if (a == "--match") Match = true;
+            // a quick battle against the AI: the lobby and the build first (Tank3DBench.Quick)
+            else if (a == "--quick") Quick = Match = true;
+            else if (a == "--quick-do" && more)
+                _quickDo.AddRange(args[++i].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             // the old view, the sprites' angle, rather than the isometric one (Orbit)
             else if (a == "--game-angle") _gameAngle = true;
             // the pointer held on a cell, for a capture of the way to it (Tank3DBench.Course)

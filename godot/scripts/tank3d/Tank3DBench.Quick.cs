@@ -1,0 +1,1602 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// The quick battle against the AI (GDD meta.md, «Быстрый бой: PvP и PvAI»;
+/// the author's М-5, 2026-11-02): <c>--quick</c> on <c>Match3D.tscn</c>
+/// (<see cref="Quick"/>). Two screens before the board is built - the
+/// lobby's parameters and the squad's build - then the placement, then the
+/// squads revealed and the toss.
+///
+/// <b>The prototype's layout, piece for piece</b> (the artifact «Сборка
+/// отряда: быстрый бой», PvAI; its dark palette, <see cref="QBg"/>): the
+/// lobby a sheet of boxes; the build a header with the battle's facts and
+/// the budget's pips, the battlefield down the left, three machine cards -
+/// the machine's name and cost, its picture, the five classes as hexes, its
+/// two branches as hex nodes linked down, what it carries - and the bar of
+/// the quick start and the hands; a floating tooltip; the parameters and the
+/// map in a dialog over it. The pieces are drawn (<see cref="QuickPad"/>).
+/// <list type="bullet">
+/// <item><b>Before the board.</b> The screens run in <c>Building</c> after
+/// the tile, before the world: the map is read off its file for the minimap,
+/// and changing it costs nothing. «К сборке» from the placement reloads the
+/// scene with the setup kept (<see cref="_quickBack"/>).</item>
+/// <item><b>Parameters</b> - the map (those with a zone for each side), the
+/// player's side (south or north: the zone's half of the board), the two
+/// budgets, the AI's doctrine or a random one. Changeable until «В бой», on
+/// the build screen too; a budget cut below what is spent takes the top
+/// levels off (<see cref="QuickSquad.Trim"/>).</item>
+/// <item><b>The build</b> (<see cref="QuickSquad"/>): a class free, a
+/// level's node buys the branch up to it for its number in points, the top
+/// open one clicked gives it back, a branch's head moves the level over.
+/// An upgrade the bench has no rule for is bought and marked «*»; it is not
+/// in the machine's kit.</item>
+/// <item><b>The AI</b> builds blind as «К расстановке» is pressed, by its
+/// doctrine and budget (<see cref="QuickSquad.ForAi"/>), and stands on its
+/// homes - its own placement is the AI plan's (docs/ai-plan.md). Its side is
+/// still played by hand.</item>
+/// <item><b>The placement</b> is the player's side's alone; its «В бой»
+/// reveals both squads and says the toss (<see cref="QuickReveal"/>).</item>
+/// </list>
+/// <c>--quick-do "build;company:2;shot:PATH;go"</c> drives the screens for a
+/// capture (<see cref="QuickScript"/>).
+/// </summary>
+public sealed partial class Tank3DBench
+{
+    /// <summary>The match is a quick battle against the AI - <c>--quick</c>.</summary>
+    [Export] public bool Quick { get; set; }
+
+    private sealed class QuickSetup
+    {
+        public string Map = "duel12";
+        public Side Player = Side.Green;
+        public int Budget = QuickSquad.BudgetDefault, AiBudget = QuickSquad.BudgetDefault;
+        /// <summary>The AI's doctrine, an index into <see cref="QuickSquad.Doctrines"/>; null, random.</summary>
+        public int? Doctrine;
+        public QuickSquad.Slot[] Squad = QuickSquad.Empty();
+        /// <summary>The AI's, made at «К расстановке».</summary>
+        public QuickSquad.Slot[] Ai = QuickSquad.Empty();
+        public QuickSquad.Doctrine? AiDoctrine;
+    }
+
+    /// <summary>The setup carried over the scene's reload, «К сборке» from the placement.</summary>
+    private static QuickSetup? _quickBack;
+
+    /// <summary>The battle's setup once the screens are done; null off a quick battle.</summary>
+    private QuickSetup? _quick;
+
+    private Side QuickAi => Across(_quick!.Player);
+
+    // --- the prototype's palette, dark ---------------------------------------------
+
+    private static readonly Color QBg = new("131712");
+    private static readonly Color QPanelC = new("1C211B");
+    private static readonly Color QInset = new("171C16");
+    private static readonly Color QInk = new("DEE4D5");
+    private static readonly Color QMuted = new("98A18F");
+    private static readonly Color QLine = new("353D31");
+    private static readonly Color QOlive = new("A3B65E");
+    private static readonly Color QOnOlive = new("131712");
+    private static readonly Color QSel = new("2A3322");
+    private static readonly Color QAmber = new("E3A73C");
+    private static readonly Color QRed = new("E2695E");
+    private static readonly Color QTipBg = new("2B3329");
+    private static readonly Color QOnTip = new("EEF1E8");
+    private static readonly Color QTipMuted = new("A4AD99");
+
+    // --- the screens -------------------------------------------------------------
+
+    private enum QuickPage { Lobby, Build }
+    private enum QuickModal { None, Params, Map, Ask }
+
+    /// <summary>The question the <see cref="QuickModal.Ask"/> dialog puts (<see cref="QuickAsk"/>).</summary>
+    private (string Head, string Text, string Yes, string No, Action Act)? _qAsk;
+
+    private QuickSetup _qs = new();
+    private QuickPage _qPage;
+    private QuickModal _qModal;
+    private CanvasLayer? _qLayer;
+    private Control? _qRoot, _qOver;
+    private PanelContainer? _qTip;
+    private QuickPad? _qTipFor;
+    private bool _qGo;
+    private readonly Dictionary<string, BoardMap> _qMaps = new();
+    private int _qArtLeft;
+
+    /// <summary>In <c>Building</c>, after the tile: the lobby and the build,
+    /// until «К расстановке»; then the AI's squad and the map to build.</summary>
+    private async Task QuickScreens()
+    {
+        QuickSetup q = _quickBack ?? new QuickSetup();
+        bool back = _quickBack is not null;
+        _quickBack = null;
+        List<string> pool = QuickPool();
+        if (!back && _mapNamed)
+            q.Map = _mapName;
+        if (!pool.Contains(q.Map) && pool.Count > 0)
+            q.Map = pool[0];
+        _qs = q;
+        _qPage = back ? QuickPage.Build : QuickPage.Lobby;
+        _qLayer = new CanvasLayer { Name = "QuickScreens", Layer = 20 };
+        AddChild(_qLayer);
+        var ground = new ColorRect { Color = QBg, MouseFilter = Control.MouseFilterEnum.Ignore };
+        ground.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _qLayer.AddChild(ground);
+        _qRoot = new MarginContainer { Theme = new Theme { DefaultFontSize = 15 } };
+        _qRoot.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        foreach (string side in new[] { "left", "right", "top", "bottom" })
+            _qRoot.AddThemeConstantOverride($"margin_{side}", 22);
+        _qLayer.AddChild(_qRoot);
+        QuickShow();
+        QuickArt();
+        QuickScript();
+        Log.Print($"tank3d: quick: the screens - {(back ? "back to the build" : "the lobby")}, maps {string.Join(", ", pool)}");
+        while (!_qGo)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        foreach (int at in _qStage.Keys.ToArray())
+            QuickStageDrop(at);
+        _qLayer.QueueFree();
+        _qLayer = null;
+        _qRoot = _qOver = null;
+        _qTip = null;
+
+        // the AI builds now, blind to the player's squad (meta.md)
+        q.AiDoctrine = q.Doctrine is int d ? QuickSquad.Doctrines[d]
+                       : QuickSquad.Doctrines[Random.Shared.Next(QuickSquad.Doctrines.Length)];
+        q.Ai = QuickSquad.ForAi(q.AiDoctrine, q.AiBudget, Random.Shared);
+        _quick = q;
+        _mapName = q.Map;
+        _mapNamed = true;
+        Log.Print($"tank3d: quick: {q.Map}, the player {SideName(q.Player)} on {q.Budget} - {QuickSquad.Said(q.Squad)}; "
+                 + $"the AI {q.AiDoctrine.Name} on {q.AiBudget} - {QuickSquad.Said(q.Ai)}");
+    }
+
+    /// <summary>The maps a quick battle plays: a zone for each side and a home on each.</summary>
+    private List<string> QuickPool()
+    {
+        var pool = new List<string>();
+        foreach (string name in MapFile.Names())
+            if (QuickMap(name) is { } m && m.Arena.Zone(Parking.Green).Count > 0 && m.Arena.Zone(Parking.Brown).Count > 0)
+            {
+                string[] sides = Parking.SidesOf(m.Parked);
+                if (sides.Contains(Parking.Green) && sides.Contains(Parking.Brown))
+                    pool.Add(name);
+            }
+        return pool;
+    }
+
+    private BoardMap? QuickMap(string name)
+    {
+        if (_qMaps.TryGetValue(name, out BoardMap? had))
+            return had;
+        try
+        {
+            return _qMaps[name] = MapFile.Load(name);
+        }
+        catch (Exception e)
+        {
+            Log.Print($"tank3d: quick: {name}: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>The five classes' pictures in both paints, the roster's own
+    /// (<see cref="RosterArtOf"/>); the page drawn again as each comes in.</summary>
+    private async void QuickArt()
+    {
+        foreach (Side side in new[] { _qs.Player, Across(_qs.Player) })
+            foreach ((string model, string _, string _) in Lineup.Pairs)
+            {
+                if (_rosterArt.ContainsKey((model, side)))
+                    continue;
+                _qArtLeft++;
+                await RosterArtOf(model, side);
+                _qArtLeft--;
+                if (_qRoot is null)
+                    return;
+                if (side == _qs.Player)
+                    QuickShow();
+            }
+    }
+
+    // --- the live models on the cards ----------------------------------------------
+
+    /// <summary>A card's stage, px high: the model at a size the tree under it can spare.</summary>
+    private const float QStageHigh = 150.0f;
+
+    /// <summary>Each card's live model, kept over the page's rebuilds: a click
+    /// redraws the page, the model is loaded again only for a new class or paint.</summary>
+    private readonly Dictionary<int, (string Class, Side Side, SubViewportContainer Box)> _qStage = new();
+
+    /// <summary>Slot <paramref name="at"/>'s model turning on its stage, the
+    /// roster's own scene live (<see cref="RosterScene"/>): it spins slowly, a
+    /// drag turns it by hand. Null when the model does not load - the card
+    /// falls back on the picture.</summary>
+    private SubViewportContainer? QuickStage(int at, string cls, Side side)
+    {
+        if (_qStage.TryGetValue(at, out var had) && had.Class == cls && had.Side == side && IsInstanceValid(had.Box))
+        {
+            had.Box.GetParent()?.RemoveChild(had.Box);
+            return had.Box;
+        }
+        QuickStageDrop(at);
+        string? model = Lineup.Pairs.FirstOrDefault(p => p.Class == cls).Model;
+        if (_qLayer is null || model is null)
+            return null;
+        var box = new SubViewportContainer
+        {
+            Stretch = true, MouseFilter = Control.MouseFilterEnum.Pass, MouseDefaultCursorShape = Control.CursorShape.Drag,
+        };
+        box.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        // into the tree for the framing, which reads the placed meshes; the card takes it after
+        _qLayer.AddChild(box);
+        var size = new Vector2I(340, (int)QStageHigh);
+        if (RosterScene(model, side, size, box, live: true) is not var (_, rig))
+        {
+            box.QueueFree();
+            return null;
+        }
+        Tween spin = rig.CreateTween().SetLoops();
+        spin.TweenProperty(rig, "rotation_degrees:y", RosterArtYaw + 360.0f, 16.0).From(RosterArtYaw);
+        box.GuiInput += e =>
+        {
+            if (e is InputEventMouseMotion m && m.ButtonMask.HasFlag(MouseButtonMask.Left))
+            {
+                spin.Kill();
+                rig.RotateY(m.Relative.X * 0.012f);
+            }
+        };
+        _qLayer.RemoveChild(box);
+        _qStage[at] = (cls, side, box);
+        return box;
+    }
+
+    private void QuickStageDrop(int at)
+    {
+        if (!_qStage.Remove(at, out var had) || !IsInstanceValid(had.Box))
+            return;
+        if (had.Box.IsInsideTree())
+            had.Box.QueueFree();
+        else
+            had.Box.Free();
+    }
+
+    private Texture2D? QuickArtOf(string cls, Side side)
+    {
+        string model = Lineup.Pairs.FirstOrDefault(p => p.Class == cls).Model ?? "";
+        return _rosterArt.TryGetValue((model, side), out Texture2D? t) ? t : null;
+    }
+
+    /// <summary>The page and its dialog drawn afresh - on every change, never per frame.</summary>
+    private void QuickShow()
+    {
+        if (_qRoot is null || _qLayer is null)
+            return;
+        QuickTipHide(null);
+        // the live models out of the old page before it goes, for the new one to take
+        foreach (var stage in _qStage.Values)
+            if (IsInstanceValid(stage.Box))
+                stage.Box.GetParent()?.RemoveChild(stage.Box);
+        foreach (Node n in _qRoot.GetChildren())
+        {
+            _qRoot.RemoveChild(n);
+            n.QueueFree();
+        }
+        _qRoot.AddChild(_qPage == QuickPage.Lobby ? QuickLobby() : QuickBuild());
+        _qOver?.QueueFree();
+        _qOver = _qModal == QuickModal.None ? null : QuickDialog();
+        if (_qOver is not null)
+            _qLayer.AddChild(_qOver);
+    }
+
+    // --- the side as the board has it ----------------------------------------------
+
+    /// <summary>Whether <paramref name="side"/>'s zone lies in the board's
+    /// lower half - the south - on <paramref name="map"/>.</summary>
+    private static bool QuickSouth(BoardMap? map, Side side)
+    {
+        if (map is null)
+            return side == Side.Green;
+        IReadOnlyList<Vector2I> zone = map.Arena.Zone(side == Side.Green ? Parking.Green : Parking.Brown);
+        return zone.Count == 0 ? side == Side.Green : zone.Average(v => v.Y) >= map.Rows * 0.5f;
+    }
+
+    private string QuickSideSaid(Side side) => QuickSouth(QuickMap(_qs.Map), side) ? "Юг" : "Север";
+
+    private string QuickMode(string name) => QuickMap(name)?.Arena.Point is not null ? "Точка" : "Уничтожение";
+
+    private string QuickSize(string name) => QuickMap(name) is { } m ? $"{m.Columns} × {m.Rows}" : "";
+
+    private static string Pts(int n)
+    {
+        int m10 = n % 10, m100 = n % 100;
+        string w = m10 == 1 && m100 != 11 ? "очко" : m10 is >= 2 and <= 4 && (m100 < 12 || m100 > 14) ? "очка" : "очков";
+        return $"{n} {w}";
+    }
+
+    // --- the lobby -----------------------------------------------------------------
+
+    private Control QuickLobby()
+    {
+        var sheet = new VBoxContainer();
+        sheet.AddThemeConstantOverride("separation", 16);
+        sheet.AddChild(QEyebrow("Быстрый бой"));
+        sheet.AddChild(QText("Бой против ИИ", 30, QInk, bold: true));
+        sheet.AddChild(QuickParams(thumb: 160));
+        var foot = new HBoxContainer();
+        foot.AddThemeConstantOverride("separation", 12);
+        foot.AddChild(QBtn("К СБОРКЕ ОТРЯДА", () => { _qPage = QuickPage.Build; QuickShow(); }, primary: true));
+        foot.AddChild(QHint("Против ИИ параметры можно поменять и на экране сборки."));
+        sheet.AddChild(foot);
+        var page = new VBoxContainer();
+        page.AddChild(QBox(sheet, QPanelC, 28));
+        return page;
+    }
+
+    /// <summary>The battle's parameters as the prototype's boxes, two to a
+    /// row: in the lobby and in the build's dialog.</summary>
+    private Control QuickParams(float thumb)
+    {
+        QuickSetup q = _qs;
+        var grid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        grid.AddThemeConstantOverride("h_separation", 14);
+        grid.AddThemeConstantOverride("v_separation", 14);
+
+        // the map and its mode
+        var card = new HBoxContainer();
+        card.AddThemeConstantOverride("separation", 14);
+        card.AddChild(QuickMinimap(q.Map, q.Player, thumb, labels: false));
+        var about = new VBoxContainer();
+        about.AddThemeConstantOverride("separation", 6);
+        about.AddChild(QText(q.Map, 20, QInk, bold: true));
+        about.AddChild(QHint($"Режим «{QuickMode(q.Map)}» · {QuickSize(q.Map)} · рельеф"));
+        var maps = new HFlowContainer();
+        maps.AddThemeConstantOverride("h_separation", 6);
+        foreach (string name in QuickPool())
+        {
+            string one = name;
+            maps.AddChild(QBtn(name, () => { q.Map = one; QuickShow(); }, pressed: name == q.Map, small: true));
+        }
+        about.AddChild(maps);
+        card.AddChild(about);
+        grid.AddChild(QParam("Режим и карта", card));
+
+        // the sides
+        var sides = new VBoxContainer();
+        sides.AddThemeConstantOverride("separation", 10);
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 8);
+        row.AddChild(QChip($"Вы — {QuickSideSaid(q.Player)}"));
+        row.AddChild(QChip($"ИИ — {QuickSideSaid(Across(q.Player))}"));
+        row.AddChild(QBtn("Поменять", () => { q.Player = Across(q.Player); QuickArt(); QuickShow(); }));
+        sides.AddChild(row);
+        sides.AddChild(QHint("Свою зону расстановки вы знаете до сборки. Кто ходит первым, решит жребий после «В бой».", wrap: true));
+        grid.AddChild(QParam("Стороны", sides));
+
+        grid.AddChild(QParam("Ваш бюджет прокачки", QStepper(q.Budget, q.Budget == 0 ? "бой без апгрейдов" : "очков", v =>
+        {
+            q.Budget = v;
+            QuickSquad.Trim(q.Squad, v);
+        })));
+        int diff = q.Budget - q.AiBudget;
+        var ai = new VBoxContainer();
+        ai.AddThemeConstantOverride("separation", 10);
+        ai.AddChild(QStepper(q.AiBudget, q.AiBudget == 0 ? "без апгрейдов" : "очков", v => q.AiBudget = v));
+        ai.AddChild(diff != 0 ? QText($"Гандикап: у вас {(diff > 0 ? "+" : "−")}{Math.Abs(diff)}", 14, QAmber, bold: true)
+                              : QHint("Бюджеты равны"));
+        grid.AddChild(QParam("Бюджет ИИ — сложность", ai));
+
+        var doctrine = new VBoxContainer();
+        doctrine.AddThemeConstantOverride("separation", 10);
+        var picks = new HFlowContainer();
+        picks.AddThemeConstantOverride("h_separation", 6);
+        picks.AddThemeConstantOverride("v_separation", 6);
+        picks.AddChild(QBtn("Случайная", () => { q.Doctrine = null; QuickShow(); }, pressed: q.Doctrine is null, small: true));
+        for (int i = 0; i < QuickSquad.Doctrines.Length; i++)
+        {
+            int at = i;
+            picks.AddChild(QBtn(QuickSquad.Doctrines[i].Name, () => { q.Doctrine = at; QuickShow(); }, pressed: q.Doctrine == i, small: true));
+        }
+        doctrine.AddChild(picks);
+        doctrine.AddChild(QHint(q.Doctrine is int d
+            ? $"{QuickSquad.Doctrines[d].Play}: {string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))}."
+            : "Откроется по «В бой».", wrap: true));
+        grid.AddChild(QParam("Доктрина ИИ", doctrine));
+        return grid;
+    }
+
+    private Control QParam(string title, Control inner)
+    {
+        var col = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        col.AddThemeConstantOverride("separation", 10);
+        col.AddChild(QEyebrow(title));
+        col.AddChild(inner);
+        PanelContainer box = QBox(col, QInset, 14);
+        // the grid's two columns share the width, as the prototype's do
+        box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        return box;
+    }
+
+    private Control QStepper(int value, string label, Action<int> set)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 10);
+        var less = QBtn("−", () => { set(Math.Max(0, value - 1)); QuickShow(); });
+        less.CustomMinimumSize = new Vector2(36, 34);
+        less.Disabled = value <= 0;
+        row.AddChild(less);
+        var said = QText(value.ToString(), 22, QInk, bold: true);
+        said.CustomMinimumSize = new Vector2(30, 0);
+        said.HorizontalAlignment = HorizontalAlignment.Center;
+        row.AddChild(said);
+        var more = QBtn("+", () => { set(Math.Min(QuickSquad.BudgetMax, value + 1)); QuickShow(); });
+        more.CustomMinimumSize = new Vector2(36, 34);
+        more.Disabled = value >= QuickSquad.BudgetMax;
+        row.AddChild(more);
+        var hint = QHint(label);
+        hint.VerticalAlignment = VerticalAlignment.Center;
+        row.AddChild(hint);
+        return row;
+    }
+
+    // --- the build -----------------------------------------------------------------
+    //
+    // The colours say one thing each: olive is bought (a node, a spent pip, the
+    // chosen class), amber is what the next click buys or a warning, red is what
+    // cannot be had. A cost is said once - a level costs its number - and then
+    // only where it is paid: the tip, the card's badge, the machine's line.
+
+    private Control QuickBuild()
+    {
+        QuickSetup q = _qs;
+        int used = QuickSquad.Spent(q.Squad), left = q.Budget - used;
+        var page = new VBoxContainer();
+        page.AddThemeConstantOverride("separation", 14);
+
+        // the header: who, the facts, the budget
+        var top = new HBoxContainer();
+        top.AddThemeConstantOverride("separation", 24);
+        var who = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        who.AddThemeConstantOverride("separation", 6);
+        who.AddChild(QEyebrow("Бой против ИИ · сборка"));
+        who.AddChild(QText("Ваш отряд", 28, QInk, bold: true));
+        var facts = new HFlowContainer();
+        facts.AddThemeConstantOverride("h_separation", 8);
+        foreach ((string label, string value) in new[]
+                 {
+                     ("Карта", q.Map), ("Режим", QuickMode(q.Map)), ("Ваша сторона", QuickSideSaid(q.Player)),
+                     ("Бюджет ИИ", q.AiBudget.ToString()),
+                     ("Доктрина ИИ", q.Doctrine is int d ? QuickSquad.Doctrines[d].Name : "случайная"),
+                 })
+            facts.AddChild(QChip($"{label}: {value}", () => { _qModal = QuickModal.Params; QuickShow(); }));
+        who.AddChild(facts);
+        top.AddChild(who);
+        var budget = new VBoxContainer { SizeFlagsVertical = Control.SizeFlags.ShrinkEnd };
+        budget.AddThemeConstantOverride("separation", 6);
+        var eb = QEyebrow("Очки прокачки");
+        eb.HorizontalAlignment = HorizontalAlignment.Right;
+        budget.AddChild(eb);
+        if (q.Budget > 0)
+            budget.AddChild(QuickPips(used, q.Budget, 24));
+        var line = QHint(q.Budget > 0 ? $"Потрачено {used} из {q.Budget} · осталось {left}" : "Бюджет 0: бой без апгрейдов");
+        line.HorizontalAlignment = HorizontalAlignment.Right;
+        budget.AddChild(line);
+        top.AddChild(budget);
+        page.AddChild(top);
+        page.AddChild(QuickRules());
+
+        // the battlefield and the squad down the left, the three machines
+        var work = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        work.AddThemeConstantOverride("separation", 14);
+        work.AddChild(QuickAside());
+        for (int i = 0; i < q.Squad.Length; i++)
+            work.AddChild(QuickSlot(i, left));
+        page.AddChild(work);
+
+        // the bar: the ready squads; the budget by the button that spends it;
+        // the clearing apart from the ways on
+        var bar = new HBoxContainer();
+        bar.AddThemeConstantOverride("separation", 8);
+        int start = QuickSquad.Size * QuickSquad.CompanyLevel;
+        var qs = QEyebrow($"Готовые отряды, {Pts(start)}:");
+        qs.VerticalAlignment = VerticalAlignment.Center;
+        bar.AddChild(qs);
+        foreach (QuickSquad.Company c in QuickSquad.Companies)
+        {
+            QuickSquad.Company company = c;
+            QuickPad b = QBtn(c.Name, () => QuickAsk(q.Squad.Any(s => !s.Empty), "Заменить отряд?",
+                $"«{company.Name}» встанет вместо собранного отряда: три машины на уровне {QuickSquad.CompanyLevel}.",
+                "Заменить", () => q.Squad = QuickSquad.OfCompany(company)));
+            b.Disabled = q.Budget < start;
+            QTip(b, () => QTipBox($"Готовый отряд · {Pts(start)}", company.Name,
+                string.Join("\n", company.Slots.Select(s => $"{QuickSquad.ClassOf(s.Class).Short} — {QuickSquad.ClassOf(s.Class).BranchOf(s.Branch)!.Name}, ур. {QuickSquad.CompanyLevel}")),
+                null, $"{char.ToUpper(company.Play[0])}{company.Play[1..]}. Заменит текущий отряд; "
+                      + (q.Budget > start ? $"ещё {Pts(q.Budget - start)} останутся на прокачку." : "бюджет уйдёт весь.")));
+            bar.AddChild(b);
+        }
+        bar.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+        int missing = q.Squad.Count(s => s.Empty);
+        // the points are the header's alone; the bar says only what holds the button
+        if (missing > 0)
+        {
+            Label hint = QText($"Не выбран класс: {missing} {(missing == 1 ? "машина" : "машины")}", 14, QRed, bold: true);
+            hint.VerticalAlignment = VerticalAlignment.Center;
+            bar.AddChild(hint);
+        }
+        QuickPad clear = QBtn("Очистить отряд", () => QuickAsk(true, "Очистить отряд?",
+            "Все три машины станут пустыми, прокачка снимется.", "Очистить", () => q.Squad = QuickSquad.Empty()));
+        clear.Ink = QRed;
+        clear.Rim = clear.Fill = new Color(0, 0, 0, 0);
+        clear.HoverRim = new Color(QRed, 0.6f);
+        clear.Disabled = q.Squad.All(s => s.Empty);
+        bar.AddChild(clear);
+        bar.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(1, 0) });
+        bar.AddChild(QBtn("К параметрам", () => { _qPage = QuickPage.Lobby; QuickShow(); }));
+        QuickPad go = QBtn("К РАССТАНОВКЕ", QuickTryGo, primary: true);
+        go.Disabled = missing > 0;
+        bar.AddChild(go);
+        page.AddChild(QBox(bar, QPanelC, 12));
+        return page;
+    }
+
+    /// <summary>The budget as hexes: the spent ones olive, the free ones in the line's colour.</summary>
+    private static Control QuickPips(int used, int budget, float size)
+    {
+        var pips = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
+        pips.AddThemeConstantOverride("separation", size > 16 ? 3 : 2);
+        for (int k = 0; k < budget; k++)
+        {
+            Color c = k < used ? QOlive : QLine;
+            pips.AddChild(new QuickPad
+            {
+                Form = QuickPad.Shape.Hex, Rim = c, Fill = c, CustomMinimumSize = new Vector2(size, size * 0.875f),
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+        }
+        return pips;
+    }
+
+    /// <summary>«К расстановке»: straight on with the budget spent, else asked first.</summary>
+    private void QuickTryGo()
+    {
+        QuickSetup q = _qs;
+        int left = q.Budget - QuickSquad.Spent(q.Squad);
+        QuickAsk(left > 0, "Очки не потрачены",
+            $"Осталось {Pts(left)} из {q.Budget}. В бой они не перейдут: потратить их можно только здесь.",
+            "К расстановке", () => _qGo = true, no: "Потратить");
+    }
+
+    /// <summary>The battlefield, what the map asks of a squad, and what the squad comes to.</summary>
+    private Control QuickAside()
+    {
+        QuickSetup q = _qs;
+        var aside = new VBoxContainer { CustomMinimumSize = new Vector2(236, 0) };
+        aside.AddThemeConstantOverride("separation", 8);
+        var head = new HBoxContainer();
+        var h2 = QText("Поле боя", 17, QInk, bold: true);
+        h2.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        head.AddChild(h2);
+        head.AddChild(QBtn("Развернуть", () => { _qModal = QuickModal.Map; QuickShow(); }, small: true));
+        aside.AddChild(head);
+        aside.AddChild(QuickMinimap(q.Map, q.Player, 190, labels: true));
+        aside.AddChild(QuickLegend(3));
+        if (QuickMapSaid(q.Map) is { Length: > 0 } said)
+            aside.AddChild(QText(said, 12, QInk, wrap: true));
+
+        aside.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
+        aside.AddChild(QText("Отряд вместе", 15, QInk, bold: true));
+        aside.AddChild(QuickSquadTable());
+        foreach (string fact in QuickSquadSaid())
+            aside.AddChild(QText(fact, 12, QInk, wrap: true));
+        // a random doctrine is said in the header's chip; a chosen one, what it does
+        if (q.Doctrine is int d)
+            aside.AddChild(QHint($"ИИ — «{QuickSquad.Doctrines[d].Name}»: {QuickSquad.Doctrines[d].Play.ToLowerInvariant()}. "
+                                 + $"Классы: {string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))}.", wrap: true));
+        return QBox(aside, QPanelC, 12);
+    }
+
+    /// <summary>The build's rules in one line over the cards: what a level costs, what the dashes mean.</summary>
+    private static Control QuickRules()
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 8);
+        row.AddChild(QHint("Класс бесплатен, уровень стоит столько очков, какой у него номер.   "));
+        row.AddChild(new QuickPad
+        {
+            Form = QuickPad.Shape.Hex, Dashed = true, Rim = QMuted, Fill = new Color(0, 0, 0, 0), RimWidth = 1,
+            CustomMinimumSize = new Vector2(18, 16), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        });
+        row.AddChild(QHint("Пунктир и «*» — правила в стенде ещё нет: уровень покупается, в бою апгрейд не действует."));
+        return row;
+    }
+
+    /// <summary>What the map's ground asks of a squad, in a line or two; empty on plain ground.</summary>
+    private string QuickMapSaid(string name)
+    {
+        if (QuickMap(name) is not { } map)
+            return "";
+        int water = 0, wood = 0, walls = 0;
+        for (int r = 0; r < map.Rows; r++)
+            for (int c = 0; c < map.Columns; c++)
+            {
+                var cell = new Vector2I(c, r);
+                if (map.Plot is { } plot && !plot.Contains(cell))
+                    continue;
+                int i = map.At(cell);
+                if (map.Water[i])
+                    water++;
+                else if (map.Walls[i])
+                    walls++;
+                else if (map.Kinds[i] == TerrainSet.Forest)
+                    wood++;
+            }
+        var said = new List<string>();
+        if (water > 0)
+            said.Add($"Вода — {water} гекс. ОПВТ (LT, «Рейд» 1) не даст утонуть.");
+        if (walls > 0)
+            said.Add($"Стены — {walls} гекс. HT их сносит, TD бьёт сквозь одну.");
+        if (wood > 0)
+            said.Add($"Лес — {wood} гекс. Зажигательный снаряд его поджигает.");
+        return string.Join("\n", said);
+    }
+
+    /// <summary>The squad side by side: steps, might, the front plate, the turret.</summary>
+    private Control QuickSquadTable()
+    {
+        var grid = new GridContainer { Columns = 5, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        grid.AddThemeConstantOverride("h_separation", 10);
+        grid.AddThemeConstantOverride("v_separation", 2);
+        if (_qs.Squad.All(s => s.Empty))
+            return QHint("Пока пусто: выберите классы машин.", wrap: true);
+        foreach (string h in new[] { "", "Шаги", "Мощь", "Лоб", "Башня" })
+            grid.AddChild(QText(h, 11, QMuted, bold: true));
+        foreach (QuickSquad.Slot s in _qs.Squad)
+        {
+            if (s.Empty)
+            {
+                grid.AddChild(QText("—", 12, QMuted));
+                for (int k = 0; k < 4; k++)
+                    grid.AddChild(QText("", 12, QMuted));
+                continue;
+            }
+            MovementProfile p = QuickSquad.ClassOf(s.Class!).Profile;
+            grid.AddChild(QText(QuickSquad.ClassOf(s.Class!).Short, 12, QInk, bold: true));
+            grid.AddChild(QText(p.Steps.ToString(), 12, QInk));
+            grid.AddChild(QText(QRoman(p.Might), 12, QInk));
+            grid.AddChild(QText(QRoman(Gunnery.ArmourAt(p, Gunnery.Plate.Front)), 12, QInk));
+            grid.AddChild(QText(p.Turreted ? "есть" : "нет", 12, QInk));
+        }
+        return grid;
+    }
+
+    /// <summary>What the squad can and cannot: a heavy's front, its actions.</summary>
+    private IEnumerable<string> QuickSquadSaid()
+    {
+        QuickSquad.Slot[] squad = _qs.Squad;
+        if (squad.All(s => s.Empty))
+            yield break;
+        string[] front = squad.Where(s => s.Class is "TDP" or "HMP").Select(s => QuickSquad.ClassOf(s.Class!).Short).Distinct().ToArray();
+        yield return front.Length > 0 ? $"HT в лоб пробьёт: {string.Join(", ", front)}." : "HT в лоб пробить нечем: это могут только TD и HM.";
+        string[] acts = squad.SelectMany(QuickSquad.UpgradesOf).Where(u => u.Kind.StartsWith("способность"))
+                             .Select(u => u.Name).Distinct().ToArray();
+        yield return acts.Length > 0 ? $"Действия: {string.Join(", ", acts)}." : "Особых действий нет: только ход и выстрел.";
+    }
+
+    /// <summary>A machine's card: the class and its duty, the model with the
+    /// arrows that turn the class over, the tree. An empty card lists the
+    /// classes to pick from. The points are said once, in the header.</summary>
+    private Control QuickSlot(int at, int left)
+    {
+        QuickSetup q = _qs;
+        QuickSquad.Slot s = q.Squad[at];
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 10);
+        var head = new HBoxContainer { CustomMinimumSize = new Vector2(0, 26) };
+        head.AddThemeConstantOverride("separation", 8);
+        if (s.Empty)
+            head.AddChild(QEyebrow($"Машина {at + 1} · выберите класс"));
+        else
+        {
+            QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
+            head.AddChild(QText(c.Name, 16, QInk, bold: true));
+            var duty = QText(c.Duty, 13, QMuted);
+            duty.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            duty.VerticalAlignment = VerticalAlignment.Center;
+            duty.ClipText = true;
+            head.AddChild(duty);
+        }
+        col.AddChild(head);
+
+        if (s.Empty)
+        {
+            // the classes as rows, each with its duty; a class there are two of is shut
+            QuickStageDrop(at);
+            var list = new VBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+            list.AddThemeConstantOverride("separation", 6);
+            foreach (QuickSquad.Class c in QuickSquad.Classes)
+            {
+                bool full = QuickSquad.ClassWhy(q.Squad, at, c.Tag).Length > 0;
+                QuickSquad.Class one = c;
+                QuickPad row = QBtn($"{c.Short}   {c.Name} — {(full ? "в отряде уже две" : c.Duty)}", () =>
+                {
+                    q.Squad[at] = new QuickSquad.Slot(one.Tag, null, 0);
+                    QuickShow();
+                });
+                row.Align = HorizontalAlignment.Left;
+                row.CustomMinimumSize = new Vector2(0, 40);
+                row.Disabled = full;
+                QTip(row, () => QuickClassTip(one, full));
+                list.AddChild(row);
+            }
+            col.AddChild(list);
+        }
+        else
+        {
+            // the model between the arrows; the stage takes what height the card has spare
+            var stageRow = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+            stageRow.AddThemeConstantOverride("separation", 0);
+            stageRow.AddChild(QuickTurn(at, -1));
+            var model = new QuickPad
+            {
+                Rim = QLine, Fill = QInset, Ink = QMuted, CustomMinimumSize = new Vector2(0, QStageHigh),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Glow = QSel.Lightened(0.15f),
+            };
+            if (QuickStage(at, s.Class!, q.Player) is { } stage)
+                model.AddChild(stage);
+            else
+            {
+                model.Picture = QuickArtOf(s.Class!, q.Player);
+                model.PictureSize = new Vector2(150, 110);
+            }
+            QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
+            QTip(model, () => QuickClassTip(c, false));
+            stageRow.AddChild(model);
+            stageRow.AddChild(QuickTurn(at, +1));
+            col.AddChild(stageRow);
+            col.AddChild(QuickClassDots(at));
+
+            var tree = new HBoxContainer();
+            tree.AddThemeConstantOverride("separation", 8);
+            foreach (QuickSquad.Branch b in c.Branches)
+                tree.AddChild(QuickBranch(at, s, b, left));
+            // what the machine carries is the tree itself: nothing said again under it
+            col.AddChild(tree);
+        }
+        var box = QBox(col, QPanelC, 12);
+        box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        box.SizeFlagsStretchRatio = 1.0f;
+        box.SetMeta(QTipBeside, true);
+        return box;
+    }
+
+    /// <summary>The class <paramref name="dir"/> steps from slot <paramref name="at"/>'s,
+    /// round the five, past those there are two of already; null when none is free.</summary>
+    private QuickSquad.Class? QuickClassStep(int at, int dir)
+    {
+        QuickSquad.Class[] all = QuickSquad.Classes;
+        int from = Array.FindIndex(all, c => c.Tag == _qs.Squad[at].Class);
+        for (int k = 1; k < all.Length; k++)
+        {
+            QuickSquad.Class c = all[((from + dir * k) % all.Length + all.Length) % all.Length];
+            if (QuickSquad.ClassWhy(_qs.Squad, at, c.Tag).Length == 0)
+                return c;
+        }
+        return null;
+    }
+
+    /// <summary>An arrow beside the model: the next or the last class that may
+    /// be had; the level goes with the old class, its tip says so.</summary>
+    private QuickPad QuickTurn(int at, int dir)
+    {
+        QuickSquad.Class? to = QuickClassStep(at, dir);
+        var arrow = new QuickPad
+        {
+            Text = dir < 0 ? "‹" : "›", FontSize = 30, Bold = true, Rim = QLine, Fill = QInset, Ink = QInk,
+            HoverFill = QSel, HoverRim = QOlive, Disabled = to is null, CustomMinimumSize = new Vector2(34, 0),
+        };
+        arrow.Clicked += () =>
+        {
+            if (QuickClassStep(at, dir) is { } c)
+                _qs.Squad[at] = new QuickSquad.Slot(c.Tag, null, 0);
+            QuickShow();
+        };
+        int level = _qs.Squad[at].Level;
+        if (to is not null)
+            QTip(arrow, () => QuickClassTip(to, false,
+                level > 0 ? $"Сменит класс: прокачка снимется, вернётся {Pts(level)}." : null));
+        return arrow;
+    }
+
+    /// <summary>Where the class is among the five: a dot each, the slot's olive,
+    /// a class there are two of already dimmed - the arrows step past it.</summary>
+    private Control QuickClassDots(int at)
+    {
+        var row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 10);
+        foreach (QuickSquad.Class c in QuickSquad.Classes)
+        {
+            bool mine = _qs.Squad[at].Class == c.Tag;
+            bool full = !mine && QuickSquad.ClassWhy(_qs.Squad, at, c.Tag).Length > 0;
+            row.AddChild(QText(c.Short, 12, mine ? QOlive : full ? new Color(QMuted, 0.45f) : QMuted, bold: mine));
+        }
+        return row;
+    }
+
+    /// <summary>A branch: its name, its three levels as hex nodes linked down,
+    /// each with what kind of thing it is. Both branches are drawn alike and
+    /// both can be clicked; the chosen one is told by its rim and its fill.</summary>
+    private Control QuickBranch(int at, QuickSquad.Slot s, QuickSquad.Branch b, int left)
+    {
+        QuickSetup q = _qs;
+        bool chosen = s.Branch == b.Id && s.Level > 0, other = s.Level > 0 && !chosen;
+        int mine = chosen ? s.Level : 0;
+        var col = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Alignment = BoxContainer.AlignmentMode.Begin };
+        col.AddThemeConstantOverride("separation", 0);
+        var head = new QuickPad
+        {
+            Text = b.Name, FontSize = 14, Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
+            Ink = QInk, HoverFill = other ? QSel : null, CustomMinimumSize = new Vector2(0, 28),
+        };
+        head.Clicked += () =>
+        {
+            // the same level on the other branch costs nothing
+            if (q.Squad[at].Level > 0)
+                q.Squad[at] = q.Squad[at] with { Branch = b.Id };
+            QuickShow();
+        };
+        string ups = string.Join("\n", b.Levels.Select((u, i) => $"{i + 1}. {u.Name}{(u.Flag is null ? " *" : "")}"));
+        QTip(head, () => QTipBox($"Ветка · {b.Tag}", b.Name, ups, null,
+            chosen ? "Выбрана." : other ? $"Щелчок перенесёт уровень {s.Level} на эту ветку, бесплатно." : "Выбирается её первым уровнем."));
+        col.AddChild(head);
+        for (int l = 1; l <= b.Levels.Length; l++)
+        {
+            QuickSquad.Upgrade u = b.Levels[l - 1];
+            bool open = l <= mine;
+            // this machine to (b, l) costs l less the level it holds
+            int need = l - s.Level;
+            bool shortOf = !open && need > left;
+            bool next = !open && !shortOf && (chosen ? l == s.Level + 1 : l == 1);
+            if (l > 1)
+                col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
+            int level = l;
+            var hex = new QuickPad
+            {
+                Form = QuickPad.Shape.Hex, Text = l.ToString(), FontSize = 15, Bold = true, RimWidth = 1,
+                Rim = open ? QOlive : next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
+                Fill = open ? QOlive : QPanelC, Ink = open ? QOnOlive : QInk, Dashed = u.Flag is null && !open,
+                HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(50, 43),
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+            };
+            hex.Clicked += () =>
+            {
+                QuickSquad.Slot now = q.Squad[at];
+                if (now.Branch == b.Id && now.Level == level)
+                    q.Squad[at] = now with { Level = level - 1 };
+                else if (level - now.Level <= q.Budget - QuickSquad.Spent(q.Squad))
+                    q.Squad[at] = now with { Branch = b.Id, Level = level };
+                QuickShow();
+            };
+            string state = open ? (l == mine ? "Открыт. Щелчок снимет этот уровень." : "Открыт.")
+                : shortOf ? $"Не хватает {Pts(need - left)}."
+                : other ? $"Сменит ветку: машина перейдёт на «{b.Name}», ур. {l}."
+                : need > 0 ? $"Откроет уровни до {l}: ещё {Pts(need)}." : $"Вернёт машину на уровень {l}.";
+            QTip(hex, () => QTipBox($"{b.Name} · уровень {level}", u.Name, u.Text, (u.Kind, Pts(level)),
+                                    state + (u.Flag is null ? "\nПунктир: в стенде правила ещё нет, в бою не действует." : "")));
+            col.AddChild(hex);
+            var nm = QText(u.Name + (u.Flag is null ? " *" : ""), 13, open ? QInk : QMuted, bold: open, wrap: true);
+            nm.HorizontalAlignment = HorizontalAlignment.Center;
+            nm.CustomMinimumSize = new Vector2(0, 34);
+            col.AddChild(nm);
+            var kind = QText(QKind(u), 11, QMuted);
+            kind.HorizontalAlignment = HorizontalAlignment.Center;
+            col.AddChild(kind);
+        }
+        var box = QBox(col, chosen ? QSel : QInset, 6, chosen ? QOlive : QLine);
+        box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        return box;
+    }
+
+    /// <summary>An upgrade's kind in a word, under its node.</summary>
+    private static string QKind(QuickSquad.Upgrade u) =>
+        u.Flag is null ? "нет в стенде"
+        : u.Kind.StartsWith("способность") ? u.Kind.Contains("атака") ? "атака" : "действие"
+        : "пассивный";
+
+    private static string QRoman(int n) => n switch { 0 => "0", 1 => "I", 2 => "II", 3 => "III", 4 => "IV", _ => "V" };
+
+    private Control QuickClassTip(QuickSquad.Class c, bool full, string? note = null)
+    {
+        MovementProfile p = c.Profile;
+        string armour = string.Join(" / ", new[] { Gunnery.Plate.Front, Gunnery.Plate.Side, Gunnery.Plate.Rear, Gunnery.Plate.Roof }
+                                           .Select(pl => QRoman(Gunnery.ArmourAt(p, pl))));
+        var rows = new[]
+        {
+            ("Скорость", $"{p.Steps} шагов"), ("Огневая мощь", QRoman(p.Might)),
+            ("Броня лоб / борт / корма / крыша", armour), ("Масса", QRoman(p.Mass)), ("Башня", p.Turreted ? "есть" : "нет"),
+        };
+        return QTipBox($"Класс · {c.Short} · {c.Duty}", c.Name, c.Role, null, full ? "В отряде уже две машины этого класса." : note,
+                       rows, $"Особенность. {c.Trait}");
+    }
+
+    // --- the dialogs ---------------------------------------------------------------
+
+    private Control QuickDialog()
+    {
+        var over = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
+        over.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        var dim = new ColorRect { Color = new Color(10 / 255f, 14 / 255f, 10 / 255f, 0.72f) };
+        dim.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        dim.GuiInput += e =>
+        {
+            if (e is InputEventMouseButton { Pressed: true })
+                QuickClose();
+        };
+        over.AddChild(dim);
+        var box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", 12);
+        if (_qModal == QuickModal.Ask && _qAsk is var (askHead, askText, yes, no, act))
+        {
+            box.AddChild(QText(askHead, 18, QInk, bold: true));
+            box.AddChild(QText(askText, 14, QInk, wrap: true));
+            var hands = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
+            hands.AddThemeConstantOverride("separation", 8);
+            hands.AddChild(QBtn(no, QuickClose));
+            hands.AddChild(QBtn(yes, () =>
+            {
+                _qModal = QuickModal.None;
+                _qAsk = null;
+                act();
+                QuickShow();
+            }, primary: true));
+            box.AddChild(hands);
+            var ask = QBox(box, QPanelC, 18);
+            ask.CustomMinimumSize = new Vector2(460, 0);
+            var middle = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+            middle.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            middle.AddChild(ask);
+            over.AddChild(middle);
+            return over;
+        }
+        var head = new HBoxContainer();
+        bool map = _qModal == QuickModal.Map;
+        var h2 = QText(map ? $"{_qs.Map} · {QuickMode(_qs.Map)}" : "Параметры боя против ИИ", 18, QInk, bold: true);
+        h2.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        head.AddChild(h2);
+        head.AddChild(QBtn(map ? "Закрыть" : "Готово", QuickClose, small: true));
+        box.AddChild(head);
+        if (map)
+        {
+            box.AddChild(QuickMinimap(_qs.Map, _qs.Player, 560, labels: true));
+            box.AddChild(QuickLegend());
+        }
+        else
+        {
+            box.AddChild(QuickParams(thumb: 120));
+            box.AddChild(QHint("Отряд сохраняется. Если бюджет станет меньше потраченного, снимутся верхние уровни."));
+        }
+        var panel = QBox(box, QPanelC, 14);
+        var center = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        center.AddChild(panel);
+        if (!map)
+            panel.CustomMinimumSize = new Vector2(760, 0);
+        over.AddChild(center);
+        return over;
+    }
+
+    private void QuickClose()
+    {
+        _qModal = QuickModal.None;
+        _qAsk = null;
+        QuickShow();
+    }
+
+    /// <summary>A question before a step that throws work away or burns points:
+    /// <paramref name="act"/> on «<paramref name="yes"/>»; straight away when
+    /// <paramref name="ask"/> is false, nothing to lose.</summary>
+    private void QuickAsk(bool ask, string head, string text, string yes, Action act, string no = "Отмена")
+    {
+        if (ask)
+        {
+            _qAsk = (head, text, yes, no, act);
+            _qModal = QuickModal.Ask;
+        }
+        else
+            act();
+        QuickShow();
+    }
+
+    // --- the tooltip ---------------------------------------------------------------
+
+    /// <summary>The prototype's floating tip on <paramref name="pad"/>, built when the pointer comes on.</summary>
+    private void QTip(QuickPad pad, Func<Control> build) =>
+        pad.Over += (p, on) =>
+        {
+            if (on)
+                QuickTipShow(p, build());
+            else
+                QuickTipHide(p);
+        };
+
+    private async void QuickTipShow(QuickPad pad, Control body)
+    {
+        QuickTipHide(null);
+        if (_qLayer is null)
+            return;
+        var style = new StyleBoxFlat { BgColor = QTipBg, ShadowColor = new Color(0, 0, 0, 0.28f), ShadowSize = 12 };
+        style.SetContentMarginAll(11);
+        _qTip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Modulate = new Color(1, 1, 1, 0) };
+        _qTip.AddThemeStyleboxOverride("panel", style);
+        _qTip.AddChild(body);
+        _qTipFor = pad;
+        _qLayer.AddChild(_qTip);
+        PanelContainer tip = _qTip;
+        // a wrapped label first measures itself at no width - a word a line,
+        // the screen's height - and settles only once laid out; a container
+        // never shrinks by itself, so the tip is cut back to its content and
+        // placed anew each time that settles
+        tip.MinimumSizeChanged += () => Callable.From(() => QuickTipPlace(tip, pad)).CallDeferred();
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        QuickTipPlace(tip, pad);
+        if (IsInstanceValid(tip))
+            tip.Modulate = Colors.White;
+    }
+
+    /// <summary>The tip cut to its content and put beside the pad, else under it, inside the screen.
+    /// A pad inside a machine's card has it beside the card, level with the pad:
+    /// the tree the player is about to click stays open.</summary>
+    private void QuickTipPlace(PanelContainer tip, QuickPad pad)
+    {
+        if (!IsInstanceValid(tip) || !IsInstanceValid(pad) || _qTip != tip)
+            return;
+        tip.ResetSize();
+        Node? card = pad;
+        while (card is not null && !card.HasMeta(QTipBeside))
+            card = card.GetParent();
+        Rect2 own = pad.GetGlobalRect();
+        Rect2 r = card is Control box ? new Rect2(box.GetGlobalRect().Position.X, own.Position.Y, box.Size.X, own.Size.Y) : own;
+        Vector2 ts = tip.Size, vs = GetViewport().GetVisibleRect().Size;
+        float x = r.End.X + 10, y = r.Position.Y;
+        if (x + ts.X > vs.X - 8)
+            x = r.Position.X - ts.X - 10;
+        if (x < 8)
+        {
+            x = Mathf.Clamp(r.GetCenter().X - ts.X * 0.5f, 8, vs.X - ts.X - 8);
+            y = r.End.Y + 8;
+            if (y + ts.Y > vs.Y - 8)
+                y = r.Position.Y - ts.Y - 8;
+        }
+        tip.Position = new Vector2(x, Mathf.Clamp(y, 8, Mathf.Max(8, vs.Y - ts.Y - 8)));
+    }
+
+    /// <summary>The meta that puts a tip beside this control rather than its pad.</summary>
+    private static readonly StringName QTipBeside = "quick_tip_beside";
+
+    private void QuickTipHide(QuickPad? pad)
+    {
+        if (pad is not null && pad != _qTipFor)
+            return;
+        _qTip?.QueueFree();
+        _qTip = null;
+        _qTipFor = null;
+    }
+
+    /// <summary>A tip's body: the kicker, the head, the text, a row of kind
+    /// and cost, a table, a closing line and the state in amber.</summary>
+    private static Control QTipBox(string kicker, string head, string text, (string Kind, string Cost)? row, string? state,
+                                   (string, string)[]? table = null, string? coda = null)
+    {
+        var col = new VBoxContainer { CustomMinimumSize = new Vector2(300, 0) };
+        col.AddThemeConstantOverride("separation", 5);
+        col.AddChild(QText(kicker.ToUpperInvariant(), 11, QTipMuted, bold: true));
+        col.AddChild(QText(head, 17, QOnTip, bold: true));
+        col.AddChild(QText(text, 13, QOnTip, wrap: true));
+        if (table is not null)
+        {
+            var grid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            grid.AddThemeConstantOverride("h_separation", 10);
+            foreach ((string k, string v) in table)
+            {
+                var kl = QText(k, 12, QTipMuted);
+                kl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+                grid.AddChild(kl);
+                var vl = QText(v, 12, QOnTip, bold: true);
+                vl.HorizontalAlignment = HorizontalAlignment.Right;
+                grid.AddChild(vl);
+            }
+            col.AddChild(grid);
+        }
+        if (coda is not null)
+            col.AddChild(QText(coda, 13, QOnTip, wrap: true));
+        if (row is var (kind, cost))
+        {
+            col.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.12f), CustomMinimumSize = new Vector2(0, 1) });
+            var r = new HBoxContainer();
+            var kl = QText(kind, 12, QTipMuted);
+            kl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            r.AddChild(kl);
+            r.AddChild(QText(cost, 12, QOnTip, bold: true));
+            col.AddChild(r);
+        }
+        if (state is not null)
+            col.AddChild(QText(state, 12, new Color("E9B860"), wrap: true));
+        return col;
+    }
+
+    // --- the minimap ---------------------------------------------------------------
+
+    /// <summary>The map from above as hexes, turned so the player's zone is at
+    /// the bottom, as the placement looks at it. The zones are what the map is
+    /// read for, so the ground round them is drawn faint and they in full
+    /// colour, each ringed on its outer edges - the own one in light olive, the
+    /// enemy's in red and hatched; the point in amber. With
+    /// <paramref name="labels"/> the zones' names stand in strips above and
+    /// below the map, not on the zones.</summary>
+    private Control QuickMinimap(string name, Side player, float width, bool labels)
+    {
+        BoardMap? map = QuickMap(name);
+        float aspect = map is null ? 1.0f
+            : (map.Rows + 0.5f) * 0.866f / ((map.Columns - 1) * 0.75f + 1.0f);
+        var c = new Control
+        {
+            CustomMinimumSize = new Vector2(width, width * aspect + (labels ? 2 * QMapStrip : 0)),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        if (map is not null)
+            c.Draw += () => QuickMapDraw(c, map, player, labels);
+        return c;
+    }
+
+    private static readonly Color QField = new("5F8A3A"), QWood = new("3F5E2A"), QWater = new("3E6E8E"), QWall = new("8B5A3C");
+
+    /// <summary>The strip a zone's name stands in, above or below the map, px.</summary>
+    private const float QMapStrip = 22.0f;
+
+    /// <summary>What the ground outside the zones fades to.</summary>
+    private static readonly Color QFaint = new("2E352B");
+
+    private static void QuickMapDraw(Control c, BoardMap map, Side player, bool labels)
+    {
+        float strip = labels ? QMapStrip : 0.0f;
+        // no frame round the map: the hexes and the zones' rings keep a margin of their own inside the box
+        var area = new Rect2(0, strip, c.Size.X, c.Size.Y - 2 * strip);
+        float Fit(Rect2 r) => Mathf.Min(r.Size.X / ((map.Columns - 1) * 0.75f + 1.0f), r.Size.Y / ((map.Rows + 0.5f) * 0.866f));
+        // the ring's half width and a little more, so it stops short of the box and the names
+        area = area.Grow(-(QuickRingWidth(Fit(area)) * 0.5f + 3.0f));
+        float w = Fit(area);
+        float h = w * 0.866f;
+        var extent = new Vector2((map.Columns - 1) * 0.75f * w + w, (map.Rows + 0.5f) * h);
+        Vector2 off = area.Position + (area.Size - extent) * 0.5f;
+        IReadOnlyList<Vector2I> own = map.Arena.Zone(player == Side.Green ? Parking.Green : Parking.Brown);
+        IReadOnlyList<Vector2I> foe = map.Arena.Zone(player == Side.Green ? Parking.Brown : Parking.Green);
+        bool flip = !QuickSouth(map, player);
+        Vector2 Mid(Vector2I cell)
+        {
+            var at = new Vector2(cell.X * 0.75f * w + w * 0.5f, cell.Y * h + (cell.X % 2 != 0 ? h * 0.5f : 0.0f) + h * 0.5f);
+            return off + (flip ? extent - at : at);
+        }
+        var hex = new Vector2[6];
+        Vector2[] Hex(Vector2I cell, float scale)
+        {
+            Vector2 m = Mid(cell);
+            for (int k = 0; k < 6; k++)
+            {
+                float a = Mathf.DegToRad(60.0f * k);
+                hex[k] = m + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * w * 0.5f * scale;
+            }
+            return hex;
+        }
+        var zoned = new HashSet<Vector2I>(own);
+        zoned.UnionWith(foe);
+        c.DrawRect(new Rect2(Vector2.Zero, c.Size), QInset);
+        for (int r = 0; r < map.Rows; r++)
+            for (int q = 0; q < map.Columns; q++)
+            {
+                var cell = new Vector2I(q, r);
+                if (map.Plot is { } plot && !plot.Contains(cell))
+                    continue;
+                int i = map.At(cell);
+                Color fill = map.Water[i] ? QWater
+                    : map.Walls[i] ? QWall
+                    : map.Kinds[i] == TerrainSet.Forest ? QWood
+                    : QField.Lightened(Mathf.Clamp(map.Levels[i] * 0.16f, -0.3f, 0.5f));
+                // the ground outside the zones faint: still read for water and wood, not a colour of its own
+                if (!zoned.Contains(cell))
+                    fill = fill.Lerp(QFaint, 0.62f);
+                c.DrawColoredPolygon(Hex(cell, 1.0f), fill);
+                c.DrawPolyline(new[] { hex[0], hex[1], hex[2], hex[3], hex[4], hex[5], hex[0] }, new Color(0, 0, 0, 0.25f), 1.0f);
+            }
+        foreach (Vector2I cell in foe)
+        {
+            c.DrawColoredPolygon(Hex(cell, 1.0f), new Color(QRed, 0.22f));
+            // the hatching, a stroke across each hex
+            c.DrawLine(hex[1].Lerp(hex[2], 0.5f), hex[4].Lerp(hex[5], 0.5f), new Color(QRed, 0.55f), 1.5f);
+        }
+        foreach (Vector2I cell in own)
+            c.DrawColoredPolygon(Hex(cell, 1.0f), new Color(QOlive, 0.18f));
+        QuickMapRing(c, own, QOlive.Lightened(0.35f), w, Mid, Hex);
+        QuickMapRing(c, foe, QRed, w, Mid, Hex);
+        if (map.Arena.Point is { } point)
+        {
+            c.DrawCircle(Mid(point.Cell), w * 0.3f, QAmber);
+            c.DrawArc(Mid(point.Cell), w * 0.46f, 0, Mathf.Tau, 24, QAmber, 2.0f);
+        }
+        if (!labels)
+            return;
+        Font font = QuickPad.BoldFont;
+        void Chip(string text, IReadOnlyList<Vector2I> zone, Color ink, bool top)
+        {
+            if (zone.Count == 0)
+                return;
+            float x = 0.0f;
+            foreach (Vector2I v in zone)
+                x += Mid(v).X;
+            x /= zone.Count;
+            Vector2 size = font.GetStringSize(text, HorizontalAlignment.Left, -1, 12) + new Vector2(16, 4);
+            float y = top ? (strip - size.Y) * 0.5f : c.Size.Y - strip + (strip - size.Y) * 0.5f;
+            var rect = new Rect2(new Vector2(Mathf.Clamp(x - size.X * 0.5f, 0, c.Size.X - size.X), y), size);
+            c.DrawRect(rect, QPanelC);
+            c.DrawRect(rect, ink, false, 1.0f);
+            c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(12) + 2), text, HorizontalAlignment.Left, -1, 12, ink);
+        }
+        // the own zone is the bottom one, the map being turned so
+        Chip("ВАША ЗОНА", own, QOlive.Lightened(0.35f), top: false);
+        Chip("ЗОНА ПРОТИВНИКА", foe, QRed, top: true);
+    }
+
+    /// <summary>A zone's outer edges, the ones its hexes share with a hex not
+    /// in it: each neighbour's edge is the one whose middle lies nearest the
+    /// midpoint between the two centres, which holds however the map is turned.</summary>
+    private static void QuickMapRing(Control c, IReadOnlyList<Vector2I> zone, Color ink, float w,
+                                     Func<Vector2I, Vector2> mid, Func<Vector2I, float, Vector2[]> hexOf)
+    {
+        var inside = new HashSet<Vector2I>(zone);
+        foreach (Vector2I cell in zone)
+        {
+            Vector2[] hex = hexOf(cell, 1.0f);
+            Vector2 m = mid(cell);
+            bool odd = cell.X % 2 != 0;
+            // odd-q: an odd column sits half a hex lower
+            foreach (Vector2I d in odd ? QOddSteps : QEvenSteps)
+            {
+                Vector2I n = cell + d;
+                if (inside.Contains(n))
+                    continue;
+                Vector2 half = (m + mid(n)) * 0.5f;
+                int best = 0;
+                float near = float.MaxValue;
+                for (int k = 0; k < 6; k++)
+                {
+                    float dist = ((hex[k] + hex[(k + 1) % 6]) * 0.5f).DistanceSquaredTo(half);
+                    if (dist < near)
+                    {
+                        near = dist;
+                        best = k;
+                    }
+                }
+                c.DrawLine(hex[best], hex[(best + 1) % 6], ink, QuickRingWidth(w));
+            }
+        }
+    }
+
+    /// <summary>A zone's ring, px, for hexes <paramref name="w"/> across.</summary>
+    private static float QuickRingWidth(float w) => Mathf.Max(2.0f, w * 0.16f);
+
+    private static readonly Vector2I[] QEvenSteps =
+        { new(1, 0), new(0, 1), new(-1, 0), new(-1, -1), new(0, -1), new(1, -1) };
+    private static readonly Vector2I[] QOddSteps =
+        { new(1, 1), new(0, 1), new(-1, 1), new(-1, 0), new(0, -1), new(1, 0) };
+
+    private static Control QuickLegend(int columns = 2)
+    {
+        var grid = new GridContainer { Columns = columns, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        grid.AddThemeConstantOverride("h_separation", 14);
+        grid.AddThemeConstantOverride("v_separation", 4);
+        foreach ((Color c, string name) in new[]
+                 {
+                     (QField, "Поле"), (QField.Lightened(0.32f), "Высота"), (QWood, "Лес"),
+                     (QWater, "Вода"), (QWall, "Стена"), (QAmber, "Точка"),
+                 })
+        {
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 6);
+            row.AddChild(new QuickPad
+            {
+                Form = QuickPad.Shape.Hex, Rim = c, Fill = c, CustomMinimumSize = new Vector2(13, 11),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter, MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+            row.AddChild(QText(name, 12, QMuted));
+            grid.AddChild(row);
+        }
+        return grid;
+    }
+
+    // --- the bits ------------------------------------------------------------------
+
+    private static Label QText(string text, int size, Color ink, bool bold = false, bool wrap = false)
+    {
+        var l = new Label { Text = text, AutowrapMode = wrap ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off };
+        l.AddThemeFontSizeOverride("font_size", size);
+        l.AddThemeColorOverride("font_color", ink);
+        if (bold)
+            l.AddThemeFontOverride("font", QuickPad.BoldFont);
+        if (wrap)
+            l.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        return l;
+    }
+
+    private static Label QEyebrow(string text) => QText(text.ToUpperInvariant(), 11, QMuted, bold: true);
+
+    private static Label QHint(string text, bool wrap = false) => QText(text, 13, QMuted, wrap: wrap);
+
+    /// <summary>The prototype's buttons: plain, picked (a choice made), primary.</summary>
+    private static QuickPad QBtn(string text, Action clicked, bool primary = false, bool small = false, bool pressed = false)
+    {
+        bool picked = pressed;
+        var b = new QuickPad
+        {
+            Text = text, FontSize = primary ? 16 : small ? 13 : 14, Bold = primary,
+            Rim = primary ? QOlive : picked ? QOlive : QLine,
+            Fill = primary ? QOlive : picked ? QSel : QInset,
+            Ink = primary ? QOnOlive : QInk,
+            HoverRim = QOlive,
+            HoverFill = primary ? QOlive.Lightened(0.08f) : null,
+        };
+        b.Fit(primary ? new Vector2(22, 11) : small ? new Vector2(10, 5) : new Vector2(14, 8));
+        b.Clicked += clicked;
+        return b;
+    }
+
+    /// <summary>A fact of the battle: plain, or a door to the parameters.</summary>
+    private static QuickPad QChip(string text, Action? clicked = null)
+    {
+        var b = new QuickPad
+        {
+            Text = text, FontSize = 13, Rim = QLine, Fill = QPanelC, Ink = QInk,
+            HoverRim = clicked is null ? null : QOlive,
+            MouseFilter = clicked is null ? Control.MouseFilterEnum.Ignore : Control.MouseFilterEnum.Stop,
+        }.Fit(new Vector2(10, 4));
+        if (clicked is not null)
+            b.Clicked += clicked;
+        return b;
+    }
+
+    /// <summary>A panel round <paramref name="inner"/>: the prototype's square box with its line.</summary>
+    private static PanelContainer QBox(Control inner, Color bg, float pad, Color? rim = null)
+    {
+        var box = new StyleBoxFlat { BgColor = bg, BorderColor = rim ?? QLine };
+        box.SetBorderWidthAll(1);
+        box.SetContentMarginAll(pad);
+        var panel = new PanelContainer();
+        panel.AddThemeStyleboxOverride("panel", box);
+        panel.AddChild(inner);
+        return panel;
+    }
+
+    // --- the squads on the board ---------------------------------------------------
+
+    /// <summary>
+    /// In <c>LineUpSides</c>: the map's homes for the two squads - each side's
+    /// first three, then its zone's free cells if it has fewer - each with its
+    /// machine's class and kit. The map's other homes stand empty.
+    /// </summary>
+    private void QuickHomes()
+    {
+        if (_quick is not { } q)
+            return;
+        string[] sides = Parking.SidesOf(_parkings);
+        var homes = new List<Parking>();
+        foreach (Side side in new[] { Side.Green, Side.Brown })
+        {
+            string name = side == Side.Green ? Parking.Green : Parking.Brown;
+            QuickSquad.Slot[] squad = side == q.Player ? q.Squad : q.Ai;
+            var cells = new List<(Vector2I Cell, int? Facing)>();
+            for (int i = 0; i < _parkings.Count; i++)
+                if (sides[i] == name)
+                    cells.Add((_parkings[i].Cell, _parkings[i].Facing));
+            foreach (Vector2I cell in _arena.Zone(name))
+                if (cells.All(c => c.Cell != cell))
+                    cells.Add((cell, null));
+            for (int i = 0; i < squad.Length && i < cells.Count; i++)
+                homes.Add(new Parking(cells[i].Cell, squad[i].Class, name, cells[i].Facing, QuickSquad.KitOf(squad[i])));
+        }
+        _parkings = homes;
+    }
+
+    // --- back to the build, and the reveal -------------------------------------------
+
+    /// <summary>«К сборке» in the placement: the scene again, the setup kept.</summary>
+    private void QuickBackToBuild()
+    {
+        if (_quick is null)
+            return;
+        _quickBack = _quick;
+        Log.Print("tank3d: quick: back to the build");
+        GetTree().ReloadCurrentScene();
+    }
+
+    private Control? _qReveal;
+
+    /// <summary>The player's «В бой» (<c>DeployReady</c>): both squads open,
+    /// the toss said - the prototype's reveal, over the board.</summary>
+    private void QuickReveal()
+    {
+        if (_quick is not { } q || _noUi || _banner?.GetParent() is not CanvasLayer layer)
+            return;
+        bool mineFirst = _mt.First == q.Player;
+        var sheet = new VBoxContainer();
+        sheet.AddThemeConstantOverride("separation", 10);
+        sheet.AddChild(QEyebrow("Отряды открыты"));
+        sheet.AddChild(QText($"Жребий: {(mineFirst ? "первыми ходите вы" : "первым ходит ИИ")}", 22, QInk, bold: true));
+        sheet.AddChild(QHint($"Дальше начинается бой на карте «{q.Map}», режим «{QuickMode(q.Map)}»."));
+        var cols = new HBoxContainer();
+        cols.AddThemeConstantOverride("separation", 14);
+        cols.AddChild(QuickRevealSide($"Вы · {QuickSouthSaid(q.Player)}", q.Squad, q.Budget, q.Player, mineFirst, ""));
+        cols.AddChild(QuickRevealSide($"ИИ · {QuickSouthSaid(QuickAi)}", q.Ai, q.AiBudget, QuickAi, !mineFirst,
+                                      q.AiDoctrine is { } d ? $" · доктрина «{d.Name}»" : ""));
+        sheet.AddChild(cols);
+        var go = QBtn("К БОЮ", () => { _qReveal?.QueueFree(); _qReveal = null; }, primary: true);
+        go.SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd;
+        sheet.AddChild(go);
+        var over = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Stop };
+        over.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        over.AddChild(QBox(sheet, QPanelC, 18));
+        _qReveal = over;
+        layer.AddChild(over);
+        Log.Print($"tank3d: quick: revealed - the AI {q.AiDoctrine?.Name}: {QuickSquad.Said(q.Ai)}");
+    }
+
+    private string QuickSouthSaid(Side side) => QuickSouth(QuickMap(_quick!.Map), side) ? "юг" : "север";
+
+    private Control QuickRevealSide(string title, QuickSquad.Slot[] squad, int budget, Side side, bool first, string extra)
+    {
+        var col = new VBoxContainer { CustomMinimumSize = new Vector2(380, 0) };
+        col.AddThemeConstantOverride("separation", 8);
+        col.AddChild(QEyebrow(first ? "Ходит первым" : "Ходит вторым"));
+        col.AddChild(QText(title, 18, SideInk(side), bold: true));
+        col.AddChild(QHint($"Потрачено {QuickSquad.Spent(squad)} из {budget}{extra}"));
+        foreach (QuickSquad.Slot s in squad)
+        {
+            if (s.Empty)
+                continue;
+            QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
+            col.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 12);
+            row.AddChild(new TextureRect
+            {
+                Texture = QuickArtOf(c.Tag, side),
+                CustomMinimumSize = new Vector2(96, 72),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            });
+            var text = new VBoxContainer();
+            text.AddChild(QText($"{c.Name} · {(s.Level > 0 ? $"{c.BranchOf(s.Branch)?.Name}, ур. {s.Level}" : "нейтральная")}", 14, QInk, bold: true));
+            foreach (QuickSquad.Upgrade u in QuickSquad.UpgradesOf(s))
+                text.AddChild(QText($"•  {u.Name}{(u.Flag is null ? " *" : "")}", 13, QMuted));
+            row.AddChild(text);
+            col.AddChild(row);
+        }
+        return QBox(col, QPanelC, 14, first ? QOlive : QLine);
+    }
+
+    // --- the script ----------------------------------------------------------------
+
+    /// <summary>
+    /// <c>--quick-do "STEP;STEP"</c>: the screens driven for a capture, a step
+    /// every few frames - <c>lobby</c>, <c>build</c>, <c>params</c>,
+    /// <c>mapview</c>, <c>close</c>, <c>map:NAME</c>, <c>swap</c>,
+    /// <c>budget:N</c>, <c>ai-budget:N</c>, <c>doctrine:N|random</c>,
+    /// <c>company:N</c> (from 1), <c>class:SLOT:TAG</c>,
+    /// <c>level:SLOT:BRANCH:L</c>, <c>tip:SLOT:BRANCH:L</c> (the pointer on a
+    /// node), <c>shot:PATH</c> (once the pictures are in) and <c>go</c>.
+    /// </summary>
+    private async void QuickScript()
+    {
+        foreach (string step in _quickDo)
+        {
+            for (int f = 0; f < 4; f++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (_qRoot is null)
+                return;
+            string[] p = step.Split(':');
+            QuickSetup q = _qs;
+            int Slot(string s) => Math.Clamp((int)F(s, 1) - 1, 0, QuickSquad.Size - 1);
+            switch (p[0])
+            {
+                case "lobby": _qPage = QuickPage.Lobby; break;
+                case "build": _qPage = QuickPage.Build; break;
+                case "params": _qModal = QuickModal.Params; break;
+                case "mapview": _qModal = QuickModal.Map; break;
+                case "close": _qModal = QuickModal.None; _qAsk = null; break;
+                case "try-go": QuickTryGo(); continue;
+                case "clear": QuickAsk(true, "Очистить отряд?", "Все три машины станут пустыми, прокачка снимется.", "Очистить",
+                                       () => q.Squad = QuickSquad.Empty()); continue;
+                case "focus" when p.Length > 3:
+                    // the keyboard's way to a node: its tip comes up with its focus
+                    QuickShow();
+                    for (int f = 0; f < 2; f++)
+                        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    QuickPadAt(Slot(p[1]), p[2], (int)F(p[3], 1))?.GrabFocus();
+                    continue;
+                case "map" when p.Length > 1: q.Map = p[1]; break;
+                case "swap": q.Player = Across(q.Player); QuickArt(); break;
+                case "budget" when p.Length > 1: q.Budget = (int)F(p[1], q.Budget); QuickSquad.Trim(q.Squad, q.Budget); break;
+                case "ai-budget" when p.Length > 1: q.AiBudget = (int)F(p[1], q.AiBudget); break;
+                case "doctrine" when p.Length > 1: q.Doctrine = p[1] == "random" ? null : (int)F(p[1], 1) - 1; break;
+                case "company" when p.Length > 1:
+                    q.Squad = QuickSquad.OfCompany(QuickSquad.Companies[Math.Clamp((int)F(p[1], 1) - 1, 0, 3)]);
+                    break;
+                case "class" when p.Length > 2:
+                    if (QuickSquad.ClassWhy(q.Squad, Slot(p[1]), p[2].ToUpperInvariant()) is { Length: > 0 } no)
+                        Log.Print($"tank3d: quick: {step} - {no}");
+                    else
+                        q.Squad[Slot(p[1])] = new QuickSquad.Slot(p[2].ToUpperInvariant(), null, 0);
+                    break;
+                case "level" when p.Length > 3:
+                    int at = Slot(p[1]), l = (int)F(p[3], 0);
+                    if (QuickSquad.LevelWhy(q.Squad, at, p[2], l, q.Budget) is { Length: > 0 } why)
+                        Log.Print($"tank3d: quick: {step} - {why}");
+                    else
+                        q.Squad[at] = q.Squad[at] with { Branch = l > 0 ? p[2] : null, Level = l };
+                    break;
+                case "tip" when p.Length > 3:
+                    QuickShow();
+                    for (int f = 0; f < 2; f++)
+                        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    QuickPointAt(Slot(p[1]), p[2], (int)F(p[3], 1));
+                    continue;
+                case "shot" when p.Length > 1:
+                    for (int f = 0; f < 600 && _qArtLeft > 0; f++)
+                        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    if (_qTip is null)
+                        QuickShow();
+                    for (int f = 0; f < 6; f++)
+                        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    string path = string.Join(":", p.Skip(1));
+                    Error err = GetViewport().GetTexture().GetImage().SavePng(path);
+                    Log.Print(err == Error.Ok ? $"capture: {path}" : $"capture to {path} failed: {err}");
+                    continue;
+                case "go":
+                    // the button waits for three; a script's empty slot is filled as the timer's would be
+                    if (q.Squad.Any(s => s.Empty))
+                    {
+                        QuickSquad.Fill(q.Squad);
+                        Log.Print($"tank3d: quick: go - the empty slots filled by «Сводная»: {QuickSquad.Said(q.Squad)}");
+                    }
+                    _qGo = true;
+                    return;
+                default: Log.Print($"tank3d: quick: no step {step}"); continue;
+            }
+            QuickShow();
+        }
+    }
+
+    /// <summary><c>tip:</c> - the tooltip of slot <paramref name="at"/>'s node
+    /// <paramref name="level"/> of <paramref name="branch"/>, as the pointer would raise it.</summary>
+    private void QuickPointAt(int at, string branch, int level) =>
+        QuickPadAt(at, branch, level)?.EmitSignal(Control.SignalName.MouseEntered);
+
+    /// <summary>Slot <paramref name="at"/>'s node <paramref name="level"/> of
+    /// <paramref name="branch"/>, or level 0: the branch's head.</summary>
+    private QuickPad? QuickPadAt(int at, string branch, int level)
+    {
+        if (_qRoot is null || _qs.Squad[at].Class is not { } cls || QuickSquad.ClassOf(cls).BranchOf(branch) is not { } b)
+            return null;
+        // the nodes of one level in the page's order: two a slot, a branch each
+        var pads = _qRoot.FindChildren("*", "", true, false).OfType<QuickPad>()
+                         .Where(x => level > 0 ? x.Form == QuickPad.Shape.Hex && x.Text == level.ToString()
+                                               : QuickSquad.Classes.SelectMany(c => c.Branches).Any(y => y.Name == x.Text)).ToList();
+        int index = at * 2 + Array.IndexOf(QuickSquad.ClassOf(cls).Branches, b);
+        return index >= 0 && index < pads.Count ? pads[index] : null;
+    }
+
+    /// <summary><c>--quick-do</c>'s steps, in order.</summary>
+    private readonly List<string> _quickDo = new();
+}

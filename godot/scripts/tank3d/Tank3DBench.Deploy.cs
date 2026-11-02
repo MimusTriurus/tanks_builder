@@ -143,7 +143,8 @@ public sealed partial class Tank3DBench
             return;
         Log.Print("tank3d: match: placement - green zone " + Zoned(Side.Green) + ", brown zone " + Zoned(Side.Brown));
         // player 1 first (Tank3DBench.Match, the toss)
-        DeploySide(_mt.First);
+        // a quick battle places the player's side alone, the AI standing on its homes (Tank3DBench.Quick)
+        DeploySide(_quick is { } q ? q.Player : _mt.First);
     }
 
     private string Zoned(Side side) =>
@@ -207,7 +208,8 @@ public sealed partial class Tank3DBench
         // the same count (the curtain used to force it, hiding the panel)
         _deployMovedShown = -1;
         // the toss said on the first side's banner (Tank3DBench.Match)
-        Banner($"{(side == _mt.First ? TossSaid : "")}Расстановка: {SideName(side)}", SideInk(side));
+        // in a quick battle the toss is said with the reveal
+        Banner($"{(side == _mt.First && _quick is null ? TossSaid : "")}Расстановка: {SideName(side)}", SideInk(side));
         Log.Print($"tank3d: match: {SideName(side)} place their tanks");
     }
 
@@ -363,7 +365,7 @@ public sealed partial class Tank3DBench
             return;
         Log.Print($"tank3d: match: {SideName(side)} are placed - "
                  + string.Join(", ", Units().Where(u => u.Side == side).Select(u => $"{u.Tag}#{u.Id} {MapAt(UnitCell(u.Id))}")));
-        if (side == _mt.First)
+        if (side == _mt.First && _quick is null)
         {
             DeploySide(Across(side));
             return;
@@ -382,6 +384,7 @@ public sealed partial class Tank3DBench
         if (_side != _mt.First && FirstReady(_mt.First) is { } first)
             TakeOver(first);
         Banner($"В бой · раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+        QuickReveal();
         // from straight down into the isometric view from the side to move, smoothly
         CameraTurnTo(IsoYawOf(_mt.Turn), Mathf.DegToRad(IsoPitchDeg));
         Log.Print($"tank3d: match: both sides placed - in battle, {SideName(_mt.First)} to move");
@@ -786,6 +789,19 @@ public sealed partial class Tank3DBench
         reset.AddThemeFontSizeOverride("font_size", 15);
         reset.Pressed += DeployReset;
         row.AddChild(reset);
+        // a quick battle: back to the squad, the setup kept (Tank3DBench.Quick)
+        if (_quick is not null)
+        {
+            var back = new Button
+            {
+                Text = "К сборке",
+                FocusMode = Control.FocusModeEnum.None,
+                TooltipText = "назад к сборке отряда и параметрам боя; расстановка начнётся заново",
+            };
+            back.AddThemeFontSizeOverride("font_size", 15);
+            back.Pressed += QuickBackToBuild;
+            row.AddChild(back);
+        }
         pad.AddChild(row);
         panel.AddChild(pad);
         layer.AddChild(panel);

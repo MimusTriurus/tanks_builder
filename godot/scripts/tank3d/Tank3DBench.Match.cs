@@ -220,6 +220,8 @@ public sealed partial class Tank3DBench
         _kits = Array.Empty<Kit>();
         if (!Match)
             return;
+        // a quick battle: the two squads on the homes, each machine its kit (Tank3DBench.Quick)
+        QuickHomes();
         _lineup = Lineup.Of(_parkings);
         // the home's kit, else the starting squad's stub by the class (Р-4, Д8)
         _kits = _lineup.Select(u => _parkings[u.Slot].Kit ?? Kits.Starter(ClassFor(u.Model))).ToArray();

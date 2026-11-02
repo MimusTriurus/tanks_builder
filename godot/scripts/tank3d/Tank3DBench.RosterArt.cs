@@ -47,24 +47,37 @@ public sealed partial class Tank3DBench
         {
             if (!IsInsideTree())
                 return;
-            string path = RosterCachePath(tag, side);
-            Texture2D? art = null;
-            if (path.Length > 0 && FileAccess.FileExists(path) && Image.LoadFromFile(path) is { } kept && !kept.IsEmpty())
-            {
-                art = ImageTexture.CreateFromImage(kept);
+            if (await RosterArtOf(tag, side) is not { } got)
+                continue;
+            if (got.Cached)
                 cached++;
-            }
-            else if (await RosterRender(tag, side) is { } made)
-            {
-                art = ImageTexture.CreateFromImage(made);
+            else
                 rendered++;
-                if (path.Length > 0)
-                    RosterCacheWrite(path, tag, side, made);
-            }
-            if (art is not null)
-                _rosterArt[(tag, side)] = art;
         }
         Log.Print($"tank3d: roster: {_rosterArt.Count} of {wanted.Count} units - {cached} from the cache, {rendered} rendered");
+    }
+
+    /// <summary>One model's picture in a side's paint: off the disk, else
+    /// rendered and kept, and into <see cref="_rosterArt"/>; null if the model
+    /// does not load. The quick battle's build screen asks it too
+    /// (<c>Tank3DBench.Quick</c>).</summary>
+    private async System.Threading.Tasks.Task<(Texture2D Art, bool Cached)?> RosterArtOf(string tag, Side side)
+    {
+        if (_rosterArt.TryGetValue((tag, side), out Texture2D? had))
+            return (had, true);
+        string path = RosterCachePath(tag, side);
+        (Texture2D, bool)? art = null;
+        if (path.Length > 0 && FileAccess.FileExists(path) && Image.LoadFromFile(path) is { } kept && !kept.IsEmpty())
+            art = (ImageTexture.CreateFromImage(kept), true);
+        else if (await RosterRender(tag, side) is { } made)
+        {
+            art = (ImageTexture.CreateFromImage(made), false);
+            if (path.Length > 0)
+                RosterCacheWrite(path, tag, side, made);
+        }
+        if (art is { } done)
+            _rosterArt[(tag, side)] = done.Item1;
+        return art;
     }
 
     /// <summary>Bumped by hand when the picture changes for a reason the
@@ -109,6 +122,36 @@ public sealed partial class Tank3DBench
 
     private async System.Threading.Tasks.Task<Image?> RosterRender(string tag, Side side)
     {
+        if (RosterScene(tag, side, new Vector2I(RosterArtPx, RosterArtPx), this, live: false) is not var (view, _))
+            return null;
+
+        // drawn on the next frame; read back once it has been
+        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        Image? image = view.GetTexture()?.GetImage();
+        view.QueueFree();
+        if (image is null || image.IsEmpty())
+            return null;
+        // cut to what was drawn: the box frames the model loosely (antennae,
+        // the gun's reach), the icon wants the tank edge to edge
+        Rect2I used = image.GetUsedRect();
+        if (used.Size.X > 0 && used.Size.Y > 0)
+            image = image.GetRegion(used.Grow(1).Intersection(new Rect2I(Vector2I.Zero, image.GetSize())));
+        return image;
+    }
+
+    /// <summary>
+    /// One model alone in a viewport of its own under <paramref name="parent"/>
+    /// (it must be in the tree: the framing reads the placed meshes): the
+    /// board's glTF, cel shading and paint, a sun without shadows, a clear
+    /// background, the board's pitch. Still (<paramref name="live"/> false) it
+    /// is turned three-quarters and framed tight on that view, for a picture
+    /// read back once. Live - the quick battle's build card - it is drawn every
+    /// frame and framed loose enough for the rig to turn it any way round; the
+    /// rig is the model's turntable. Null when the model does not load.
+    /// </summary>
+    private (SubViewport View, Node3D Rig)? RosterScene(string tag, Side side, Vector2I size, Node parent, bool live)
+    {
         TankModel model;
         try
         {
@@ -122,13 +165,13 @@ public sealed partial class Tank3DBench
         var view = new SubViewport
         {
             Name = $"RosterArt_{tag}",
-            Size = new Vector2I(RosterArtPx, RosterArtPx),
+            Size = size,
             OwnWorld3D = true,
             TransparentBg = true,
             Msaa3D = Viewport.Msaa.Msaa4X,
-            RenderTargetUpdateMode = SubViewport.UpdateMode.Once,
+            RenderTargetUpdateMode = live ? SubViewport.UpdateMode.Always : SubViewport.UpdateMode.Once,
         };
-        AddChild(view);
+        parent.AddChild(view);
         var world = BoardDress.World();
         world.Environment.BackgroundMode = Godot.Environment.BGMode.ClearColor;
         view.AddChild(world);
@@ -154,6 +197,35 @@ public sealed partial class Tank3DBench
         view.AddChild(camera);
         Aabb box = RosterBox(model);
         Basis b = camera.Basis;
+        float reach = box.Size.Length();
+        camera.Near = 1.0f;
+        camera.Far = reach * 4.0f;
+        if (live)
+        {
+            // the model's own box, unturned, swept round the rig's axis a
+            // twelfth of a turn at a time: what the camera sees at its widest
+            rig.RotationDegrees = Vector3.Zero;
+            Aabb own = RosterBox(model);
+            rig.RotationDegrees = new Vector3(0.0f, RosterArtYaw, 0.0f);
+            float lowY = float.MaxValue, highY = float.MinValue, wide = 0.0f;
+            for (int k = 0; k < 12; k++)
+            {
+                var turn = new Basis(Vector3.Up, Mathf.Tau * k / 12.0f);
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector3 p = turn * (own.Position + new Vector3((i & 1) != 0 ? own.Size.X : 0.0f,
+                                                                   (i & 2) != 0 ? own.Size.Y : 0.0f,
+                                                                   (i & 4) != 0 ? own.Size.Z : 0.0f));
+                    float y = p.Dot(b.Y);
+                    lowY = Mathf.Min(lowY, y);
+                    highY = Mathf.Max(highY, y);
+                    wide = Mathf.Max(wide, Mathf.Abs(p.Dot(b.X)));
+                }
+            }
+            camera.Size = Mathf.Max(highY - lowY, 2.0f * wide * size.Y / Mathf.Max(size.X, 1)) * 1.04f;
+            camera.Position = b.Y * ((lowY + highY) * 0.5f) + b.Z * reach * 2.0f;
+            return (view, rig);
+        }
         float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
         for (int i = 0; i < 8; i++)
         {
@@ -166,28 +238,12 @@ public sealed partial class Tank3DBench
             minY = Mathf.Min(minY, y);
             maxY = Mathf.Max(maxY, y);
         }
-        float reach = box.Size.Length();
         camera.Size = Mathf.Max(maxX - minX, maxY - minY) * 1.08f;
-        camera.Near = 1.0f;
-        camera.Far = reach * 4.0f;
         Vector3 mid = box.GetCenter();
         // the box's middle on the camera's axis, the camera well back along it
-        Vector3 across = b.X * ((minX + maxX) * 0.5f - mid.Dot(b.X)) + b.Y * ((minY + maxY) * 0.5f - mid.Dot(b.Y));
-        camera.Position = mid + across + b.Z * reach * 2.0f;
-
-        // drawn on the next frame; read back once it has been
-        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-        Image? image = view.GetTexture()?.GetImage();
-        view.QueueFree();
-        if (image is null || image.IsEmpty())
-            return null;
-        // cut to what was drawn: the box frames the model loosely (antennae,
-        // the gun's reach), the icon wants the tank edge to edge
-        Rect2I used = image.GetUsedRect();
-        if (used.Size.X > 0 && used.Size.Y > 0)
-            image = image.GetRegion(used.Grow(1).Intersection(new Rect2I(Vector2I.Zero, image.GetSize())));
-        return image;
+        Vector3 off = b.X * ((minX + maxX) * 0.5f - mid.Dot(b.X)) + b.Y * ((minY + maxY) * 0.5f - mid.Dot(b.Y));
+        camera.Position = mid + off + b.Z * reach * 2.0f;
+        return (view, rig);
     }
 
     /// <summary>The model's box in the viewport's world: every mesh's, as placed.</summary>
