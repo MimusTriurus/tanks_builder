@@ -103,6 +103,10 @@ public static class MapRules
         public IReadOnlyDictionary<Vector2I, Masonry> Walling =
             new Dictionary<Vector2I, Masonry>();
 
+        /// <summary>Every cell that carries masonry - a bare letter too, which
+        /// <see cref="Walling"/> leaves out - for <see cref="WallReliefFaults"/>.</summary>
+        public IReadOnlyCollection<Vector2I> Walled = Array.Empty<Vector2I>();
+
         public int At(Vector2I cell) => cell.Y * Columns + cell.X;
 
         public bool On(Vector2I cell) =>
@@ -172,6 +176,7 @@ public static class MapRules
             Parked = map.Parked,
             Arena = map.Arena,
             Walling = map.Walling,
+            Walled = map.Walled(),
         };
     }
 
@@ -724,6 +729,44 @@ public static class MapRules
         return faults;
     }
 
+    /// <summary>
+    /// <c>wall.relief</c>, fatal: masonry stands on its level or above the
+    /// ground round it, never under it. A walled cell is a pad flat at its
+    /// level (<see cref="Relief.Pad"/>); a higher land neighbour brings its
+    /// slope down on to the wall's back, and two walled cells side by side on
+    /// different levels leave the slope nowhere to go - a sheer step. A
+    /// fortified height stays: lower neighbours are what a pad's shoulder is
+    /// for. Water and rock are not ground the rule asks about: a pond's bank
+    /// and a crag's foot are their own. The user's call, 2026-11-02 (BOT-12,
+    /// option B), which replaces the step allowed as a cliff (В-3).
+    /// </summary>
+    public static List<Fault> WallReliefFaults(Draft draft)
+    {
+        var faults = new List<Fault>();
+        foreach (Vector2I cell in draft.Walled.OrderBy(c => c.Y).ThenBy(c => c.X))
+        {
+            if (!draft.On(cell))
+                continue;
+            var over = new List<string>();
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(cell, h);
+                if (!draft.On(next) || draft.IsWater(next) || draft.IsCliff(next))
+                    continue;
+                if (draft.LevelAt(next) > draft.LevelAt(cell))
+                    over.Add($"({next.X},{next.Y})");
+            }
+            if (over.Count == 0)
+                continue;
+            faults.Add(new Fault(cell, "wall.relief",
+                $"the masonry at ({cell.X},{cell.Y}) stands under higher ground at "
+                + string.Join(", ", over) + " - a wall stands on its level or "
+                + "above the ground round it, never under a slope or a step",
+                true, $"({cell.X},{cell.Y}) masonry under a slope"));
+        }
+        return faults;
+    }
+
     // --- the whole board -----------------------------------------------------
 
     /// <summary>
@@ -744,6 +787,7 @@ public static class MapRules
         faults.AddRange(WaterFaults(draft));
         faults.AddRange(HomeFaults(draft));
         faults.AddRange(WallFaults(draft));
+        faults.AddRange(WallReliefFaults(draft));
         faults.AddRange(ArenaFaults(draft));
         return faults;
     }

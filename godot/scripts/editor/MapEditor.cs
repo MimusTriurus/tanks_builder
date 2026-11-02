@@ -960,10 +960,6 @@ public sealed partial class MapEditor : SceneRoot
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
         Covered();
         Ringed(draft, water, kinds);
-        // masonry stands on a pad (Relief.Pad, BOT-12); two pads side by side
-        // on different levels leave the slope nowhere to go - a sheer step
-        // the rules call a cliff (BoardRules.PadStep): allowed, and named
-        WallSteps(faults);
         Stones(faults);
         // where the board breaks the symmetry that is up (MapEditor.Symmetry)
         Symmetric(faults);
@@ -1144,31 +1140,6 @@ public sealed partial class MapEditor : SceneRoot
     /// stage's mine markers redraw on, and setting the cover seals every walled
     /// cell again before the props write their real sides.
     /// </summary>
-    /// <summary>
-    /// <c>wall.step</c>, never fatal: each pair of masonry cells side by side
-    /// on different levels, once, at the lower. Both are pads flat to their
-    /// sides (<see cref="Relief.Pad"/>), so the step between them is sheer and
-    /// no hull drives it (<see cref="BoardRules.PadStep"/>) - the user's call,
-    /// 2026-11-02 (В-3): a step the author may want, said so on the stroke.
-    /// </summary>
-    private void WallSteps(List<MapRules.Fault> faults)
-    {
-        IReadOnlyList<Vector2I> walled = _edit.Walled();
-        var set = new HashSet<Vector2I>(walled);
-        foreach (Vector2I cell in walled)
-            foreach (int heading in HexField.EdgeHeadings)
-            {
-                Vector2I next = HexField.Step(cell, heading);
-                if (!set.Contains(next) || _field.LevelAt(next) <= _field.LevelAt(cell))
-                    continue;
-                faults.Add(new MapRules.Fault(cell, "wall.step",
-                    $"the masonry at ({cell.X},{cell.Y}) and at ({next.X},{next.Y}) stands "
-                    + $"{_field.LevelAt(next) - _field.LevelAt(cell)} level(s) apart: the slope "
-                    + "has nowhere to go, and the step between them is a cliff", false,
-                    $"({cell.X},{cell.Y})-({next.X},{next.Y}) wall step"));
-            }
-    }
-
     private void Covered()
     {
         var cover = new Cover[_edit.Columns * _edit.Rows];
