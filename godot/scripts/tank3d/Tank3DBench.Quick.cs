@@ -137,7 +137,10 @@ public sealed partial class Tank3DBench
         QuickScript();
         Log.Print($"tank3d: quick: the screens - {(back ? "back to the build" : "the lobby")}, maps {string.Join(", ", pool)}");
         while (!_qGo)
+        {
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            QuickStageTurn();
+        }
         foreach (int at in _qStage.Keys.ToArray())
             QuickStageDrop(at);
         _qLayer.QueueFree();
@@ -211,7 +214,24 @@ public sealed partial class Tank3DBench
 
     /// <summary>Each card's live model, kept over the page's rebuilds: a click
     /// redraws the page, the model is loaded again only for a new class or paint.</summary>
-    private readonly Dictionary<int, (string Class, Side Side, SubViewportContainer Box)> _qStage = new();
+    private readonly Dictionary<int, (string Class, Side Side, SubViewportContainer Box, Node3D Rig)> _qStage = new();
+
+    /// <summary>A full turn of the stages, seconds.</summary>
+    private const double QTurnSeconds = 16.0;
+
+    /// <summary>Degrees the drags have added to the stages' common heading.</summary>
+    private float _qTurnBy;
+
+    /// <summary>Every card's model at one heading - the clock's, plus the drags' -
+    /// so the squad turns as one and a model brought in joins it in step. Each
+    /// frame of the screens; allocates nothing.</summary>
+    private void QuickStageTurn()
+    {
+        float yaw = RosterArtYaw + _qTurnBy + (float)(Time.GetTicksMsec() / 1000.0 % QTurnSeconds / QTurnSeconds * 360.0);
+        foreach (var stage in _qStage.Values)
+            if (IsInstanceValid(stage.Rig))
+                stage.Rig.RotationDegrees = new Vector3(0.0f, yaw, 0.0f);
+    }
 
     /// <summary>Slot <paramref name="at"/>'s model turning on its stage, the
     /// roster's own scene live (<see cref="RosterScene"/>): it spins slowly, a
@@ -241,18 +261,15 @@ public sealed partial class Tank3DBench
             box.QueueFree();
             return null;
         }
-        Tween spin = rig.CreateTween().SetLoops();
-        spin.TweenProperty(rig, "rotation_degrees:y", RosterArtYaw + 360.0f, 16.0).From(RosterArtYaw);
+        // a drag turns every model at once: they keep one heading (QuickStageTurn)
         box.GuiInput += e =>
         {
             if (e is InputEventMouseMotion m && m.ButtonMask.HasFlag(MouseButtonMask.Left))
-            {
-                spin.Kill();
-                rig.RotateY(m.Relative.X * 0.012f);
-            }
+                _qTurnBy += m.Relative.X * 0.7f;
         };
         _qLayer.RemoveChild(box);
-        _qStage[at] = (cls, side, box);
+        _qStage[at] = (cls, side, box, rig);
+        QuickStageTurn();
         return box;
     }
 
@@ -891,8 +908,16 @@ public sealed partial class Tank3DBench
             col.AddChild(hex);
             var nm = QText(u.Name + (u.Flag is null ? " *" : ""), 13, open ? QInk : QMuted, bold: open, wrap: true);
             nm.HorizontalAlignment = HorizontalAlignment.Center;
-            nm.CustomMinimumSize = new Vector2(0, 34);
-            col.AddChild(nm);
+            // two lines, never more and never fewer: a longer name must not make
+            // this tree taller than the next card's, or the stage over it shorter
+            // (a box of its own, fixed high: a label's own height follows its lines and their spacing)
+            nm.MaxLinesVisible = 2;
+            nm.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+            nm.VerticalAlignment = VerticalAlignment.Center;
+            var slot = new Control { CustomMinimumSize = new Vector2(0, QNameHigh), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Ignore };
+            nm.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            slot.AddChild(nm);
+            col.AddChild(slot);
             var kind = QText(QKind(u), 11, QMuted);
             kind.HorizontalAlignment = HorizontalAlignment.Center;
             col.AddChild(kind);
@@ -901,6 +926,9 @@ public sealed partial class Tank3DBench
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         return box;
     }
+
+    /// <summary>An upgrade's name under its node, px high: two lines of 13 px and their spacing.</summary>
+    private static readonly float QNameHigh = Mathf.Ceil(QuickPad.FontOf(true).GetHeight(13) * 2 + 6);
 
     /// <summary>An upgrade's kind in a word, under its node.</summary>
     private static string QKind(QuickSquad.Upgrade u) =>
