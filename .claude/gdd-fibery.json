@@ -11,6 +11,8 @@
     "upgrades":       { "view": "5abf60b5-6968-4c8b-b4d9-bbdb1a5ec1e5", "secret": "ec35353d-afe3-4a8f-9fe1-95b65450cba3", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/54" },
     "contradictions": { "view": "19cbfd77-decf-4c1d-86b9-d850c0012fa4", "secret": "0bc6d381-3952-443b-812f-035827a02ffc", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/55" },
     "undefined":      { "view": "c44c5403-3438-43dd-83e8-9a587def49c6", "secret": "9b92616d-845d-4960-9394-9c66874832f0", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/56" },
-    "upgrades-draft": { "view": "ec485c36-baf3-455e-87e6-1edb01dc7fba", "secret": "f0b29ed8-57ae-48a8-bd20-361168d7a24a", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/57" }
+    "upgrades-draft": { "view": "ec485c36-baf3-455e-87e6-1edb01dc7fba", "secret": "f0b29ed8-57ae-48a8-bd20-361168d7a24a", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/57" },
+    "GameModes":      { "view": "87f2858b-1137-4967-96ad-ad00e8c865c5", "secret": "858de089-c1fd-459f-a53b-ef24cb4c3fd0", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/80" },
+    "meta":           { "view": "345a5935-08b7-423b-9e2c-24b9d7d99d29", "secret": "fc8b67fa-d798-41ad-8ce7-a91b901c5556", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/81" }
   }
 }
