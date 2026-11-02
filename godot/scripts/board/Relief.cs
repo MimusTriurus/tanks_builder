@@ -490,7 +490,11 @@ public sealed class Relief
     /// <summary>How far the bank runs on under the bunker's own wall, in
     /// circumradii: past where the leaning face stands at the bank's height
     /// (about 0.09 R in), short of the floor a tank stands on.</summary>
-    public const float BermIn = 0.12f;
+    public const float BermIn = 0.06f;
+
+    /// <summary>Over how much of a side, in circumradii, the bank comes down
+    /// to nothing toward the gate (<see cref="GateFade"/>).</summary>
+    public const float BermTaper = 0.3f;
 
     /// <summary>
     /// Whether a cell is a pad (BOT-12, docs/walls-relief-plan.md): masonry -
@@ -558,6 +562,22 @@ public sealed class Relief
             ways[k] = (WorldCentre(field, HexField.Step(any, h)) - from).Normalized();
             bits[k] = 1 << HexField.EdgeIndex(h);
         }
+        // which side meets each side at the end it runs to (+ along it, the
+        // normal turned a quarter left) and at the other: the two whose
+        // normals are 60° off it
+        _endBits = new (int Plus, int Minus)[ways.Length];
+        for (int w = 0; w < ways.Length; w++)
+        {
+            var along = new Vector2(-ways[w].Y, ways[w].X);
+            for (int k = 0; k < ways.Length; k++)
+                if (Mathf.Abs(ways[k].Dot(ways[w]) - 0.5f) < 0.1f)
+                {
+                    if (ways[k].Dot(along) > 0.0f)
+                        _endBits[w].Plus = bits[k];
+                    else
+                        _endBits[w].Minus = bits[k];
+                }
+        }
         float side = r * 0.8660254f;
         float core = side + PadLip * r, shoulder = PadShoulder * r, wide = FootWide * r;
         // ground px of height, as the screen's lift px the raster holds
@@ -602,7 +622,11 @@ public sealed class Relief
                         if (dist <= side)
                         {
                             if ((pad.Sides & bits[nearest]) != 0)
-                                berm = Mathf.Max(berm, Mathf.SmoothStep(side - BermIn * r, side - (BermIn - 0.04f) * r, dist));
+                            {
+                                var along = new Vector2(-ways[nearest].Y, ways[nearest].X);
+                                berm = Mathf.Max(berm, Mathf.SmoothStep(side - BermIn * r, side - 0.5f * BermIn * r, dist)
+                                                       * GateFade(pad.Sides, nearest, d.Dot(along), r));
+                            }
                         }
                         else
                         {
@@ -614,7 +638,8 @@ public sealed class Relief
                                 var along = new Vector2(-ways[w].Y, ways[w].X);
                                 float t = Mathf.Clamp(rel.Dot(along), -0.5f * r, 0.5f * r);
                                 float gap = (rel - along * t).Length();
-                                berm = Mathf.Max(berm, 1.0f - Mathf.SmoothStep(0.0f, BermWide * r, gap));
+                                berm = Mathf.Max(berm, (1.0f - Mathf.SmoothStep(0.0f, BermWide * r, gap))
+                                                       * GateFade(pad.Sides, w, rel.Dot(along), r));
                             }
                         }
                     }
@@ -639,6 +664,29 @@ public sealed class Relief
                 foot[p] = shade;
             }
         return foot;
+    }
+
+    /// <summary>The sides meeting each side at its two ends, as bits
+    /// (<see cref="Pads"/>, <see cref="GateFade"/>).</summary>
+    private (int Plus, int Minus)[] _endBits = Array.Empty<(int, int)>();
+
+    /// <summary>
+    /// How much of a bunker's bank a standing side <paramref name="w"/> keeps
+    /// at <paramref name="t"/> along it (0 at its middle, ±R/2 at its ends):
+    /// toward an end where the gate is, it comes down to nothing over
+    /// <see cref="BermTaper"/> and does not wrap round the corner. Wrapped, the
+    /// banks of the gate's two neighbours met in front of it as a sill (the
+    /// user's catch, 2026-11-02); between two standing sides the corner keeps
+    /// its round.
+    /// </summary>
+    private float GateFade(int sides, int w, float t, float r)
+    {
+        float fade = 1.0f, end = 0.5f * r, taper = BermTaper * r;
+        if ((sides & _endBits[w].Plus) == 0)
+            fade *= 1.0f - Mathf.SmoothStep(end - taper, end, t);
+        if ((sides & _endBits[w].Minus) == 0)
+            fade *= Mathf.SmoothStep(-end, -end + taper, t);
+        return fade;
     }
 
     /// <summary>A cell's middle in the raster's world x, z.</summary>

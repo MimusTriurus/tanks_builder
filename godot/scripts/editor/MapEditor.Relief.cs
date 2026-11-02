@@ -78,7 +78,7 @@ public sealed partial class MapEditor
                       + "|" + (looks is null ? "" : new string(looks))
                       + "|" + string.Join(";", roads)
                       + "|" + _edit.Climate + "|"
-                      + string.Join(";", _edit.Walled().Select(c => $"{c.X},{c.Y},{_edit.MasonryAt(c)?.Edges},{_edit.MasonryAt(c)?.Kind}")) + "|"
+                      + string.Join(";", _edit.Walled().Select(c => $"{c.X},{c.Y},{_edit.MasonryAt(c)?.Built},{_edit.MasonryAt(c)?.Kind}")) + "|"
                       + string.Join(";", rocking.OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
                                                 .Select(kv => $"{kv.Key}{kv.Value}"));
         if (want == _reliefAs)
@@ -105,7 +105,7 @@ public sealed partial class MapEditor
             // shaded where it stands (Relief.Pads)
             foreach (Vector2I walled in _edit.Walled())
                 if (_edit.MasonryAt(walled) is { } masonry)
-                    _board.SetSides(walled + ring.Shift, masonry.Edges);
+                    _board.SetSides(walled + ring.Shift, masonry.Built);
             _board.SetSoil(looks);
             _board.Roads = roads;
         }

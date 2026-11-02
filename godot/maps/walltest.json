@@ -29,6 +29,6 @@
   ],
 
   "walls": [
-    { "at": [3, 6], "kind": "capon", "facing": 270 }
+    { "at": [3, 6], "kind": "capon", "facing": 90 }
   ]
 }

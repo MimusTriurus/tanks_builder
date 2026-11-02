@@ -1098,7 +1098,7 @@ public sealed partial class Tank3DBench : Node3D
         // where it stands (Relief.Pads); BuildWalls writes them again off
         // the bricks
         foreach ((Vector2I cell, Masonry wall) in map.Walling)
-            _field.SetSides(cell, wall.Edges);
+            _field.SetSides(cell, wall.Built);
         _field.SetSoil(Dressed(map));
         // the roads' way through each cell, for the drawing; the rule is the
         // floor the map already laid (Foundation.Road)
