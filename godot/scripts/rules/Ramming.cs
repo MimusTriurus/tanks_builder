@@ -197,9 +197,11 @@ public static class Ramming
         // On slopes a level up is a step a tank drives, and a ram throws it
         // there as well (the user's call, 2026-11-01); on ramps up wants a
         // ramp, and a ram is not one.
-        if (drop < 0 && !(field.Slopes && -drop <= field.MaxClimb))
+        // a step between two masonry pads is sheer either way (BoardRules.PadStep)
+        bool sheer = BoardRules.PadStep(field, from, cell);
+        if (drop < 0 && (sheer || !(field.Slopes && -drop <= field.MaxClimb)))
             return Bar.Uphill;
-        if (drop > 1)
+        if (drop > 1 || (drop > 0 && sheer))
             return Bar.Cliff;
         if (occupied(cell))
             return Bar.Taken;

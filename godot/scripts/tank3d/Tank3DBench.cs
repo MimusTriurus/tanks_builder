@@ -1083,9 +1083,9 @@ public sealed partial class Tank3DBench : Node3D
         };
         _field.SetKinds(map.Kinds);
         _field.SetGround(map.Ground);
-        // no walls on the relief (BuildWalls), so none in the cover either:
-        // an unseen wall is an obstacle nothing explains
-        _field.SetCover(_reliefOn ? Array.ConvertAll(map.Over, c => c == Cover.Walls ? Cover.None : c) : map.Over);
+        // the walls' cells too on the relief: each is a pad there
+        // (Relief.Pad, BOT-12), and BuildWalls stands its masonry on it
+        _field.SetCover(map.Over);
         // --relief joins the levels by slopes: no ramps, a level up or down
         // is one step from any side (HexField.Slopes; BOT-11, a departure
         // from the GDD's ramp kept to the flag)

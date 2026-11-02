@@ -279,6 +279,8 @@ public sealed class Relief
         var rockRaw = new float[n];
         var rawLevel = new int[n];
         var dry = new bool[n];
+        var pad = new bool[n];
+        bool padded = false;
         Array.Fill(rawLevel, _seaLevel);
         var mask = new float[Share.Length][];
         for (int k = 0; k < mask.Length; k++)
@@ -314,10 +316,16 @@ public sealed class Relief
                 Vector2 off = new Vector2(warpX.GetNoise2D(x, z), warpZ.GetNoise2D(x, z) * Squash) * (Warp * r);
                 Vector2I wc = field.FlatCellAt(flat + off);
                 Vector2I from = field.InBounds(wc) ? wc : edge;
+                pad[p] = Pad(field, edge);
+                padded |= pad[p];
+                // A pad (Pad) is its own hexagon, unwarped both ways: its
+                // points read their own cell, and no other cell's read it.
+                if (pad[p] || Pad(field, from))
+                    from = edge;
                 // The warp moves a shore only inward: a dry cell never reads a
                 // water neighbour's height, so no water is laid on a cell the
                 // rules call dry (the user's catch: a pond ran on to its bank).
-                if (field.IsWater(from) && !field.IsWater(edge))
+                else if (field.IsWater(from) && !field.IsWater(edge))
                     from = edge;
                 // and a terrace's edge only into its own cells: no point reads
                 // a higher neighbour, so a hill never stands on a lower hex
@@ -348,12 +356,17 @@ public sealed class Relief
         // as the reference's, a level - a rule here, unlike there - read as a
         // swell.
         float sig = Terrace * r / Cell;
-        Inset(raw, dry, Mathf.Max(0, Mathf.RoundToInt((2.0f - SlopeOut) * sig)),
-              Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
+        int reachDry = Mathf.Max(0, Mathf.RoundToInt((2.0f - SlopeOut) * sig));
+        int reachWet = Mathf.Max(1, Mathf.RoundToInt(2.0f * sig));
+        // a pad's band on its neighbours: the blur's two sigma and a point
+        // more for the masonry's thickness (PadLip), so the slope starts
+        // past the wall's foot
+        int reachPad = padded ? reachWet + Mathf.Max(1, Mathf.RoundToInt(PadLip * r / Cell)) : 0;
+        bool[]? padMask = padded ? pad : null;
+        Inset(raw, dry, reachDry, reachWet, padMask, reachPad);
         if (rawFlat is not null)
         {
-            Inset(rawFlat, dry, Mathf.Max(0, Mathf.RoundToInt((2.0f - SlopeOut) * sig)),
-                  Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
+            Inset(rawFlat, dry, reachDry, reachWet, padMask, reachPad);
             Blur(rawFlat, Nx, Ny, sig);
         }
         Array.Copy(raw, Height, n);
@@ -448,8 +461,32 @@ public sealed class Relief
 
         FillWater(field);
         Carve(lift, r);
+        // last, so no stage after the inset - the blur's tail, the swell,
+        // a weir, the dunes, the bed - touches a pad
+        if (padded)
+            for (int p = 0; p < n; p++)
+                if (pad[p])
+                    Height[p] = field.TopAt(Owner[p]);
         Hollows(lift, r);
     }
+
+    /// <summary>How far past its hexagon a pad's band reaches, in circumradii,
+    /// over the blur's: the masonry on a side is thicker than the side
+    /// (<see cref="Inset"/>).</summary>
+    public const float PadLip = 0.05f;
+
+    /// <summary>
+    /// Whether a cell is a pad (BOT-12, docs/walls-relief-plan.md): masonry -
+    /// a brick wall, a caponier, a bunker, all <see cref="Cover.Walls"/> - is
+    /// laid on a plane at the cell's level (<c>WallProp</c>), so its cell is
+    /// flat at <see cref="HexField.TopAt"/> over the whole hexagon: no warp,
+    /// no swell, and the slope to a lower neighbour lies on the neighbour (the
+    /// user's call, 2026-11-02). A map without masonry has none, and its
+    /// relief is the one it always was.
+    /// </summary>
+    public static bool Pad(HexField field, Vector2I c) =>
+        field.InBounds(c) && field.CoverAt(c) == Cover.Walls && !field.IsWater(c)
+        && field.FoundationAt(c) != Foundation.Rock;
 
     /// <summary>
     /// The dunes (format 3's soil, <see cref="Soil.Dunes"/>): transverse ridges
@@ -790,8 +827,15 @@ public sealed class Relief
     /// takes the highest dry height within <paramref name="reachWet"/> (the
     /// blur's two sigma), so the bank's slope comes out wholly inside the
     /// water's cells and no water is laid on a dry hex.
+    ///
+    /// A pad (<see cref="Pad"/>) gives way to nothing, and a dry point within
+    /// <paramref name="reachPad"/> of one takes the nearest pad's height,
+    /// up or down: the slope to a lower neighbour comes out wholly on it, and
+    /// a higher neighbour's keeps to itself - no <see cref="SlopeOut"/> on the
+    /// pad.
     /// </summary>
-    private void Inset(float[] raw, bool[] dry, int reachDry, int reachWet)
+    private void Inset(float[] raw, bool[] dry, int reachDry, int reachWet,
+                       bool[]? pad = null, int reachPad = 0)
     {
         int n = raw.Length;
         var outp = new float[n];
@@ -801,6 +845,19 @@ public sealed class Relief
                 int p = j * Nx + i;
                 float best = raw[p];
                 bool found = false;
+                if (pad is not null && dry[p])
+                {
+                    if (pad[p])
+                    {
+                        outp[p] = best;
+                        continue;
+                    }
+                    if (NearestPad(raw, pad, i, j, reachPad) is float level)
+                    {
+                        outp[p] = level;
+                        continue;
+                    }
+                }
                 int reach = dry[p] ? reachDry : reachWet;
                 for (int dj = -reach; dj <= reach; dj++)
                 {
@@ -827,6 +884,32 @@ public sealed class Relief
                 outp[p] = best;
             }
         Array.Copy(outp, raw, n);
+    }
+
+    /// <summary>The height of the pad point nearest raster point (i, j)
+    /// within <paramref name="reach"/> points, or null with none.</summary>
+    private float? NearestPad(float[] raw, bool[] pad, int i, int j, int reach)
+    {
+        float? best = null;
+        int bestD = int.MaxValue;
+        for (int dj = -reach; dj <= reach; dj++)
+        {
+            int jj = j + dj;
+            if (jj < 0 || jj >= Ny)
+                continue;
+            for (int di = -reach; di <= reach; di++)
+            {
+                int ii = i + di, d = di * di + dj * dj;
+                if (ii < 0 || ii >= Nx || d > reach * reach || d >= bestD)
+                    continue;
+                int o = jj * Nx + ii;
+                if (!pad[o])
+                    continue;
+                best = raw[o];
+                bestD = d;
+            }
+        }
+        return best;
     }
 
     /// <summary>

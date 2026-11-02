@@ -134,11 +134,11 @@ public static class BattleRun
     /// <summary>
     /// The board a match is played on (<see cref="BattleBoard.Of"/> a field
     /// built from the map as the bench builds its own): the relief's - the
-    /// levels joined by slopes, a level up or down a step from any side, and no
-    /// walls, neither in the cover nor on the edges (the bench's
-    /// <c>BuildBoard</c> with <c>--relief</c>; the ramps were given up,
-    /// 2026-11-01). With <paramref name="slopes"/> off (<c>--ramps</c>), the
-    /// old board: the map's ramps and its walls.
+    /// levels joined by slopes, a level up or down a step from any side (the
+    /// bench's <c>BuildBoard</c> with <c>--relief</c>; the ramps were given up,
+    /// 2026-11-01), and the map's walls in the cover and on the edges, each
+    /// cell a pad on the relief (BOT-12). With <paramref name="slopes"/> off
+    /// (<c>--ramps</c>), the old board: the map's ramps.
     ///
     /// The map as given, in its own cells: the sea round it is
     /// <see cref="Played"/>'s, and <see cref="Start"/> asks for it.
@@ -155,13 +155,12 @@ public static class BattleRun
         {
             field.SetKinds(map.Kinds);
             field.SetGround(map.Ground);
-            field.SetCover(slopes ? Array.ConvertAll(map.Over, c => c == Cover.Walls ? Cover.None : c) : map.Over);
+            field.SetCover(map.Over);
             field.SetRelief(map.Levels, slopes ? null : map.Ramps);
             field.Slopes = slopes;
             field.SetWater(map.Water);
-            if (!slopes)
-                foreach ((Vector2I cell, Masonry wall) in map.Walling)
-                    field.SetSides(cell, wall.Edges);
+            foreach ((Vector2I cell, Masonry wall) in map.Walling)
+                field.SetSides(cell, wall.Edges);
             return BattleBoard.Of(field);
         }
         finally

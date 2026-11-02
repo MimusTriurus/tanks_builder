@@ -83,7 +83,8 @@ public static class BoardRules
         if (!b.Leveled)
             return true;
         if (!b.Ramped)
-            return System.Math.Abs(b.LevelAt(next) - b.LevelAt(cell)) <= b.MaxClimb;
+            return System.Math.Abs(b.LevelAt(next) - b.LevelAt(cell)) <= b.MaxClimb
+                   && !PadStep(b, cell, next);
 
         int here = b.RampHeading(cell), there = b.RampHeading(next);
         int back = HexField.Reverse(heading);
@@ -106,11 +107,23 @@ public static class BoardRules
                    && b.LevelAt(next) == b.LevelAt(cell) - 1);
     }
 
+    /// <summary>
+    /// Whether two neighbours are masonry cells on different levels, on
+    /// slopes: each is a pad flat to its sides (<see cref="Relief.Pad"/>), so
+    /// the slope between them has nowhere to go and the step is sheer - a
+    /// cliff to the rules, up or down (BOT-12, the user's call 2026-11-02:
+    /// allowed on a map, with the editor's <c>wall.step</c> warning).
+    /// </summary>
+    public static bool PadStep(IHexBoard b, Vector2I a, Vector2I c) =>
+        b.Slopes && b.CoverAt(a) == Cover.Walls && b.CoverAt(c) == Cover.Walls
+        && b.LevelAt(a) != b.LevelAt(c);
+
     /// <summary><see cref="HexField.Drops"/>.</summary>
     public static bool Drops(IHexBoard b, Vector2I from, Vector2I onto) =>
         b.Slopes
             ? b.LevelAt(onto) < b.LevelAt(from) - b.MaxClimb
               || (TerrainRules.Plunges(b.FoundationAt(onto)) && b.LevelAt(onto) < b.LevelAt(from))
+              || (PadStep(b, from, onto) && b.LevelAt(onto) < b.LevelAt(from))
             : b.RampHeading(from) < 0 && b.RampHeading(onto) < 0
               && b.LevelAt(onto) < b.LevelAt(from);
 
