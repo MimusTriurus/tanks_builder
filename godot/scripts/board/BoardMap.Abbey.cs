@@ -203,6 +203,9 @@ public sealed partial class BoardMap
 
             foreach (MapRules.Fault fault in MapRules.HomeFaults(draft))
                 lines.Add("  BAD " + fault.Text);
+            // masonry under higher ground (BOT-12)
+            foreach (MapRules.Fault fault in MapRules.WallReliefFaults(draft))
+                lines.Add("  BAD " + fault.Text);
 
             // A species on a cell with no wood waits to be planted - named,
             // not BAD (format 3's trees, docs/map-format3-plan.md Ф5)

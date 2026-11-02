@@ -87,7 +87,7 @@ public static class MapFair
 
     private static void Run(BoardMap map, bool slopes)
     {
-        Log.Print($"map-fair: {map.Name} {map.Columns}x{map.Rows} on {(slopes ? "the relief - slopes, no walls" : "ramps and walls")}, levels "
+        Log.Print($"map-fair: {map.Name} {map.Columns}x{map.Rows} on {(slopes ? "the relief - slopes, walls on pads" : "ramps and walls")}, levels "
                   + string.Join(", ", map.Levels.GroupBy(l => l).OrderBy(g => g.Key).Select(g => $"{g.Key}: {g.Count()}"))
                   + (map.Ramps.Any(r => r) ? $", {map.Ramps.Count(r => r)} ramp(s) in the file" : ""));
 

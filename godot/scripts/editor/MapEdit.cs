@@ -2107,6 +2107,7 @@ public sealed class MapEdit
             Parked = _homes.ToList(),
             Arena = Arena,
             Walling = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
+            Walled = Walled(),
         };
         var plot = new HashSet<Vector2I>();
         for (int r = 0; r < Rows; r++)

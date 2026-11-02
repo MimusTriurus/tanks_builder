@@ -960,13 +960,6 @@ public sealed partial class MapEditor : SceneRoot
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
         Covered();
         Ringed(draft, water, kinds);
-        // no walls, capon or bunker on the relief (Tank3DBench.BuildWalls):
-        // the letters keep them, and each is named where it is
-        foreach (Vector2I walled in _edit.Walled())
-            faults.Add(new MapRules.Fault(walled, "relief.flat",
-                $"({walled.X},{walled.Y}) carries masonry, and the relief stands no "
-                + "wall, capon or bunker - kept in the file, not played", false,
-                $"({walled.X},{walled.Y}) masonry"));
         Stones(faults);
         // where the board breaks the symmetry that is up (MapEditor.Symmetry)
         Symmetric(faults);
@@ -1066,9 +1059,8 @@ public sealed partial class MapEditor : SceneRoot
     {
         if (_stage is null || _field.Atlas is null)
             return;
-        // None on the relief, which stands no masonry (Settle names the cells).
-        // The rest is kept for the day it does.
-        IReadOnlyList<Vector2I> walled = Array.Empty<Vector2I>();
+        // each on its pad (Relief.Pad, BOT-12)
+        IReadOnlyList<Vector2I> walled = _edit.Walled();
         // The relief is in the signature because a wall stands at its cell's own
         // height - see WallProp.Build, which reads LevelAt - so raising the
         // ground under one has to lift it.

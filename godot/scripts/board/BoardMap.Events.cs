@@ -66,7 +66,7 @@ public sealed partial class BoardMap
     /// three cells to reach them is three cells of animation in front of every
     /// screenshot.
     ///
-    /// <b>And a concrete capon at <c>(3,1)</c>, by the rise</b> - the map's
+    /// <b>And a concrete capon at <c>(3,1)</c>, a cell from the rise</b> - the map's
     /// own block (<see cref="Masonry.Sheltering"/>), slit to 270, down the
     /// board at the camera, so the barrel of a tank put in it shows; the gate
     /// opens on to <c>(3,0)</c>, which the medium reaches from its parking
@@ -80,7 +80,7 @@ public sealed partial class BoardMap
     {
         // 0123456789AB
         ".....ff.11..", // r0  a wood at the top middle; the shelf at (8,0),(9,0)
-        ".11W.f...Wvv", // r1  a rise top left; the capon at (3,1); brick at (9,1); the pit at (10,1),(11,1)
+        ".1.W.f...Wvv", // r1  a rise top left, one cell clear of the capon at (3,1) (masonry never stands under higher ground, BOT-12); brick at (9,1); the pit at (10,1),(11,1)
         "............", // r2  ramp on (1,2) climbs north on to (1,1)
         "....m.......", // r3  a mine between the two parkings on this row
         "............", // r4  (7,4) is the ravine's rim: the ramp's high edge

@@ -51,15 +51,11 @@ public sealed partial class MapEditor
             return;
         BoardMap.Ring ring = BoardMap.RingOf(_edit.Columns, _edit.Rows, _edit.OnBoard);
         _ring = ring;
-        // no walls in the cover either, as on the bench: an unseen wall is an
-        // obstacle nothing explains
+        // the walls' cells too: each is a pad (Relief.Pad, BOT-12)
         var cover = new Cover[_edit.Columns * _edit.Rows];
         for (int r = 0; r < _edit.Rows; r++)
         for (int q = 0; q < _edit.Columns; q++)
-        {
-            Cover over = _edit.GlyphAt(new Vector2I(q, r)).Over;
-            cover[r * _edit.Columns + q] = over == Cover.Walls ? Cover.None : over;
-        }
+            cover[r * _edit.Columns + q] = _edit.GlyphAt(new Vector2I(q, r)).Over;
         int[] levels = ring.Spread(draft.Levels, _edit.Plinth - 1);
         bool[] wet = ring.Spread(water, true);
         Foundation[] ground = ring.Spread(draft.Ground, Foundation.Deep);
@@ -82,6 +78,7 @@ public sealed partial class MapEditor
                       + "|" + (looks is null ? "" : new string(looks))
                       + "|" + string.Join(";", roads)
                       + "|" + _edit.Climate + "|"
+                      + string.Join(";", _edit.Walled().Select(c => $"{c.X},{c.Y},{_edit.MasonryAt(c)?.Built},{_edit.MasonryAt(c)?.Kind}")) + "|"
                       + string.Join(";", rocking.OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
                                                 .Select(kv => $"{kv.Key}{kv.Value}"));
         if (want == _reliefAs)
@@ -104,6 +101,11 @@ public sealed partial class MapEditor
             _board.SetGround(ground);
             _board.SetCover(covered);
             _board.SetWater(wet);
+            // the masonry's sides on the ring's cells: a wall's foot is
+            // shaded where it stands (Relief.Pads)
+            foreach (Vector2I walled in _edit.Walled())
+                if (_edit.MasonryAt(walled) is { } masonry)
+                    _board.SetSides(walled + ring.Shift, masonry.Built);
             _board.SetSoil(looks);
             _board.Roads = roads;
         }
@@ -114,7 +116,12 @@ public sealed partial class MapEditor
             return;
         }
 
-        _relief = Relief.Build(_board, rocks: rocks);
+        // the bunkers dug in (Relief.Pads), on the ring's cells
+        var berms = new HashSet<Vector2I>();
+        foreach (Vector2I walled in _edit.Walled())
+            if (_edit.MasonryAt(walled)?.Kind == Masonry.Sort.Capon)
+                berms.Add(walled + ring.Shift);
+        _relief = Relief.Build(_board, rocks: rocks, berms: berms);
         Vector2 offset = _board.FlatAnchor(ring.Shift) - _field.FlatAnchor(Vector2I.Zero);
         Relief? relief = _relief;
         _board.Surface = relief is null ? null : relief.HeightAt;

@@ -158,6 +158,15 @@ public sealed class Masonry
 
     public bool Stands(int heading) => (Edges & (1 << Bit(heading))) != 0;
 
+    /// <summary>The sides that stand once it is built: <see cref="Edges"/>,
+    /// less a capon's gate - the side opposite its slit (<see cref="Facing"/>),
+    /// open whole (<c>CaponKit</c>). What the relief digs a bunker in by
+    /// (<c>Relief.Pads</c>) before the props write their real sides; the
+    /// ring a capon's record carries made the bank run across the gate as a
+    /// sill (the user's catch, 2026-11-02).</summary>
+    public int Built =>
+        Kind == Sort.Capon ? Edges & ~(1 << Bit(((Facing ?? 270) + 180) % 360)) : Edges;
+
     /// <summary>The headings this cell carries wall on, in bit order.</summary>
     public IEnumerable<int> Standing() =>
         Headings.Where(Stands);

@@ -65,9 +65,9 @@ public sealed partial class Tank3DBench : Node3D
     private string _mapName = "events";
     private bool _flat;
     /// <summary>The board as one smooth ground (BOT-11, <see cref="Relief"/>),
-    /// its levels joined by slopes, no walls, in a sea: the board by default
-    /// since 2026-11-01 (the user's call, docs/relief.md). <c>--ramps</c>: the
-    /// old prisms, ramps and walls.</summary>
+    /// its levels joined by slopes, masonry on flat pads (BOT-12), in a sea:
+    /// the board by default since 2026-11-01 (the user's call, docs/relief.md).
+    /// <c>--ramps</c>: the old prisms and ramps.</summary>
     private bool _reliefOn = true;
 
     /// <summary>The rocks' looks on the relief (<c>--rock</c>, docs/rocks-plan.md):
@@ -1083,9 +1083,9 @@ public sealed partial class Tank3DBench : Node3D
         };
         _field.SetKinds(map.Kinds);
         _field.SetGround(map.Ground);
-        // no walls on the relief (BuildWalls), so none in the cover either:
-        // an unseen wall is an obstacle nothing explains
-        _field.SetCover(_reliefOn ? Array.ConvertAll(map.Over, c => c == Cover.Walls ? Cover.None : c) : map.Over);
+        // the walls' cells too on the relief: each is a pad there
+        // (Relief.Pad, BOT-12), and BuildWalls stands its masonry on it
+        _field.SetCover(map.Over);
         // --relief joins the levels by slopes: no ramps, a level up or down
         // is one step from any side (HexField.Slopes; BOT-11, a departure
         // from the GDD's ramp kept to the flag)
@@ -1094,6 +1094,11 @@ public sealed partial class Tank3DBench : Node3D
         // After the relief - the tank bench's reason: the water's guards are
         // asked about levels and ramps.
         _field.SetWater(map.Water);
+        // the map's own sides before the relief: a wall's foot is shaded
+        // where it stands (Relief.Pads); BuildWalls writes them again off
+        // the bricks
+        foreach ((Vector2I cell, Masonry wall) in map.Walling)
+            _field.SetSides(cell, wall.Built);
         _field.SetSoil(Dressed(map));
         // the roads' way through each cell, for the drawing; the rule is the
         // floor the map already laid (Foundation.Road)
@@ -1209,7 +1214,13 @@ public sealed partial class Tank3DBench : Node3D
         }
         _iceBuilt = rocks?.Ice ?? map.Climate.Ice;
         _windBuilt = rocks?.Wind ?? map.Climate.Wind;
-        _relief = Relief.Build(_field!, rocks: rocks);
+        // the bunkers dug in (Relief.Pads): every capon whose model stands
+        var berms = new HashSet<Vector2I>();
+        if (_show.Walls && _show.Bunkers)
+            foreach (Vector2I cell in map.Walled())
+                if (map.MasonryAt(cell)?.Kind == Masonry.Sort.Capon)
+                    berms.Add(cell);
+        _relief = Relief.Build(_field!, rocks: rocks, berms: berms);
         if (_relief is null)
             return;
         foreach (RockGroup g in _relief.Rocks)
