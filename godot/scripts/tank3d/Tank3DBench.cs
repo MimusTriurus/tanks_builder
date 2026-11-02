@@ -65,9 +65,9 @@ public sealed partial class Tank3DBench : Node3D
     private string _mapName = "events";
     private bool _flat;
     /// <summary>The board as one smooth ground (BOT-11, <see cref="Relief"/>),
-    /// its levels joined by slopes, no walls, in a sea: the board by default
-    /// since 2026-11-01 (the user's call, docs/relief.md). <c>--ramps</c>: the
-    /// old prisms, ramps and walls.</summary>
+    /// its levels joined by slopes, masonry on flat pads (BOT-12), in a sea:
+    /// the board by default since 2026-11-01 (the user's call, docs/relief.md).
+    /// <c>--ramps</c>: the old prisms and ramps.</summary>
     private bool _reliefOn = true;
 
     /// <summary>The rocks' looks on the relief (<c>--rock</c>, docs/rocks-plan.md):
