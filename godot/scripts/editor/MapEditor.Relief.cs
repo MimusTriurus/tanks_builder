@@ -51,15 +51,11 @@ public sealed partial class MapEditor
             return;
         BoardMap.Ring ring = BoardMap.RingOf(_edit.Columns, _edit.Rows, _edit.OnBoard);
         _ring = ring;
-        // no walls in the cover either, as on the bench: an unseen wall is an
-        // obstacle nothing explains
+        // the walls' cells too: each is a pad (Relief.Pad, BOT-12)
         var cover = new Cover[_edit.Columns * _edit.Rows];
         for (int r = 0; r < _edit.Rows; r++)
         for (int q = 0; q < _edit.Columns; q++)
-        {
-            Cover over = _edit.GlyphAt(new Vector2I(q, r)).Over;
-            cover[r * _edit.Columns + q] = over == Cover.Walls ? Cover.None : over;
-        }
+            cover[r * _edit.Columns + q] = _edit.GlyphAt(new Vector2I(q, r)).Over;
         int[] levels = ring.Spread(draft.Levels, _edit.Plinth - 1);
         bool[] wet = ring.Spread(water, true);
         Foundation[] ground = ring.Spread(draft.Ground, Foundation.Deep);
