@@ -133,9 +133,6 @@ public sealed partial class Tank3DBench
         switch (c.Kind)
         {
             case CommandKind.Take:
-                // in placement a command lowers the curtain, as place and ready do
-                if (Deploying)
-                    CurtainDown();
                 // in placement the view stays over the zone (Tank3DBench.Deploy)
                 if (c.Unit == _unitId && !Deploying)
                     GlideTo(_rig.Position);
@@ -197,13 +194,11 @@ public sealed partial class Tank3DBench
             case CommandKind.Undo:
                 UndoMove();
                 break;
-            // the placement (Tank3DBench.Deploy): a command lowers the curtain
+            // the placement (Tank3DBench.Deploy)
             case CommandKind.Place:
-                CurtainDown();
                 Place(c.Unit, c.Cell, c.Side);
                 break;
             case CommandKind.Ready:
-                CurtainDown();
                 DeployReady();
                 break;
         }

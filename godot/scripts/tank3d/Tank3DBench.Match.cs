@@ -145,9 +145,9 @@ public sealed partial class Tank3DBench
         _otherWanted = false;
         _modelTag = Roster[0];
         _modelNamed = true;
-        // Player 1 (match.md, «Расстановка и первый ход»): a toss in hot-seat.
+        // Player 1 (match.md, «Расстановка и первый ход»): a toss in the quick battle.
         // A run by script - commands, a capture, a recipe, a measure - is not
-        // hot-seat and keeps green first, so it plays the same each time;
+        // a game and keeps green first, so it plays the same each time;
         // --first says either side for one.
         bool scripted = _commands.Count > 0 || _capturePath is not null || _sequenceDir is not null
                         || _script.Count > 0 || _perfDir is not null;
@@ -266,7 +266,7 @@ public sealed partial class Tank3DBench
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
         // the placement before the first turn, on a map with a zone (Tank3DBench.Deploy);
-        // its «В бой» says the round, and the curtain the toss
+        // its «В бой» says the round, and the first side's banner the toss
         DeployStart();
         if (!Deploying)
             Banner($"{TossSaid}Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
@@ -1024,8 +1024,6 @@ public sealed partial class Tank3DBench
         BuildRoster(layer);
         // the placement's panel, where the acts stand in the battle (Tank3DBench.Deploy)
         BuildDeployPanel(layer);
-        // the curtain between the sides in placement (Tank3DBench.Deploy), over all
-        BuildCurtain(layer);
     }
 
     private Button? _passButton;
@@ -1101,7 +1099,6 @@ public sealed partial class Tank3DBench
         h.Add(_mt.Turn);
         h.Add(_mt.Drove);
         h.Add(_deploy);
-        h.Add(_curtainUp);
         h.Add(_orderNote);
         h.Add(_mt.Fired);
         h.Add(_mt.Bonus);

@@ -12,9 +12,10 @@ namespace TankSpriteTest;
 /// then press «В бой». Player 1 first (the toss, Tank3DBench.Match), then the other.
 /// <list type="bullet">
 /// <item><b>Blind.</b> While a side places, the other side's tanks are not on
-/// the board, and between the two a curtain covers the screen - in hot-seat
-/// the screen is handed over hidden. Both are shown when player 2 press «В бой»,
-/// and player 1 takes the first turn.</item>
+/// the board; a banner says whose placement it is. No curtain between the two:
+/// hot-seat is gone from the GDD (meta.md, «Быстрый бой: PvP и PvAI»), and the
+/// bench places both sides on one screen in turn. Both are shown when player 2
+/// press «В бой», and player 1 takes the first turn.</item>
 /// <item><b>Only on a map with a zone.</b> A map that marks none starts on its
 /// homes, as every match did; a side with no zone of its own places among its
 /// homes' cells.</item>
@@ -34,11 +35,6 @@ public sealed partial class Tank3DBench
 
     private bool Deploying => _deploy is not null;
 
-    /// <summary>The curtain between the sides is up.</summary>
-    private bool _curtainUp;
-
-    private Control? _curtain;
-    private Label? _curtainSays;
     private readonly List<Vector2I> _deployCells = new();
     /// <summary>The rose's arrow under the pointer: the side the ghost shows
     /// the tank turned to, on its own cell.</summary>
@@ -163,7 +159,7 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>The side to place: its tanks shown and one on the rig, the
-    /// other's off the board, the curtain up.</summary>
+    /// other's off the board, the banner saying it.</summary>
     private void DeploySide(Side side)
     {
         // the side placed before back in its own dress, hidden as it goes
@@ -179,7 +175,7 @@ public sealed partial class Tank3DBench
         _deployCells.Clear();
         _deployCells.AddRange(DeployZone(side));
         // straight down on the board, the side's own edge at the bottom of
-        // the screen (the author's note, 2026-11-01) - at once, behind the curtain
+        // the screen (the author's note, 2026-11-01) - at once
         DeployLookDown(side);
         // the view over the zone across, not over the tank on the rig: a side
         // stood in a corner kept the zone half off the screen (2026-11-01);
@@ -207,9 +203,11 @@ public sealed partial class Tank3DBench
             }
             GlideTo(mid);
         }
-        // the toss said on the first curtain (Tank3DBench.Match)
-        CurtainUp((side == _mt.First && _tossed ? $"Жребий: первыми ходят {SideName(side)}\n\n" : "")
-                  + $"Расстановка: {SideName(side)}\n{(side == Side.Green ? "Коричневые" : "Зелёные")} не смотрят\n\nщелчок или Enter — начать");
+        // the panel's line names the side: rewritten for the new one even at
+        // the same count (the curtain used to force it, hiding the panel)
+        _deployMovedShown = -1;
+        // the toss said on the first side's banner (Tank3DBench.Match)
+        Banner($"{(side == _mt.First ? TossSaid : "")}Расстановка: {SideName(side)}", SideInk(side));
         Log.Print($"tank3d: match: {SideName(side)} place their tanks");
     }
 
@@ -376,7 +374,6 @@ public sealed partial class Tank3DBench
         DeployCarryEnd();
         // on the field now: the ghosts' dress off
         DeployUndress();
-        CurtainDown();
         DeployShow(null);
         _deployCells.Clear();
         // DeployTick runs no more: what it kept up is put away here
@@ -413,11 +410,11 @@ public sealed partial class Tank3DBench
     /// (<c>PickZone</c>): drawn as the move's zone - one rim round the whole
     /// of it, on the relief stood off the hexes' edges (<c>ZoneGap</c>) - in
     /// the side's colour (the author's note, 2026-11-01: each hex rimmed on
-    /// its own did not read as one zone). Under the curtain, none.
+    /// its own did not read as one zone).
     /// </summary>
     private void DeployZoneDraw(ImmediateMesh mesh)
     {
-        if (_deploy is not Side side || _curtainUp || _field is null || _tile is null || _deployCells.Count == 0)
+        if (_deploy is not Side side || _field is null || _tile is null || _deployCells.Count == 0)
             return;
         _zoneFill.Clear();
         _zoneFill.AddRange(_deployCells);
@@ -450,7 +447,7 @@ public sealed partial class Tank3DBench
         _deployArrow = null;
         // shown again unless an arrow under the pointer puts it away below
         _rig.Visible = true;
-        if (_curtainUp || _fate != Fate.Alive || _field is null)
+        if (_fate != Fate.Alive || _field is null)
             return;
         Vector2 mouse = GetViewport().GetMousePosition();
         // A tank carried (Tank3DBench.Deploy, DeployCarryTick): the tank
@@ -541,7 +538,7 @@ public sealed partial class Tank3DBench
     /// the turn is free in placement.</summary>
     private int? DeployArrowAt(Vector2 screen)
     {
-        if (!Deploying || _curtainUp || _field is null || _tile is null)
+        if (!Deploying || _field is null || _tile is null)
             return null;
         float r = RoseDisc();
         Vector2I cell = CellHere;
@@ -559,7 +556,7 @@ public sealed partial class Tank3DBench
     private void DrawDeploy(Control ink)
     {
         // none while a tank is up off its cell
-        if (!Deploying || _curtainUp || _fate != Fate.Alive || _carryAt is not null)
+        if (!Deploying || _fate != Fate.Alive || _carryAt is not null)
             return;
         float r = RoseDisc();
         Vector2I cell = CellHere;
@@ -576,13 +573,6 @@ public sealed partial class Tank3DBench
     {
         if (!Deploying)
             return false;
-        if (_curtainUp)
-        {
-            if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }
-                or InputEventKey { Pressed: true, Echo: false, Keycode: Key.Enter or Key.KpEnter or Key.Space })
-                CurtainDown();
-            return e is InputEventMouseButton or InputEventKey;
-        }
         // Enter, as the turn's end in the battle (with Ctrl, as before)
         if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Enter or Key.KpEnter })
         {
@@ -666,62 +656,6 @@ public sealed partial class Tank3DBench
             }
         }
         return best;
-    }
-
-    // --- the curtain ---------------------------------------------------------------
-
-    /// <summary>The curtain between the sides (<see cref="BuildMatchUi"/>).</summary>
-    private void BuildCurtain(CanvasLayer layer)
-    {
-        var curtain = new ColorRect
-        {
-            // opaque: a curtain one sees the board through is no curtain
-            Color = new Color(0.07f, 0.08f, 0.09f),
-            MouseFilter = Control.MouseFilterEnum.Stop,
-            // over the action panel's group marks, which stand over their frames (ZIndex 1)
-            ZIndex = 10,
-            Visible = false,
-        };
-        curtain.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        curtain.GuiInput += e =>
-        {
-            if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
-                CurtainDown();
-        };
-        var says = new Label
-        {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        says.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        says.AddThemeFontSizeOverride("font_size", 34);
-        curtain.AddChild(says);
-        layer.AddChild(curtain);
-        _curtain = curtain;
-        _curtainSays = says;
-        if (_curtainUp)
-            CurtainUp(_curtainText);
-    }
-
-    private string _curtainText = "";
-
-    private void CurtainUp(string text)
-    {
-        _curtainUp = true;
-        _curtainText = text;
-        if (_curtain is null || _curtainSays is null)
-            return;
-        _curtainSays.Text = text;
-        _curtainSays.AddThemeColorOverride("font_color", _deploy is Side s ? SideInk(s) : Colors.White);
-        _curtain.Visible = true;
-    }
-
-    private void CurtainDown()
-    {
-        _curtainUp = false;
-        if (_curtain is not null)
-            _curtain.Visible = false;
     }
 
     /// <summary>The HUD's line in placement.</summary>
@@ -859,13 +793,13 @@ public sealed partial class Tank3DBench
         _deploySays = says;
     }
 
-    /// <summary>Every frame of placement: the panel up with the curtain down,
-    /// its line rewritten only when the count changes.</summary>
+    /// <summary>Every frame of placement: the panel up, its line rewritten
+    /// only when the count changes.</summary>
     private void DeployPanelTick()
     {
         if (_deployPanel is null || _deploySays is null)
             return;
-        bool up = Deploying && !_curtainUp;
+        bool up = Deploying;
         _deployPanel.Visible = up;
         if (!up)
         {
