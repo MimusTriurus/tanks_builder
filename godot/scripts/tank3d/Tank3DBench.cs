@@ -1094,6 +1094,11 @@ public sealed partial class Tank3DBench : Node3D
         // After the relief - the tank bench's reason: the water's guards are
         // asked about levels and ramps.
         _field.SetWater(map.Water);
+        // the map's own sides before the relief: a wall's foot is shaded
+        // where it stands (Relief.Pads); BuildWalls writes them again off
+        // the bricks
+        foreach ((Vector2I cell, Masonry wall) in map.Walling)
+            _field.SetSides(cell, wall.Edges);
         _field.SetSoil(Dressed(map));
         // the roads' way through each cell, for the drawing; the rule is the
         // floor the map already laid (Foundation.Road)
