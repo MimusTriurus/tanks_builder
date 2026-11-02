@@ -1,6 +1,6 @@
 # Состояния танка
 
-Часть правил [Board of Tanks](index.md). Соседние части: [поле](field.md), [классы](classes.md), [юниты](units.md), [апгрейды](upgrades.md), [состояния](states.md), [партия](match.md). Открытые вопросы — [contradictions.md](contradictions.md), [undefined.md](undefined.md).
+Часть правил [Board of Tanks](index.md). Соседние части: [поле](field.md), [классы](classes.md), [юниты](units.md), [апгрейды](upgrades.md), [состояния](states.md), [партия](match.md), [режимы](GameModes.md). Открытые вопросы — [contradictions.md](contradictions.md), [undefined.md](undefined.md).
 
 ## Семь состояний
 - Активен - базовое состояние. Может двигаться и стрелять.
