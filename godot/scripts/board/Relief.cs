@@ -796,7 +796,11 @@ public sealed class Relief
 
     /// <summary>How wide the weir between the sea and a ford or a pit is, in
     /// circumradii, on the sea's side of their border (<see cref="Weir"/>).</summary>
-    public const float WeirWide = 0.2f;
+    public const float WeirWide = 0.45f, WeirCrest = 0.1f;
+
+    /// <summary>How far into a dry pit its edge rises to the dam's crest, in
+    /// circumradii: short, a pit beside the sea is often one cell wide.</summary>
+    public const float WeirIn = 0.4f;
 
     /// <summary>
     /// A bank of ground along the border where the sea (<see cref="BoardMap.Moated"/>,
@@ -813,8 +817,7 @@ public sealed class Relief
         if (field.Sea is not { } sea)
             return;
         int reach = Math.Max(1, Mathf.RoundToInt(WeirWide * r / Cell));
-        // the dam drawn into a copy of the ground and blurred a point, so its
-        // edge is round and not the raster's stairs, then laid over it
+        // the dam drawn into a copy of the ground, then laid over it
         var dam = (float[])raw.Clone();
         float lip = 0.15f * field.Lift;
         var top = new float[raw.Length];
@@ -846,9 +849,23 @@ public sealed class Relief
             {
                 int p = j * Nx + i;
                 Vector2I c = Owner[p];
-                if (!float.IsNaN(top[p]) || toSea[p] > 2.5f * reach)
+                if (toSea[p] > 2.5f * reach)
                     continue;
+                // a dry pit's own edge comes up to the crest over WeirIn:
+                // the dam unblurred stood on the pit's side as a sheer bank
+                if (!float.IsNaN(top[p]))
+                {
+                    if (!field.IsWater(c))
+                    {
+                        float pw = 1.0f - Mathf.SmoothStep(0.0f, WeirIn * r, toSea[p] * Cell);
+                        dam[p] = Mathf.Max(raw[p], Mathf.Lerp(raw[p], top[p] + lip, pw));
+                    }
+                    continue;
+                }
+                // the highest water within reach, and how near the nearest
+                // point under it lies
                 float best = float.NaN;
+                int near = int.MaxValue;
                 for (int dj = -reach; dj <= reach; dj++)
                 {
                     int jj = j + dj;
@@ -856,19 +873,32 @@ public sealed class Relief
                         continue;
                     for (int di = -reach; di <= reach; di++)
                     {
-                        int ii = i + di;
-                        if (ii < 0 || ii >= Nx || di * di + dj * dj > reach * reach)
+                        int ii = i + di, d2 = di * di + dj * dj;
+                        if (ii < 0 || ii >= Nx || d2 > reach * reach)
                             continue;
                         float t = top[jj * Nx + ii];
-                        if (!float.IsNaN(t) && (float.IsNaN(best) || t > best))
+                        if (float.IsNaN(t))
+                            continue;
+                        if (float.IsNaN(best) || t > best)
                             best = t;
+                        near = Math.Min(near, d2);
                     }
                 }
                 if (float.IsNaN(best))
                     continue;
-                dam[p] = Mathf.Max(raw[p], best + lip);
+                // a spit, not a wall: whole for WeirCrest off the pit or
+                // the ford, then down to the ground it stands on by
+                // WeirWide - into the sea as a beach (the user's catch,
+                // 2026-11-02: a strip 0.2 R wide a whole level tall, its
+                // crest torn and its sheer sea face the raster's stairs)
+                float off = Mathf.Sqrt(near) * Cell;
+                float w = 1.0f - Mathf.SmoothStep(WeirCrest * r, WeirWide * r, off);
+                dam[p] = Mathf.Max(raw[p], Mathf.Lerp(raw[p], best + lip, w));
             }
-        Blur(dam, Nx, Ny, 1.2f);
+        // no blur: the profile is smooth already, and blurred a point the crest
+        // at a pit's side sank under the surface beside the pit's floor - the
+        // sheet then ended where the pit's points take no water, a raster
+        // quad at a time: the stairs along the shore
         for (int p = 0; p < raw.Length; p++)
             raw[p] = Mathf.Max(raw[p], dam[p]);
     }
