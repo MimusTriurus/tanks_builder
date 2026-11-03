@@ -31,7 +31,7 @@ public partial class QuickRank : Control
 
     public override void _Draw()
     {
-        float wide = W, h = wide * Rise, step = wide * Step, w = Mathf.Max(2.0f, wide * 0.12f);
+        float wide = W, h = wide * Rise, step = wide * Step, w = Mathf.Max(3.0f, wide * 0.19f);
         // the lowest chevron is the first level, as on a sleeve; the gap between
         // two is about a chevron's own stroke, so they count at a glance
         for (int i = 0; i < Of; i++)

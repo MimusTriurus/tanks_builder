@@ -215,6 +215,8 @@ public sealed partial class Tank3DBench
         clear.Ink = QRed;
         clear.HoverRim = new Color(QRed, 0.6f);
         clear.Disabled = q.Squad.All(x => x.Empty);
+        // hidden for now (author 2026-11-03); --quick-do clear still asks
+        clear.Visible = false;
         stage.AddChild(clear);
 
         Control title = QuickHangarName();
