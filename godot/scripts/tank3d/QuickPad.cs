@@ -33,6 +33,8 @@ public partial class QuickPad : Control
     public Texture2D? Picture;
     /// <summary>The picture's box inside the pad, px; zero fits the pad.</summary>
     public Vector2 PictureSize;
+    /// <summary>The picture's opacity: a level not yet open shows its upgrade dimmed.</summary>
+    public float PictureAlpha = 1.0f;
     /// <summary>A soft oval under the picture, the prototype's stage light.</summary>
     public Color? Glow;
     public HorizontalAlignment Align = HorizontalAlignment.Center;
@@ -147,7 +149,7 @@ public partial class QuickPad : Control
             Vector2 ps = pic.GetSize();
             float k = Mathf.Min(box.X / Mathf.Max(ps.X, 1), box.Y / Mathf.Max(ps.Y, 1));
             Vector2 at = (s - ps * k) * 0.5f;
-            DrawTextureRect(pic, new Rect2(at, ps * k), false, new Color(1, 1, 1, a));
+            DrawTextureRect(pic, new Rect2(at, ps * k), false, new Color(1, 1, 1, a * PictureAlpha));
         }
         if (Text.Length > 0)
         {

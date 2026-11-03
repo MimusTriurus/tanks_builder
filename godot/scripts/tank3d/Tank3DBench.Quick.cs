@@ -885,14 +885,18 @@ public sealed partial class Tank3DBench
             if (l > 1)
                 col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
             int level = l;
+            // the upgrade's icon in the node; its number only where there is no icon
+            Texture2D? icon = QUpgradeIcon(u.Icon);
             var hex = new QuickPad
             {
-                Form = QuickPad.Shape.Hex, Text = l.ToString(), FontSize = 15, Bold = true, RimWidth = 1,
+                Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = 1,
                 Rim = open ? QOlive : next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
                 Fill = open ? QOlive : QPanelC, Ink = open ? QOnOlive : QInk, Dashed = u.Flag is null && !open,
                 HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(50, 43),
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                Picture = icon, PictureSize = new Vector2(32, 32), PictureAlpha = open || next ? 1.0f : 0.55f,
             };
+            hex.SetMeta("q_level", l);
             hex.Clicked += () =>
             {
                 QuickSquad.Slot now = q.Squad[at];
@@ -929,6 +933,18 @@ public sealed partial class Tank3DBench
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         return box;
     }
+
+    /// <summary>An upgrade's icon, read once (<see cref="ActImage"/>, 64 px); null with no file.</summary>
+    private static Texture2D? QUpgradeIcon(string name)
+    {
+        if (name.Length == 0)
+            return null;
+        if (!QIcons.TryGetValue(name, out Texture2D? tex))
+            QIcons[name] = tex = ActImage(name, 64) is { } image ? ImageTexture.CreateFromImage(image) : null;
+        return tex;
+    }
+
+    private static readonly Dictionary<string, Texture2D?> QIcons = new();
 
     /// <summary>An upgrade's name under its node, px high: two lines of 13 px and their spacing.</summary>
     private static readonly float QNameHigh = Mathf.Ceil(QuickPad.FontOf(true).GetHeight(13) * 2 + 6);
@@ -1629,7 +1645,7 @@ public sealed partial class Tank3DBench
             return null;
         // the nodes of one level in the page's order: two a slot, a branch each
         var pads = _qRoot.FindChildren("*", "", true, false).OfType<QuickPad>()
-                         .Where(x => level > 0 ? x.Form == QuickPad.Shape.Hex && x.Text == level.ToString()
+                         .Where(x => level > 0 ? x.HasMeta("q_level") && (int)x.GetMeta("q_level") == level
                                                : x.HasMeta("q_branch")).ToList();
         // the hangar draws the podium's slot's tree alone
         if (_qHangar && at != _qhAt)

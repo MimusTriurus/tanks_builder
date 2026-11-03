@@ -29,8 +29,9 @@ public static class QuickSquad
 
     /// <summary>An upgrade on a tree: its name, what kind it is, its rule in a
     /// line, and the bench's flag for it - null where there is no rule yet;
-    /// whether it is an ability and an attack, apart from the words of its kind.</summary>
-    public sealed record Upgrade(string Name, string Kind, string Text, Kit? Flag, bool Ability = false, bool Attack = false);
+    /// whether it is an ability and an attack, apart from the words of its kind;
+    /// its picture, <c>Icons/&lt;Icon&gt;.svg</c> (docs/upgrade-icons-plan.md).</summary>
+    public sealed record Upgrade(string Name, string Kind, string Text, Kit? Flag, bool Ability = false, bool Attack = false, string Icon = "");
 
     /// <summary>A branch of a class's tree: three levels, in order.</summary>
     public sealed record Branch(string Id, string Name, string Tag, Upgrade[] Levels);
@@ -60,24 +61,24 @@ public static class QuickSquad
     /// squads are made of and the branches it levels.</summary>
     public sealed record Doctrine(string Id, string Name, string[] Pool, string[] Branches, string Play);
 
-    private static Upgrade U(string name, string kind, string text, Kit? flag = null) =>
-        new(name, L.T(kind), text, flag, kind.StartsWith("squad.kind.ability", StringComparison.Ordinal), kind == "squad.kind.ability_attack");
+    private static Upgrade U(string icon, string name, string kind, string text, Kit? flag = null) =>
+        new(name, L.T(kind), text, flag, kind.StartsWith("squad.kind.ability", StringComparison.Ordinal), kind == "squad.kind.ability_attack", icon);
 
     // the upgrades the trees share, said once
-    private static readonly Upgrade Snorkel = U(L.T("squad.up.snorkel.name"), "squad.kind.passive", L.T("squad.up.snorkel.text"), Kit.Snorkel);
-    private static readonly Upgrade WideTracks = U(L.T("squad.up.wide_tracks.name"), "squad.kind.passive", L.T("squad.up.wide_tracks.text"), Kit.WideTracks);
-    private static readonly Upgrade SmokePot = U(L.T("squad.up.smoke_pot.name"), "squad.kind.ability_bonus", L.T("squad.up.smoke_pot.text"), Kit.Smoke);
-    private static readonly Upgrade Incendiary = U(L.T("squad.up.incendiary.name"), "squad.kind.ability_attack", L.T("squad.up.incendiary.text"), Kit.Incendiary);
-    private static readonly Upgrade MineLayer = U(L.T("squad.up.mine_layer.name"), "squad.kind.ability_bonus", L.T("squad.up.mine_layer.text"), Kit.MineLayer);
-    private static readonly Upgrade Stabilizer = U(L.T("squad.up.stabilizer.name"), "squad.kind.passive", L.T("squad.up.stabilizer.text"), Kit.AmbushStabilizer);
-    private static readonly Upgrade Thermal = U(L.T("squad.up.thermal.name"), "squad.kind.passive", L.T("squad.up.thermal.text"), Kit.Thermal);
-    private static readonly Upgrade MineGuard = U(L.T("squad.up.mine_guard.name"), "squad.kind.passive", L.T("squad.up.mine_guard.text"));
-    private static readonly Upgrade Winch = U(L.T("squad.up.winch.name"), "squad.kind.ability_bonus", L.T("squad.up.winch.text"), Kit.Winch);
-    private static readonly Upgrade RepairKit = U(L.T("squad.up.repair_kit.name"), "squad.kind.ability_bonus", L.T("squad.up.repair_kit.text"), Kit.RepairKit);
-    private static readonly Upgrade SpallLiner = U(L.T("squad.up.spall_liner.name"), "squad.kind.passive", L.T("squad.up.spall_liner.text"), Kit.SpallLiner);
-    private static readonly Upgrade Extinguisher = U(L.T("squad.up.extinguisher.name"), "squad.kind.passive_cost", L.T("squad.up.extinguisher.text"), Kit.Extinguisher);
-    private static readonly Upgrade DoubleTurn = U(L.T("squad.up.double_turn.name"), "squad.kind.ability_bonus", L.T("squad.up.double_turn.text"), Kit.DoubleTurn);
-    private static readonly Upgrade Reverse = U(L.T("squad.up.reverse.name"), "squad.kind.passive", L.T("squad.up.reverse.text"), Kit.Reverse);
+    private static readonly Upgrade Snorkel = U("snorkel", L.T("squad.up.snorkel.name"), "squad.kind.passive", L.T("squad.up.snorkel.text"), Kit.Snorkel);
+    private static readonly Upgrade WideTracks = U("wide_tracks", L.T("squad.up.wide_tracks.name"), "squad.kind.passive", L.T("squad.up.wide_tracks.text"), Kit.WideTracks);
+    private static readonly Upgrade SmokePot = U("smoke", L.T("squad.up.smoke_pot.name"), "squad.kind.ability_bonus", L.T("squad.up.smoke_pot.text"), Kit.Smoke);
+    private static readonly Upgrade Incendiary = U("incendiary", L.T("squad.up.incendiary.name"), "squad.kind.ability_attack", L.T("squad.up.incendiary.text"), Kit.Incendiary);
+    private static readonly Upgrade MineLayer = U("mine", L.T("squad.up.mine_layer.name"), "squad.kind.ability_bonus", L.T("squad.up.mine_layer.text"), Kit.MineLayer);
+    private static readonly Upgrade Stabilizer = U("ambush_stabilizer", L.T("squad.up.stabilizer.name"), "squad.kind.passive", L.T("squad.up.stabilizer.text"), Kit.AmbushStabilizer);
+    private static readonly Upgrade Thermal = U("thermal", L.T("squad.up.thermal.name"), "squad.kind.passive", L.T("squad.up.thermal.text"), Kit.Thermal);
+    private static readonly Upgrade MineGuard = U("trawl", L.T("squad.up.mine_guard.name"), "squad.kind.passive", L.T("squad.up.mine_guard.text"));
+    private static readonly Upgrade Winch = U("winch", L.T("squad.up.winch.name"), "squad.kind.ability_bonus", L.T("squad.up.winch.text"), Kit.Winch);
+    private static readonly Upgrade RepairKit = U("repair", L.T("squad.up.repair_kit.name"), "squad.kind.ability_bonus", L.T("squad.up.repair_kit.text"), Kit.RepairKit);
+    private static readonly Upgrade SpallLiner = U("spall_liner", L.T("squad.up.spall_liner.name"), "squad.kind.passive", L.T("squad.up.spall_liner.text"), Kit.SpallLiner);
+    private static readonly Upgrade Extinguisher = U("extinguisher", L.T("squad.up.extinguisher.name"), "squad.kind.passive_cost", L.T("squad.up.extinguisher.text"), Kit.Extinguisher);
+    private static readonly Upgrade DoubleTurn = U("double_turn", L.T("squad.up.double_turn.name"), "squad.kind.ability_bonus", L.T("squad.up.double_turn.text"), Kit.DoubleTurn);
+    private static readonly Upgrade Reverse = U("reverse", L.T("squad.up.reverse.name"), "squad.kind.passive", L.T("squad.up.reverse.text"), Kit.Reverse);
 
     /// <summary>The five classes, in <see cref="Lineup.Roster"/>'s order.</summary>
     public static readonly Class[] Classes =
@@ -88,7 +89,7 @@ public static class QuickSquad
             new[]
             {
                 new Branch("raid", L.T("squad.branch.raid.name"), L.T("squad.branch.raid.tag"), new[] { Snorkel, WideTracks,
-                    U(L.T("squad.up.shoot_on_move.name"), "squad.kind.passive_class", L.T("squad.up.shoot_on_move.text")) }),
+                    U("fire_on_move", L.T("squad.up.shoot_on_move.name"), "squad.kind.passive_class", L.T("squad.up.shoot_on_move.text")) }),
                 new Branch("sabotage", L.T("squad.branch.sabotage.name"), L.T("squad.branch.sabotage.tag"), new[] { SmokePot, Incendiary, MineLayer }),
             }),
         new("MTP", "MT", L.T("squad.class.MTP.name"), L.T("squad.class.MTP.duty"),
@@ -97,7 +98,7 @@ public static class QuickSquad
             new[]
             {
                 new Branch("sentry", L.T("squad.branch.sentry.name"), L.T("squad.branch.sentry.tag"), new[] { Stabilizer, Thermal,
-                    U(L.T("squad.up.wide_sector.name"), "squad.kind.passive_class", L.T("squad.up.wide_sector.text")) }),
+                    U("wide_sector", L.T("squad.up.wide_sector.name"), "squad.kind.passive_class", L.T("squad.up.wide_sector.text")) }),
                 new Branch("prop", L.T("squad.branch.prop.name"), L.T("squad.branch.prop.tag"), new[] { MineGuard, Winch, RepairKit }),
             }),
         new("HTP", "HT", L.T("squad.class.HTP.name"), L.T("squad.class.HTP.duty"),
@@ -107,9 +108,9 @@ public static class QuickSquad
             {
                 new Branch("ram", L.T("squad.branch.ram.name"), L.T("squad.branch.ram.tag"), new[]
                 {
-                    U(L.T("squad.up.boost.name"), "squad.kind.ability_premove", L.T("squad.up.boost.text")),
-                    U(L.T("squad.up.ram_blade.name"), "squad.kind.passive", L.T("squad.up.ram_blade.text")),
-                    U(L.T("squad.up.double_push.name"), "squad.kind.passive_class", L.T("squad.up.double_push.text")),
+                    U("overdrive", L.T("squad.up.boost.name"), "squad.kind.ability_premove", L.T("squad.up.boost.text")),
+                    U("dozer_blade", L.T("squad.up.ram_blade.name"), "squad.kind.passive", L.T("squad.up.ram_blade.text")),
+                    U("push_two", L.T("squad.up.double_push.name"), "squad.kind.passive_class", L.T("squad.up.double_push.text")),
                 }),
                 new Branch("storm", L.T("squad.branch.storm.name"), L.T("squad.branch.storm.tag"), new[] { SpallLiner, MineGuard, Extinguisher }),
             }),
@@ -119,7 +120,7 @@ public static class QuickSquad
             new[]
             {
                 new Branch("aim", L.T("squad.branch.aim.name"), L.T("squad.branch.aim.tag"), new[] { DoubleTurn, Reverse,
-                    U(L.T("squad.up.through_forest.name"), "squad.kind.passive_class", L.T("squad.up.through_forest.text")) }),
+                    U("through_wood", L.T("squad.up.through_forest.name"), "squad.kind.passive_class", L.T("squad.up.through_forest.text")) }),
                 new Branch("ambush", L.T("squad.branch.ambush.name"), L.T("squad.branch.ambush.tag"), new[] { Thermal, Stabilizer, SmokePot }),
             }),
         new("HMP", "HM", L.T("squad.class.HMP.name"), L.T("squad.class.HMP.duty"),
@@ -129,9 +130,9 @@ public static class QuickSquad
             {
                 new Branch("support", L.T("squad.branch.support.name"), L.T("squad.branch.support.tag"), new[]
                 {
-                    U(L.T("squad.up.smoke_round.name"), "squad.kind.ability_attack", L.T("squad.up.smoke_round.text")),
+                    U("smoke_shell", L.T("squad.up.smoke_round.name"), "squad.kind.ability_attack", L.T("squad.up.smoke_round.text")),
                     Incendiary,
-                    U(L.T("squad.up.bracket.name"), "squad.kind.passive_class", L.T("squad.up.bracket.text")),
+                    U("fork_36", L.T("squad.up.bracket.name"), "squad.kind.passive_class", L.T("squad.up.bracket.text")),
                 }),
                 new Branch("guard", L.T("squad.branch.guard.name"), L.T("squad.branch.guard.tag"), new[] { SmokePot, Reverse, DoubleTurn }),
             }),
