@@ -169,6 +169,27 @@ public sealed partial class Stage3D
 uniform sampler2D road_tex : filter_linear, hint_default_black;
 uniform vec4 road_map = vec4(0.0, 0.0, 1.0, 1.0);
 uniform float road_on = 0.0;
+// The roads' photographs (Stage3D.ShowRoadPhoto, docs/new_style.md): a grain
+// for dirt and the forest track off each one's mean and spread, the cobble's
+// and asphalt's own colour; one tile per this many circumradii. Gravel keeps
+// its paint.
+uniform float road_photo_on = 0.0;
+uniform sampler2D road_dirt_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform sampler2D road_cobble_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform sampler2D road_forest_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform sampler2D road_asphalt_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform vec2 road_dirt_tone = vec2(0.5, 0.1);
+uniform vec2 road_forest_tone = vec2(0.5, 0.1);
+uniform float road_dirt_tile = 2.0;
+uniform float road_cobble_tile = 0.7;
+uniform float road_forest_tile = 2.0;
+uniform float road_asphalt_tile = 1.5;
+uniform float road_swing = 0.25;
+
+// a photograph's grain at uv: its distance from its mean in spreads
+float road_grain(sampler2D t, vec2 uv, vec2 tone) {
+    return 0.5 + (dot(texture(t, uv).rgb, vec3(0.299, 0.587, 0.114)) - tone.x) / tone.y * road_swing;
+}
 
 vec3 road_at(vec3 soil, float grain) {
     if (road_on < 0.5)
@@ -205,8 +226,11 @@ vec3 road_at(vec3 soil, float grain) {
         return soil;
     vec3 c;
     if (ty == 0) {
-        // dirt: earth, two ruts, a strip of grass between them
-        c = vec3(0.54, 0.42, 0.28) * (0.75 + 0.5 * grain);
+        // dirt: earth, two ruts, a strip of grass between them; the
+        // photograph laid along the way, so its tyre marks run with it
+        // (mirrored at the axis, under the grass strip)
+        float dg = road_photo_on > 0.5 ? road_grain(road_dirt_tex, vec2(s, d) / road_dirt_tile, road_dirt_tone) : grain;
+        c = vec3(0.54, 0.42, 0.28) * (0.75 + 0.5 * dg);
         float rut = 1.0 - smoothstep(0.03, 0.06, abs(d - 0.22));
         c *= 1.0 - 0.25 * rut;
         float mid = (1.0 - smoothstep(0.05, 0.09, d)) * step(0.4, rock_noise(q / 0.08));
@@ -217,9 +241,14 @@ vec3 road_at(vec3 soil, float grain) {
         c *= 1.0 - 0.15 * smoothstep(0.38, 0.48, d);
     } else if (ty == 2) {
         // cobble: setts with dark joints, a kerb at the edge
-        vec2 w = rock_cells(q / 0.06);
-        c = vec3(0.56, 0.54, 0.51) * (0.78 + 0.35 * rock_hash(floor(q / 0.06)));
-        c *= 1.0 - 0.55 * (1.0 - smoothstep(0.0, 0.07, w.y - w.x));
+        if (road_photo_on > 0.5) {
+            // the photograph's own setts, laid along the way
+            c = texture(road_cobble_tex, vec2(s, d) / road_cobble_tile).rgb;
+        } else {
+            vec2 w = rock_cells(q / 0.06);
+            c = vec3(0.56, 0.54, 0.51) * (0.78 + 0.35 * rock_hash(floor(q / 0.06)));
+            c *= 1.0 - 0.55 * (1.0 - smoothstep(0.0, 0.07, w.y - w.x));
+        }
         c = mix(c, vec3(0.70, 0.68, 0.64), smoothstep(0.43, 0.46, d));
     } else if (ty == 3) {
         // corduroy: logs across the way, dark gaps between
@@ -229,11 +258,13 @@ vec3 road_at(vec3 soil, float grain) {
         c *= 1.0 - 0.6 * (1.0 - smoothstep(0.0, 0.12, t));
     } else if (ty == 4) {
         // the forest track: dark earth strewn with needles
-        c = vec3(0.42, 0.32, 0.21) * (0.75 + 0.5 * grain);
+        float fg = road_photo_on > 0.5 ? road_grain(road_forest_tex, q / road_forest_tile, road_forest_tone) : grain;
+        c = vec3(0.42, 0.32, 0.21) * (0.75 + 0.5 * fg);
         c = mix(c, vec3(0.55, 0.40, 0.22), 0.5 * step(0.7, rock_noise(q / 0.015)));
     } else {
         // asphalt: dark, white edge lines, a dashed centre
-        c = vec3(0.27, 0.27, 0.28) * (0.9 + 0.2 * rock_noise(q / 0.03));
+        c = road_photo_on > 0.5 ? texture(road_asphalt_tex, q / road_asphalt_tile).rgb * 0.6
+                                : vec3(0.27, 0.27, 0.28) * (0.9 + 0.2 * rock_noise(q / 0.03));
         float line = (1.0 - smoothstep(0.012, 0.02, abs(d - 0.43)));
         float dash = (1.0 - smoothstep(0.015, 0.025, d)) * step(0.5, fract(s / 0.3));
         c = mix(c, vec3(0.92, 0.90, 0.84), max(line, dash));

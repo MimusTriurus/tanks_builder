@@ -106,6 +106,9 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--forest</c>: the forest floor in a photograph
     /// (<see cref="Stage3D.ShowForest"/>; docs/new_style.md).</summary>
     private bool _forestOn;
+    /// <summary><c>--road-photo</c>: the roads' surfaces in photographs
+    /// (<see cref="Stage3D.ShowRoadPhoto"/>; docs/new_style.md).</summary>
+    private bool _roadPhotoOn;
     /// <summary><c>--no-turf</c>: no grass on the relief's ground texture; with
     /// it the ground is bare soil everywhere (<see cref="Stage3D.ShowTurf"/>).</summary>
     private bool _turfOn = true;
@@ -1162,6 +1165,7 @@ public sealed partial class Tank3DBench : Node3D
             ShowCrag = _cragOn,
             ShowSand = _sandOn,
             ShowForest = _forestOn,
+            ShowRoadPhoto = _roadPhotoOn,
             ShowTurf = _turfOn,
         };
         AddChild(_stage);
@@ -1577,6 +1581,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--crag") _cragOn = true;
             else if (a == "--sand") _sandOn = true;
             else if (a == "--forest") _forestOn = true;
+            else if (a == "--road-photo") _roadPhotoOn = true;
             else if (a == "--no-turf") _turfOn = false;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
@@ -2821,6 +2826,9 @@ public sealed partial class Tank3DBench : Node3D
             if (Stage3D.ForestPhoto() is not null)
                 _panel.Toggle("tank3d.relief.forest", "земля под лесом, фото  (--forest)",
                               () => _stage.ShowForest, v => _stage.ShowForest = v);
+            if (Stage3D.RoadPhotosOnDisk)
+                _panel.Toggle("tank3d.relief.roads", "дороги, фото  (--road-photo)",
+                              () => _stage.ShowRoadPhoto, v => _stage.ShowRoadPhoto = v);
             _panel.Expand("tank3d.relief", true);
         }
         // Whether the pond is swum or drowned in - see TankTick.Amphibious.

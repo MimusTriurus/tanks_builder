@@ -260,6 +260,39 @@ public sealed partial class Stage3D
     /// <summary>A tile of the forest floor's photograph, in circumradii.</summary>
     private const float ForestTile = 1.4f;
 
+    /// <summary>The roads' photographs (<see cref="ShowRoadPhoto"/>, Poly
+    /// Haven, CC0), by <see cref="RoadType"/>: a dirt road's, cobble's, the
+    /// forest track's and asphalt's. Gravel and the log road keep their
+    /// paint: a gravel photograph's grit ran to one flat tone on the board
+    /// (the user's call, 2026-11-03).</summary>
+    internal static ImageTexture? RoadDirtPhoto() => Photo("dirt_aerial_02/dirt_aerial_02_diff_2k.jpg", "road dirt");
+    internal static ImageTexture? RoadCobblePhoto() => Photo("cobblestone_floor_08/cobblestone_floor_08_diff_2k.jpg", "road cobble");
+    internal static ImageTexture? RoadForestPhoto() => Photo("forest_ground_05/forest_ground_05_diff_2k.jpg", "road forest");
+    internal static ImageTexture? RoadAsphaltPhoto() => Photo("asphalt_02/asphalt_02_diff_2k.jpg", "road asphalt");
+
+    /// <summary>All four road photographs are on disk.</summary>
+    internal static bool RoadPhotosOnDisk => RoadDirtPhoto() is not null
+        && RoadCobblePhoto() is not null && RoadForestPhoto() is not null && RoadAsphaltPhoto() is not null;
+
+    /// <summary>The roads in photographs: each road's own layout stays
+    /// painted - ruts, the grass strip, shoulders, kerb, the lines - and the
+    /// photograph gives its surface a grain (dirt, the forest track) or its
+    /// own colour (cobble, asphalt). Off by default, the new style
+    /// (docs/new_style.md); <c>--road-photo</c> and the panel switch it on
+    /// when the files are there.</summary>
+    public bool ShowRoadPhoto
+    {
+        get => _showRoadPhoto;
+        set
+        {
+            _showRoadPhoto = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("road_photo_on", value && RoadPhotosOnDisk ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showRoadPhoto;
+
     /// <summary>A photograph's mean brightness and its spread, off a grid of
     /// its pixels: a grain taken from it is its distance from the mean in
     /// spreads, so another picture swaps in without new numbers.</summary>
@@ -680,6 +713,16 @@ void fragment() {
             ink.Param("forest_tone", PhotoTone(forestPhoto));
         }
         ink.Param("forest_on", ShowForest && ForestPhoto() is not null ? 1.0f : 0.0f);
+        if (RoadPhotosOnDisk)
+        {
+            ink.Param("road_dirt_tex", RoadDirtPhoto()!);
+            ink.Param("road_cobble_tex", RoadCobblePhoto()!);
+            ink.Param("road_forest_tex", RoadForestPhoto()!);
+            ink.Param("road_asphalt_tex", RoadAsphaltPhoto()!);
+            ink.Param("road_dirt_tone", PhotoTone(RoadDirtPhoto()!));
+            ink.Param("road_forest_tone", PhotoTone(RoadForestPhoto()!));
+        }
+        ink.Param("road_photo_on", ShowRoadPhoto && RoadPhotosOnDisk ? 1.0f : 0.0f);
         ink.Param("turf_on", ShowTurf ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
