@@ -241,13 +241,33 @@ public sealed partial class Tank3DBench
     /// <summary>Degrees the drags have added to the stages' common heading.</summary>
     private float _qTurnBy;
 
+    /// <summary>When the stages' turn started, ms; the hangar's front machine
+    /// and its slot that started it.</summary>
+    private ulong _qTurnFrom;
+    private int _qhFrontAt = -1;
+    private string? _qhFront;
+
     /// <summary>Every card's model at one heading - the clock's, plus the drags' -
     /// so the squad turns as one and a model brought in joins it in step. The
     /// hangar turns only the machine in front; the two behind stand at the
     /// roster's heading. Each frame of the screens; allocates nothing.</summary>
     private void QuickStageTurn()
     {
-        float yaw = RosterArtYaw + _qTurnBy + (float)(Time.GetTicksMsec() / 1000.0 % QTurnSeconds / QTurnSeconds * 360.0);
+        // the hangar's front machine, new there - another class, another slot - starts
+        // its turn from the roster's three-quarters front, not wherever the clock stood
+        // (author 2026-11-03: a class changed came up stern first)
+        if (_qHangar)
+        {
+            string? front = _qs.Squad[_qhAt].Class;
+            if (_qhAt != _qhFrontAt || front != _qhFront)
+            {
+                _qhFrontAt = _qhAt;
+                _qhFront = front;
+                _qTurnFrom = Time.GetTicksMsec();
+                _qTurnBy = 0.0f;
+            }
+        }
+        float yaw = RosterArtYaw + _qTurnBy + (float)((Time.GetTicksMsec() - _qTurnFrom) / 1000.0 % QTurnSeconds / QTurnSeconds * 360.0);
         foreach (var stage in _qStage)
             if (IsInstanceValid(stage.Value.Rig))
                 stage.Value.Rig.RotationDegrees = new Vector3(0.0f, _qHangar && stage.Key != _qhAt ? RosterArtYaw : yaw, 0.0f);
@@ -284,7 +304,7 @@ public sealed partial class Tank3DBench
             box.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         // into the tree for the framing, which reads the placed meshes; the card takes it after
         _qLayer.AddChild(box);
-        if (RosterScene(model, side, size, box, live: true) is not var (_, rig))
+        if (RosterScene(model, side, size, box, live: true, even: fixedPx is not null) is not var (_, rig))
         {
             box.QueueFree();
             return null;

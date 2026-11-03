@@ -29,6 +29,11 @@ public sealed partial class Tank3DBench
     /// <summary>The model's turn towards the camera, degrees: front and left flank.</summary>
     private const float RosterArtYaw = 35.0f;
 
+    /// <summary>The hangar's view, high, in the model's body heights swept round
+    /// (<see cref="RosterScene"/> with <c>even</c>): a tenth under it and 0.15 over it -
+    /// the guns swung round reach 0.09 past the body either way (TD, the longest).</summary>
+    private const float RosterEven = 1.25f;
+
     private readonly Dictionary<(string Tag, Side Side), Texture2D> _rosterArt = new();
 
     /// <summary>Every model of the line-up in each side's paint, one after
@@ -148,9 +153,11 @@ public sealed partial class Tank3DBench
     /// is turned three-quarters and framed tight on that view, for a picture
     /// read back once. Live - the quick battle's build card - it is drawn every
     /// frame and framed loose enough for the rig to turn it any way round; the
-    /// rig is the model's turntable. Null when the model does not load.
+    /// rig is the model's turntable. With <paramref name="even"/> (live, the
+    /// hangar's podium) the view is <see cref="RosterEven"/> times the body's height,
+    /// its foot on one line: every class the same size. Null when the model does not load.
     /// </summary>
-    private (SubViewport View, Node3D Rig)? RosterScene(string tag, Side side, Vector2I size, Node parent, bool live)
+    private (SubViewport View, Node3D Rig)? RosterScene(string tag, Side side, Vector2I size, Node parent, bool live, bool even = false)
     {
         TankModel model;
         try
@@ -206,21 +213,40 @@ public sealed partial class Tank3DBench
             // twelfth of a turn at a time: what the camera sees at its widest
             rig.RotationDegrees = Vector3.Zero;
             Aabb own = RosterBox(model);
+            Aabb body = RosterBox(model, model.Barrel);
             rig.RotationDegrees = new Vector3(0.0f, RosterArtYaw, 0.0f);
-            float lowY = float.MaxValue, highY = float.MinValue, wide = 0.0f;
-            for (int k = 0; k < 12; k++)
+            (float Low, float High, float Wide) Sweep(Aabb a)
             {
-                var turn = new Basis(Vector3.Up, Mathf.Tau * k / 12.0f);
-                for (int i = 0; i < 8; i++)
+                float low = float.MaxValue, high = float.MinValue, wide = 0.0f;
+                for (int k = 0; k < 12; k++)
                 {
-                    Vector3 p = turn * (own.Position + new Vector3((i & 1) != 0 ? own.Size.X : 0.0f,
-                                                                   (i & 2) != 0 ? own.Size.Y : 0.0f,
-                                                                   (i & 4) != 0 ? own.Size.Z : 0.0f));
-                    float y = p.Dot(b.Y);
-                    lowY = Mathf.Min(lowY, y);
-                    highY = Mathf.Max(highY, y);
-                    wide = Mathf.Max(wide, Mathf.Abs(p.Dot(b.X)));
+                    var turn = new Basis(Vector3.Up, Mathf.Tau * k / 12.0f);
+                    for (int i = 0; i < 8; i++)
+                    {
+                        Vector3 p = turn * (a.Position + new Vector3((i & 1) != 0 ? a.Size.X : 0.0f,
+                                                                     (i & 2) != 0 ? a.Size.Y : 0.0f,
+                                                                     (i & 4) != 0 ? a.Size.Z : 0.0f));
+                        float y = p.Dot(b.Y);
+                        low = Mathf.Min(low, y);
+                        high = Mathf.Max(high, y);
+                        wide = Mathf.Max(wide, Mathf.Abs(p.Dot(b.X)));
+                    }
                 }
+                return (low, high, wide);
+            }
+            var (lowY, highY, wide) = Sweep(own);
+            if (even)
+            {
+                // every class the same size by its body - hull and turret, the gun
+                // left out (a long gun made its tank small) - its tracks on one line
+                // near the foot: a class changed neither jumps in size nor in height
+                // (author 2026-11-03); the view keeps room above for the gun swung away
+                var (bodyLow, bodyHigh, _) = Sweep(body);
+                float s = (bodyHigh - bodyLow) * RosterEven;
+                camera.Size = s;
+                // the foot a tenth of the body under its tracks: a gun swung at the camera dips that far
+                camera.Position = b.Y * (bodyLow - (bodyHigh - bodyLow) * 0.1f + s * 0.5f) + b.Z * reach * 2.0f;
+                return (view, rig);
             }
             camera.Size = Mathf.Max(highY - lowY, 2.0f * wide * size.Y / Mathf.Max(size.X, 1)) * 1.04f;
             camera.Position = b.Y * ((lowY + highY) * 0.5f) + b.Z * reach * 2.0f;
@@ -246,8 +272,9 @@ public sealed partial class Tank3DBench
         return (view, rig);
     }
 
-    /// <summary>The model's box in the viewport's world: every mesh's, as placed.</summary>
-    private static Aabb RosterBox(Node3D root)
+    /// <summary>The model's box in the viewport's world: every mesh's, as placed;
+    /// with <paramref name="skip"/>, every mesh but those under it (the barrel).</summary>
+    private static Aabb RosterBox(Node3D root, Node? skip = null)
     {
         Aabb? box = null;
         var stack = new Stack<Node>();
@@ -255,6 +282,8 @@ public sealed partial class Tank3DBench
         while (stack.Count > 0)
         {
             Node n = stack.Pop();
+            if (n == skip)
+                continue;
             if (n is VisualInstance3D v and (MeshInstance3D or MultiMeshInstance3D) && v.IsVisibleInTree())
             {
                 Aabb a = v.GlobalTransform * v.GetAabb();

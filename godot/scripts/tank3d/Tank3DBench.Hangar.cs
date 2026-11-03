@@ -560,6 +560,11 @@ public sealed partial class Tank3DBench
         name.AddChild(title);
         var duty = QText(c.Duty, 13, QMuted, bold: true);
         duty.VerticalAlignment = VerticalAlignment.Center;
+        // cut to the panel, never widening it: a wider column narrowed the podium and
+        // moved everything on it when the class changed (author 2026-11-03)
+        duty.ClipText = true;
+        duty.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        duty.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         name.AddChild(duty);
         col.AddChild(name);
         // its role is the class tab's tip: in the type scale the column has no room for it
