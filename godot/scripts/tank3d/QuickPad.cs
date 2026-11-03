@@ -59,16 +59,6 @@ public partial class QuickPad : Control
 
     private bool _hover;
 
-    private static readonly Color FocusRing = new("A3B65E");
-
-    /// <summary>The bold face, the display text's: the language's own typeface as
-    /// it is (Black Ops One is heavy already, and emboldened it smears), else the
-    /// fallback font emboldened.</summary>
-    public static readonly Font BoldFont = L.Font
-        ?? new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.9f };
-
-    public static Font FontOf(bool bold) => bold ? BoldFont : ThemeDB.FallbackFont;
-
     /// <summary>White in the middle to nothing at 72% of the way out, tinted by <see cref="Glow"/>.</summary>
     private static readonly GradientTexture2D GlowTexture = new()
     {
@@ -98,7 +88,7 @@ public partial class QuickPad : Control
     /// <summary>A box that fits its text with <paramref name="pad"/> round it.</summary>
     public QuickPad Fit(Vector2 pad)
     {
-        Vector2 size = FontOf(Bold).GetMultilineStringSize(Text, HorizontalAlignment.Left, -1, FontSize);
+        Vector2 size = Ui.FontOf(Bold).GetMultilineStringSize(Text, HorizontalAlignment.Left, -1, FontSize);
         CustomMinimumSize = new Vector2(Mathf.Max(CustomMinimumSize.X, size.X + 2 * pad.X),
                                         Mathf.Max(CustomMinimumSize.Y, size.Y + 2 * pad.Y));
         return this;
@@ -155,7 +145,7 @@ public partial class QuickPad : Control
         {
             DrawRect(new Rect2(Vector2.Zero, s), new Color(fill, fill.A * a));
             if (RimWidth > 0)
-                DrawRim(this, s, new Color(rim, rim.A * a), RimWidth);
+                Ui.DrawRim(this, s, new Color(rim, rim.A * a), RimWidth);
         }
         if (focus)
         {
@@ -163,20 +153,20 @@ public partial class QuickPad : Control
             if (Form == Shape.Hex)
             {
                 Vector2[] h = Hex(Vector2.Zero, s);
-                DrawPolyline(new[] { h[0], h[1], h[2], h[3], h[4], h[5], h[0] }, FocusRing, 2.0f);
+                DrawPolyline(new[] { h[0], h[1], h[2], h[3], h[4], h[5], h[0] }, Ui.Accent, 2.0f);
             }
             else if (Form == Shape.Shield)
             {
                 Vector2[] o = Shield(Vector2.Zero, s);
-                DrawPolyline(new[] { o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[0] }, FocusRing, 2.0f);
+                DrawPolyline(new[] { o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[0] }, Ui.Accent, 2.0f);
             }
             else
-                DrawRect(new Rect2(Vector2.One, s - 2 * Vector2.One), FocusRing, false, 2.0f);
+                DrawRect(new Rect2(Vector2.One, s - 2 * Vector2.One), Ui.Accent, false, 2.0f);
         }
         if (Mark is { } mark)
         {
             // outside the shape, clear of its own rim: the node's state stays as it is
-            float w = RimLayout(this, 2);
+            float w = Ui.RimLayout(this, 2);
             var o = new Vector2(3 + w * 0.5f, 3 + w * 0.5f);
             if (Form == Shape.Hex)
             {
@@ -210,7 +200,7 @@ public partial class QuickPad : Control
         }
         if (Text.Length > 0)
         {
-            Font font = FontOf(Bold);
+            Font font = Ui.FontOf(Bold);
             string[] lines = Text.Split('\n');
             float line = font.GetHeight(FontSize);
             float top = (s.Y - line * lines.Length) * 0.5f + font.GetAscent(FontSize);
@@ -223,47 +213,15 @@ public partial class QuickPad : Control
             // on the right point of the hex, mostly beside it: read with the node, not inside
             // it, and clear of the name and kind over and under it (on the top corner it
             // covered the kind of the node above)
-            Font font = FontOf(true);
+            Font font = Ui.FontOf(true);
             float r = font.GetHeight(BadgeSize) * 0.62f;
             var at = new Vector2(s.X + r * 0.35f, s.Y * 0.5f);
             DrawCircle(at, r, new Color(BadgeFill, BadgeFill.A * a));
-            DrawArc(at, r, 0, Mathf.Tau, 32, new Color(BadgeRim, BadgeRim.A * a), RimLayout(this, 1.5f), true);
+            DrawArc(at, r, 0, Mathf.Tau, 32, new Color(BadgeRim, BadgeRim.A * a), Ui.RimLayout(this, 1.5f), true);
             float w = font.GetStringSize(Badge, HorizontalAlignment.Left, -1, BadgeSize).X;
             DrawString(font, new Vector2(at.X - w * 0.5f, at.Y - font.GetHeight(BadgeSize) * 0.5f + font.GetAscent(BadgeSize)),
                        Badge, HorizontalAlignment.Left, -1, BadgeSize, new Color(BadgeInk, BadgeInk.A * a));
         }
-    }
-
-    /// <summary>A box's rim, <paramref name="px"/> layout pixels rounded to whole screen
-    /// pixels, inside its edges, whatever the window stretches the layout by: four
-    /// filled strips of whole screen pixels each cover that many pixel rows, where a
-    /// layout pixel's line (1.25 screen pixels in a 2000-wide window) covered one
-    /// or two by where it stood, and two boxes' rims differed (author 2026-11-03).</summary>
-    public static void DrawRim(CanvasItem on, Vector2 size, Color color, float px)
-    {
-        float t = RimLayout(on, px);
-        on.DrawRect(new Rect2(0, 0, size.X, t), color);
-        on.DrawRect(new Rect2(0, size.Y - t, size.X, t), color);
-        on.DrawRect(new Rect2(0, t, t, size.Y - 2 * t), color);
-        on.DrawRect(new Rect2(size.X - t, t, t, size.Y - 2 * t), color);
-    }
-
-    /// <summary>A rim of <paramref name="px"/> layout pixels as <see cref="DrawRim"/> draws
-    /// it: rounded to whole screen pixels, one at least, given back in layout pixels.</summary>
-    public static float RimLayout(CanvasItem on, float px)
-    {
-        float k = on.GetViewport() is Window w ? ScreenScale(w) : 1.0f;
-        return Mathf.Max(1.0f, Mathf.Round(px * k)) / k;
-    }
-
-    /// <summary>Screen pixels to a layout pixel in <paramref name="w"/>: the 1600 × 900
-    /// layout stretched to the window (<c>canvas_items</c>) - 1.6 on a 2560 × 1440 screen.</summary>
-    public static float ScreenScale(Window w)
-    {
-        Vector2I size = w.Size, layout = w.ContentScaleSize;
-        float stretch = layout.X > 0 && layout.Y > 0
-            ? Mathf.Min(size.X / (float)layout.X, size.Y / (float)layout.Y) : 1.0f;
-        return Mathf.Max(0.01f, stretch * w.ContentScaleFactor);
     }
 
     /// <summary>The class icons' frame octagon (Icons/out/src/build_classes.sh,

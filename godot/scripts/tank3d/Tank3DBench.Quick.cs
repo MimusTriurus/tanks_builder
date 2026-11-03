@@ -14,7 +14,7 @@ namespace TankSpriteTest;
 /// squads revealed and the toss.
 ///
 /// <b>The prototype's layout, piece for piece</b> (the artifact «Сборка
-/// отряда: быстрый бой», PvAI; its dark palette, <see cref="QBg"/>): the
+/// отряда: быстрый бой», PvAI; its dark palette, <see cref="Ui.Bg"/>): the
 /// lobby a sheet of boxes; the build a header with the battle's facts and
 /// the budget's pips, the battlefield down the left, three machine cards -
 /// the machine's name and cost, its picture, the five classes as hexes, its
@@ -76,23 +76,6 @@ public sealed partial class Tank3DBench
 
     private Side QuickAi => Across(_quick!.Player);
 
-    // --- the prototype's palette, dark ---------------------------------------------
-
-    private static readonly Color QBg = new("131712");
-    private static readonly Color QPanelC = new("20261E");
-    private static readonly Color QInset = new("171C16");
-    private static readonly Color QInk = new("DEE4D5");
-    private static readonly Color QMuted = new("98A18F");
-    private static readonly Color QLine = new("667160");
-    private static readonly Color QOlive = new("A3B65E");
-    private static readonly Color QOnOlive = new("131712");
-    private static readonly Color QSel = new("2A3322");
-    private static readonly Color QAmber = new("E3A73C");
-    private static readonly Color QRed = new("E2695E");
-    private static readonly Color QTipBg = new("2B3329");
-    private static readonly Color QOnTip = new("EEF1E8");
-    private static readonly Color QTipMuted = new("A4AD99");
-
     // --- the screens -------------------------------------------------------------
 
     private enum QuickPage { Lobby, Build }
@@ -134,7 +117,7 @@ public sealed partial class Tank3DBench
         _qPage = back ? QuickPage.Build : QuickPage.Lobby;
         _qLayer = new CanvasLayer { Name = "QuickScreens", Layer = 20 };
         AddChild(_qLayer);
-        var ground = new ColorRect { Color = QBg, MouseFilter = Control.MouseFilterEnum.Ignore };
+        var ground = new ColorRect { Color = Ui.Bg, MouseFilter = Control.MouseFilterEnum.Ignore };
         ground.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         _qLayer.AddChild(ground);
         _qRoot = new MarginContainer { Theme = new Theme { DefaultFontSize = 15 } };
@@ -471,7 +454,7 @@ public sealed partial class Tank3DBench
             _qRoot.RemoveChild(n);
             n.QueueFree();
         }
-        QLarge = _qHangar && _qPage != QuickPage.Lobby;
+        Ui.Large = _qHangar && _qPage != QuickPage.Lobby;
         _qRoot.AddChild(_qPage == QuickPage.Lobby ? QuickLobby() : _qHangar ? QuickHangar() : QuickBuild());
         _qOver?.QueueFree();
         _qOver = _qModal == QuickModal.None ? null : QuickDialog();
@@ -506,7 +489,7 @@ public sealed partial class Tank3DBench
         var sheet = new VBoxContainer();
         sheet.AddThemeConstantOverride("separation", 16);
         sheet.AddChild(QEyebrow(L.T("quick.quick_battle")));
-        sheet.AddChild(QText(L.T("quick.vs_ai"), 30, QInk, bold: true));
+        sheet.AddChild(Ui.Text(L.T("quick.vs_ai"), 30, Ui.Ink, bold: true));
         sheet.AddChild(QuickParams(thumb: 160));
         var foot = new HBoxContainer();
         foot.AddThemeConstantOverride("separation", 12);
@@ -514,7 +497,7 @@ public sealed partial class Tank3DBench
         foot.AddChild(QHint(L.T("quick.lobby_hint")));
         sheet.AddChild(foot);
         var page = new VBoxContainer();
-        page.AddChild(QBox(sheet, QPanelC, 28));
+        page.AddChild(Ui.Box(sheet, Ui.Panel, 28));
         return page;
     }
 
@@ -533,7 +516,7 @@ public sealed partial class Tank3DBench
         card.AddChild(QuickMinimap(q.Map, q.Player, thumb, labels: false));
         var about = new VBoxContainer();
         about.AddThemeConstantOverride("separation", 6);
-        about.AddChild(QText(q.Map, 20, QInk, bold: true));
+        about.AddChild(Ui.Text(q.Map, 20, Ui.Ink, bold: true));
         about.AddChild(QHint(L.T("quick.map_about", QuickMode(q.Map), QuickSize(q.Map))));
         var maps = new HFlowContainer();
         maps.AddThemeConstantOverride("h_separation", 6);
@@ -567,7 +550,7 @@ public sealed partial class Tank3DBench
         var ai = new VBoxContainer();
         ai.AddThemeConstantOverride("separation", 10);
         ai.AddChild(QStepper(q.AiBudget, q.AiBudget == 0 ? L.T("quick.no_upgrades") : L.T("quick.points_word"), v => q.AiBudget = v));
-        ai.AddChild(diff != 0 ? QText(L.T("quick.handicap", diff > 0 ? "+" : "−", Math.Abs(diff)), 14, QAmber, bold: true)
+        ai.AddChild(diff != 0 ? Ui.Text(L.T("quick.handicap", diff > 0 ? "+" : "−", Math.Abs(diff)), 14, Ui.Extra, bold: true)
                               : QHint(L.T("quick.budgets_equal")));
         grid.AddChild(QParam(L.T("quick.ai_budget_difficulty"), ai));
 
@@ -596,7 +579,7 @@ public sealed partial class Tank3DBench
         col.AddThemeConstantOverride("separation", 10);
         col.AddChild(QEyebrow(title));
         col.AddChild(inner);
-        PanelContainer box = QBox(col, QInset, 14);
+        PanelContainer box = Ui.Box(col, Ui.Inset, 14);
         // the grid's two columns share the width, as the prototype's do
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         return box;
@@ -610,7 +593,7 @@ public sealed partial class Tank3DBench
         less.CustomMinimumSize = new Vector2(36, 34);
         less.Disabled = value <= 0;
         row.AddChild(less);
-        var said = QText(value.ToString(), 22, QInk, bold: true);
+        var said = Ui.Text(value.ToString(), 22, Ui.Ink, bold: true);
         said.CustomMinimumSize = new Vector2(30, 0);
         said.HorizontalAlignment = HorizontalAlignment.Center;
         row.AddChild(said);
@@ -644,7 +627,7 @@ public sealed partial class Tank3DBench
         var who = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         who.AddThemeConstantOverride("separation", 6);
         who.AddChild(QEyebrow(L.T("quick.build_eyebrow")));
-        who.AddChild(QText(L.T("quick.your_squad"), 28, QInk, bold: true));
+        who.AddChild(Ui.Text(L.T("quick.your_squad"), 28, Ui.Ink, bold: true));
         var facts = new HFlowContainer();
         facts.AddThemeConstantOverride("h_separation", 8);
         foreach ((string label, string value) in new[]
@@ -704,23 +687,23 @@ public sealed partial class Tank3DBench
         // the points are the header's alone; the bar says only what holds the button
         if (missing > 0)
         {
-            Label hint = QText(L.N("quick.no_class", missing), 14, QRed, bold: true);
+            Label hint = Ui.Text(L.N("quick.no_class", missing), 14, Ui.Danger, bold: true);
             hint.VerticalAlignment = VerticalAlignment.Center;
             bar.AddChild(hint);
         }
         QuickPad clear = QBtn(L.T("quick.clear_squad"), () => QuickAsk(true, L.T("quick.clear_ask"),
             L.T("quick.clear_text"), L.T("quick.clear"), () => q.Squad = QuickSquad.Empty()));
-        clear.Ink = QRed;
+        clear.Ink = Ui.Danger;
         clear.Rim = clear.Fill = new Color(0, 0, 0, 0);
-        clear.HoverRim = new Color(QRed, 0.6f);
+        clear.HoverRim = new Color(Ui.Danger, 0.6f);
         clear.Disabled = q.Squad.All(s => s.Empty);
         bar.AddChild(clear);
-        bar.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(1, 0) });
+        bar.AddChild(new ColorRect { Color = Ui.Line, CustomMinimumSize = new Vector2(1, 0) });
         bar.AddChild(QBtn(L.T("quick.to_params"), () => { _qPage = QuickPage.Lobby; QuickShow(); }));
         QuickPad go = QBtn(L.T("quick.to_deploy"), QuickTryGo, primary: true);
         go.Disabled = missing > 0;
         bar.AddChild(go);
-        page.AddChild(QBox(bar, QPanelC, 12));
+        page.AddChild(Ui.Box(bar, Ui.Panel, 12));
         return page;
     }
 
@@ -731,7 +714,7 @@ public sealed partial class Tank3DBench
         pips.AddThemeConstantOverride("separation", size > 16 ? 3 : 2);
         for (int k = 0; k < budget; k++)
         {
-            Color c = k < used ? QOlive : QLine;
+            Color c = k < used ? Ui.Accent : Ui.Line;
             pips.AddChild(new QuickPad
             {
                 Form = QuickPad.Shape.Hex, Rim = c, Fill = c, CustomMinimumSize = new Vector2(size, size * 0.875f),
@@ -758,7 +741,7 @@ public sealed partial class Tank3DBench
         var aside = new VBoxContainer { CustomMinimumSize = new Vector2(236, 0) };
         aside.AddThemeConstantOverride("separation", 8);
         var head = new HBoxContainer();
-        var h2 = QText(L.T("quick.battlefield"), 17, QInk, bold: true);
+        var h2 = Ui.Text(L.T("quick.battlefield"), 17, Ui.Ink, bold: true);
         h2.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         head.AddChild(h2);
         head.AddChild(QBtn(L.T("quick.expand"), () => { _qModal = QuickModal.Map; QuickShow(); }, small: true));
@@ -766,18 +749,18 @@ public sealed partial class Tank3DBench
         aside.AddChild(QuickMinimap(q.Map, q.Player, 190, labels: true));
         aside.AddChild(QuickLegend(3));
         if (QuickMapSaid(q.Map) is { Length: > 0 } said)
-            aside.AddChild(QText(said, 12, QInk, wrap: true));
+            aside.AddChild(Ui.Text(said, 12, Ui.Ink, wrap: true));
 
-        aside.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
-        aside.AddChild(QText(L.T("quick.squad_together"), 15, QInk, bold: true));
+        aside.AddChild(new ColorRect { Color = Ui.Line, CustomMinimumSize = new Vector2(0, 1) });
+        aside.AddChild(Ui.Text(L.T("quick.squad_together"), 15, Ui.Ink, bold: true));
         aside.AddChild(QuickSquadTable());
         foreach (string fact in QuickSquadSaid())
-            aside.AddChild(QText(fact, 12, QInk, wrap: true));
+            aside.AddChild(Ui.Text(fact, 12, Ui.Ink, wrap: true));
         // a random doctrine is said in the header's chip; a chosen one, what it does
         if (q.Doctrine is int d)
             aside.AddChild(QHint(L.T("quick.ai_doctrine_said", QuickSquad.Doctrines[d].Name, QuickSquad.Doctrines[d].Play.ToLowerInvariant(),
                                  string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))), wrap: true));
-        return QBox(aside, QPanelC, 12);
+        return Ui.Box(aside, Ui.Panel, 12);
     }
 
     /// <summary>The build's rules in one line over the cards: what a level costs, what the dashes mean.</summary>
@@ -788,7 +771,7 @@ public sealed partial class Tank3DBench
         row.AddChild(QHint(L.T("quick.rules_cost")));
         row.AddChild(new QuickPad
         {
-            Form = QuickPad.Shape.Hex, Dashed = true, Rim = QMuted, Fill = new Color(0, 0, 0, 0), RimWidth = 1,
+            Form = QuickPad.Shape.Hex, Dashed = true, Rim = Ui.Muted, Fill = new Color(0, 0, 0, 0), RimWidth = 1,
             CustomMinimumSize = new Vector2(18, 16), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         });
@@ -835,22 +818,22 @@ public sealed partial class Tank3DBench
         if (_qs.Squad.All(s => s.Empty))
             return QHint(L.T("quick.squad_empty"), wrap: true);
         foreach (string h in new[] { "", L.T("quick.col_steps"), L.T("quick.col_power"), L.T("quick.col_front"), L.T("quick.turret") })
-            grid.AddChild(QText(h, 11, QMuted, bold: true));
+            grid.AddChild(Ui.Text(h, 11, Ui.Muted, bold: true));
         foreach (QuickSquad.Slot s in _qs.Squad)
         {
             if (s.Empty)
             {
-                grid.AddChild(QText("—", 12, QMuted));
+                grid.AddChild(Ui.Text("—", 12, Ui.Muted));
                 for (int k = 0; k < 4; k++)
-                    grid.AddChild(QText("", 12, QMuted));
+                    grid.AddChild(Ui.Text("", 12, Ui.Muted));
                 continue;
             }
             MovementProfile p = QuickSquad.ClassOf(s.Class!).Profile;
-            grid.AddChild(QText(QuickSquad.ClassOf(s.Class!).Short, 12, QInk, bold: true));
-            grid.AddChild(QText(p.Steps.ToString(), 12, QInk));
-            grid.AddChild(QText(QRoman(p.Might), 12, QInk));
-            grid.AddChild(QText(QRoman(Gunnery.ArmourAt(p, Gunnery.Plate.Front)), 12, QInk));
-            grid.AddChild(QText(p.Turreted ? L.T("quick.yes") : L.T("quick.no"), 12, QInk));
+            grid.AddChild(Ui.Text(QuickSquad.ClassOf(s.Class!).Short, 12, Ui.Ink, bold: true));
+            grid.AddChild(Ui.Text(p.Steps.ToString(), 12, Ui.Ink));
+            grid.AddChild(Ui.Text(QRoman(p.Might), 12, Ui.Ink));
+            grid.AddChild(Ui.Text(QRoman(Gunnery.ArmourAt(p, Gunnery.Plate.Front)), 12, Ui.Ink));
+            grid.AddChild(Ui.Text(p.Turreted ? L.T("quick.yes") : L.T("quick.no"), 12, Ui.Ink));
         }
         return grid;
     }
@@ -884,8 +867,8 @@ public sealed partial class Tank3DBench
         else
         {
             QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
-            head.AddChild(QText(c.Name, 16, QInk, bold: true));
-            var duty = QText(c.Duty, 13, QMuted);
+            head.AddChild(Ui.Text(c.Name, 16, Ui.Ink, bold: true));
+            var duty = Ui.Text(c.Duty, 13, Ui.Muted);
             duty.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
             duty.VerticalAlignment = VerticalAlignment.Center;
             duty.ClipText = true;
@@ -924,8 +907,8 @@ public sealed partial class Tank3DBench
             stageRow.AddChild(QuickTurn(at, -1));
             var model = new QuickPad
             {
-                Rim = QLine, Fill = QInset, Ink = QMuted, CustomMinimumSize = new Vector2(0, QStageHigh),
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Glow = QSel.Lightened(0.15f),
+                Rim = Ui.Line, Fill = Ui.Inset, Ink = Ui.Muted, CustomMinimumSize = new Vector2(0, QStageHigh),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Glow = Ui.AccentFill.Lightened(0.15f),
             };
             if (QuickStage(at, s.Class!, q.Player) is { } stage)
                 model.AddChild(stage);
@@ -949,7 +932,7 @@ public sealed partial class Tank3DBench
             // what the machine carries is the tree itself: nothing said again under it
             col.AddChild(tree);
         }
-        var box = QBox(col, QPanelC, 12);
+        var box = Ui.Box(col, Ui.Panel, 12);
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         box.SizeFlagsStretchRatio = 1.0f;
         box.SetMeta(QTipBeside, true);
@@ -978,8 +961,8 @@ public sealed partial class Tank3DBench
         QuickSquad.Class? to = QuickClassStep(at, dir);
         var arrow = new QuickPad
         {
-            Text = dir < 0 ? "‹" : "›", FontSize = 30, Bold = true, Rim = QLine, Fill = QInset, Ink = QInk,
-            HoverFill = QSel, HoverRim = QOlive, Disabled = to is null, CustomMinimumSize = new Vector2(34, 0),
+            Text = dir < 0 ? "‹" : "›", FontSize = 30, Bold = true, Rim = Ui.Line, Fill = Ui.Inset, Ink = Ui.Ink,
+            HoverFill = Ui.AccentFill, HoverRim = Ui.Accent, Disabled = to is null, CustomMinimumSize = new Vector2(34, 0),
         };
         arrow.Clicked += () =>
         {
@@ -1004,7 +987,7 @@ public sealed partial class Tank3DBench
         {
             bool mine = _qs.Squad[at].Class == c.Tag;
             bool full = !mine && QuickSquad.ClassWhy(_qs.Squad, at, c.Tag).Length > 0;
-            row.AddChild(QText(c.Short, 12, mine ? QOlive : full ? new Color(QMuted, 0.45f) : QMuted, bold: mine));
+            row.AddChild(Ui.Text(c.Short, 12, mine ? Ui.Accent : full ? new Color(Ui.Muted, 0.45f) : Ui.Muted, bold: mine));
         }
         return row;
     }
@@ -1025,8 +1008,8 @@ public sealed partial class Tank3DBench
         // line under it on the other, lit under the pointer where a click moves the level
         var head = new QuickPad
         {
-            Text = b.Name, FontSize = QSize(18), Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
-            Ink = chosen ? QOnOlive : QInk, CustomMinimumSize = new Vector2(0, QSize(14) * 2),
+            Text = b.Name, FontSize = Ui.Size(18), Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
+            Ink = chosen ? Ui.OnAccent : Ui.Ink, CustomMinimumSize = new Vector2(0, Ui.Size(14) * 2),
         };
         float bandHigh = head.CustomMinimumSize.Y;
         bool lit = false;
@@ -1070,16 +1053,16 @@ public sealed partial class Tank3DBench
             var hex = new QuickPad
             {
                 Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next || swap ? 2 : 1,
-                Rim = open || swap ? QOlive : next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
-                Fill = open ? QOlive : QPanelC, Ink = open ? QOnOlive : QInk, Dashed = u.Flag is null && !open,
-                HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(46, 40),
+                Rim = open || swap ? Ui.Accent : next ? Ui.Extra : shortOf ? new Color(Ui.Danger, 0.8f) : Ui.Line.Lightened(0.15f),
+                Fill = open ? Ui.Accent : Ui.Panel, Ink = open ? Ui.OnAccent : Ui.Ink, Dashed = u.Flag is null && !open,
+                HoverFill = open ? null : Ui.AccentFill, Disabled = shortOf, CustomMinimumSize = new Vector2(46, 40),
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
                 Picture = icon, PictureSize = new Vector2(30, 30),
                 TextureFilter = QIconFilter,
                 // the price on the node, what this click costs: none on what is held or free
-                Badge = open || need <= 0 ? "" : need.ToString(), BadgeSize = QSize(12),
-                BadgeRim = next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
-                BadgeFill = next ? QAmber : QInset, BadgeInk = next ? QOnOlive : QInk,
+                Badge = open || need <= 0 ? "" : need.ToString(), BadgeSize = Ui.Size(12),
+                BadgeRim = next ? Ui.Extra : shortOf ? new Color(Ui.Danger, 0.8f) : Ui.Line.Lightened(0.15f),
+                BadgeFill = next ? Ui.Extra : Ui.Inset, BadgeInk = next ? Ui.OnAccent : Ui.Ink,
             };
             hex.SetMeta("q_level", l);
             // the left button buys or moves, never takes back: an open node holds still
@@ -1119,14 +1102,14 @@ public sealed partial class Tank3DBench
             foot.AddChild(new Control { CustomMinimumSize = new Vector2(0, 2), MouseFilter = Control.MouseFilterEnum.Ignore });
             // two lines at most: a longer name must not make this tree taller than the
             // next card's (the foot is fixed high, the link takes what the name leaves)
-            var nm = QText(u.Name, 13, QInk, bold: open, wrap: true);
+            var nm = Ui.Text(u.Name, 13, Ui.Ink, bold: open, wrap: true);
             nm.HorizontalAlignment = HorizontalAlignment.Center;
             nm.MaxLinesVisible = 2;
             nm.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
             foot.AddChild(nm);
             if (!last)
             {
-                Control link = QLink(l < mine ? QOlive : QLine);
+                Control link = QLink(l < mine ? Ui.Accent : Ui.Line);
                 link.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
                 foot.AddChild(link);
             }
@@ -1136,8 +1119,8 @@ public sealed partial class Tank3DBench
         }
         var bottom = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
         col.AddChild(bottom);
-        var box = QBox(col, chosen ? QSel : QInset, 6, chosen ? QOlive : QLine,
-                       () => (chosen ? QOlive : lit ? QSel : QPanelC, chosen ? null : QLine, bandHigh));
+        var box = Ui.Box(col, chosen ? Ui.AccentFill : Ui.Inset, 6, chosen ? Ui.Accent : Ui.Line,
+                       () => (chosen ? Ui.Accent : lit ? Ui.AccentFill : Ui.Panel, chosen ? null : Ui.Line, bandHigh));
         if (other)
             head.Over += (_, on) => { lit = on; box.QueueRedraw(); };
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
@@ -1234,7 +1217,7 @@ public sealed partial class Tank3DBench
     /// <summary>An upgrade's name under its node and the link down from it, px high, till
     /// the tree is first sorted (<see cref="QuickTreeCenter"/> sizes it then, off the label):
     /// the name's two lines, the gap over them and the link's least.</summary>
-    private static float QFootHigh => Mathf.Ceil(QuickPad.BoldFont.GetHeight(QSize(13)) * 2 + 3 + 2 + QLinkLeast);
+    private static float QFootHigh => Mathf.Ceil(Ui.BoldFont.GetHeight(Ui.Size(13)) * 2 + 3 + 2 + QLinkLeast);
 
     /// <summary>The link between two nodes at its shortest, px: under a name on two lines.</summary>
     private const float QLinkLeast = 12;
@@ -1246,7 +1229,7 @@ public sealed partial class Tank3DBench
         var link = new Control { CustomMinimumSize = new Vector2(0, QLinkLeast), MouseFilter = Control.MouseFilterEnum.Ignore };
         link.Draw += () =>
         {
-            float w = QuickPad.RimLayout(link, 2), x = Mathf.Round(link.Size.X * 0.5f - w * 0.5f);
+            float w = Ui.RimLayout(link, 2), x = Mathf.Round(link.Size.X * 0.5f - w * 0.5f);
             link.DrawRect(new Rect2(x, 1, w, link.Size.Y - 1), ink);
         };
         return link;
@@ -1289,8 +1272,8 @@ public sealed partial class Tank3DBench
         box.AddThemeConstantOverride("separation", 12);
         if (_qModal == QuickModal.Ask && _qAsk is var (askHead, askText, yes, no, act))
         {
-            box.AddChild(QText(askHead, 18, QInk, bold: true));
-            box.AddChild(QText(askText, 14, QInk, wrap: true));
+            box.AddChild(Ui.Text(askHead, 18, Ui.Ink, bold: true));
+            box.AddChild(Ui.Text(askText, 14, Ui.Ink, wrap: true));
             var hands = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
             hands.AddThemeConstantOverride("separation", 8);
             hands.AddChild(QBtn(no, QuickClose));
@@ -1302,7 +1285,7 @@ public sealed partial class Tank3DBench
                 QuickShow();
             }, primary: true));
             box.AddChild(hands);
-            var ask = QBox(box, QPanelC, 18);
+            var ask = Ui.Box(box, Ui.Panel, 18);
             ask.CustomMinimumSize = new Vector2(460, 0);
             var middle = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
             middle.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -1312,7 +1295,7 @@ public sealed partial class Tank3DBench
         }
         var head = new HBoxContainer();
         bool map = _qModal == QuickModal.Map;
-        var h2 = QText(map ? $"{_qs.Map} · {QuickMode(_qs.Map)}" : L.T("quick.params_title"), 18, QInk, bold: true);
+        var h2 = Ui.Text(map ? $"{_qs.Map} · {QuickMode(_qs.Map)}" : L.T("quick.params_title"), 18, Ui.Ink, bold: true);
         h2.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         head.AddChild(h2);
         head.AddChild(QBtn(map ? L.T("quick.close") : L.T("quick.done"), QuickClose, small: true));
@@ -1327,7 +1310,7 @@ public sealed partial class Tank3DBench
             box.AddChild(QuickParams(thumb: 120));
             box.AddChild(QHint(L.T("quick.params_hint")));
         }
-        var panel = QBox(box, QPanelC, 14);
+        var panel = Ui.Box(box, Ui.Panel, 14);
         var center = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         center.AddChild(panel);
@@ -1393,18 +1376,18 @@ public sealed partial class Tank3DBench
                 return;
             }
         }
-        var style = new StyleBoxFlat { BgColor = QTipBg, ShadowColor = new Color(0, 0, 0, 0.28f), ShadowSize = 12 };
+        var style = new StyleBoxFlat { BgColor = Ui.TipBg, ShadowColor = new Color(0, 0, 0, 0.28f), ShadowSize = 12 };
         style.SetContentMarginAll(11);
         _qTip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Modulate = new Color(1, 1, 1, 0) };
         _qTip.AddThemeStyleboxOverride("panel", style);
         // a rim (the tip is a surface over the others, and over the page's own dark it
         // lost its edge) and a beak on the side toward its pad, level with the pad's
         // middle (author 2026-11-03: a tip beside the card stood apart from its node).
-        // The rim and the ring round the pad one colour, QTipRim: they read as a pair
+        // The rim and the ring round the pad one colour, Ui.TipRim: they read as a pair
         PanelContainer rimmed = _qTip;
         rimmed.Draw += () =>
         {
-            QuickPad.DrawRim(rimmed, rimmed.Size, QTipRim, 1.0f);
+            Ui.DrawRim(rimmed, rimmed.Size, Ui.TipRim, 1.0f);
             QuickTipBeak(rimmed);
         };
         _qTip.AddChild(body);
@@ -1425,15 +1408,11 @@ public sealed partial class Tank3DBench
             // stood off the band's edges (the beak says it there)
             if (IsInstanceValid(pad) && (pad.Form != QuickPad.Shape.Box || pad.RimWidth > 0))
             {
-                pad.Mark = QTipRim;
+                pad.Mark = Ui.TipRim;
                 pad.QueueRedraw();
             }
         }
     }
-
-    /// <summary>The tips' rim and the ring round the pad a tip tells of: lighter than the
-    /// panels' rims (QLine), the tip being over them.</summary>
-    private static readonly Color QTipRim = new("98A18F");
 
     /// <summary>Which side of the tip its beak stands on, and where along it, px.</summary>
     private Side4 _qTipBeak;
@@ -1448,7 +1427,7 @@ public sealed partial class Tank3DBench
         if (_qTipBeak == Side4.None)
             return;
         const float half = 7, reach = 8;
-        float t = QuickPad.RimLayout(tip, 1), a = _qTipBeakAt;
+        float t = Ui.RimLayout(tip, 1), a = _qTipBeakAt;
         Vector2 s = tip.Size;
         (Vector2 b0, Vector2 apex, Vector2 b1, Vector2 inward) = _qTipBeak switch
         {
@@ -1457,8 +1436,8 @@ public sealed partial class Tank3DBench
             Side4.Top => (new Vector2(a - half, 0), new Vector2(a, -reach), new Vector2(a + half, 0), new Vector2(0, t)),
             _ => (new Vector2(a - half, s.Y), new Vector2(a, s.Y + reach), new Vector2(a + half, s.Y), new Vector2(0, -t)),
         };
-        tip.DrawColoredPolygon(new[] { b0 + inward, apex, b1 + inward }, QTipBg);
-        tip.DrawPolyline(new[] { b0, apex, b1 }, QTipRim, t, true);
+        tip.DrawColoredPolygon(new[] { b0 + inward, apex, b1 + inward }, Ui.TipBg);
+        tip.DrawPolyline(new[] { b0, apex, b1 }, Ui.TipRim, t, true);
     }
 
     /// <summary>The tip cut to its content and put beside the pad, else under it, inside the screen.
@@ -1541,38 +1520,38 @@ public sealed partial class Tank3DBench
     {
         var col = new VBoxContainer { CustomMinimumSize = new Vector2(300, 0) };
         col.AddThemeConstantOverride("separation", 5);
-        col.AddChild(QText(kicker.ToUpperInvariant(), 11, QTipMuted, bold: true));
-        col.AddChild(QText(head, 17, QOnTip, bold: true));
-        col.AddChild(QText(text, 13, QOnTip, wrap: true));
+        col.AddChild(Ui.Text(kicker.ToUpperInvariant(), 11, Ui.TipMuted, bold: true));
+        col.AddChild(Ui.Text(head, 17, Ui.TipInk, bold: true));
+        col.AddChild(Ui.Text(text, 13, Ui.TipInk, wrap: true));
         if (table is not null)
         {
             var grid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             grid.AddThemeConstantOverride("h_separation", 10);
             foreach ((string k, string v) in table)
             {
-                var kl = QText(k, 12, QTipMuted);
+                var kl = Ui.Text(k, 12, Ui.TipMuted);
                 kl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
                 grid.AddChild(kl);
-                var vl = QText(v, 12, QOnTip, bold: true);
+                var vl = Ui.Text(v, 12, Ui.TipInk, bold: true);
                 vl.HorizontalAlignment = HorizontalAlignment.Right;
                 grid.AddChild(vl);
             }
             col.AddChild(grid);
         }
         if (coda is not null)
-            col.AddChild(QText(coda, 13, QOnTip, wrap: true));
+            col.AddChild(Ui.Text(coda, 13, Ui.TipInk, wrap: true));
         if (row is var (kind, cost))
         {
             col.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.12f), CustomMinimumSize = new Vector2(0, 1) });
             var r = new HBoxContainer();
-            var kl = QText(kind, 12, QTipMuted);
+            var kl = Ui.Text(kind, 12, Ui.TipMuted);
             kl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
             r.AddChild(kl);
-            r.AddChild(QText(cost, 12, QOnTip, bold: true));
+            r.AddChild(Ui.Text(cost, 12, Ui.TipInk, bold: true));
             col.AddChild(r);
         }
         if (state is not null)
-            col.AddChild(QText(state, 12, new Color("E9B860"), wrap: true));
+            col.AddChild(Ui.Text(state, 12, new Color("E9B860"), wrap: true));
         return col;
     }
 
@@ -1603,7 +1582,7 @@ public sealed partial class Tank3DBench
     private static readonly Color QField = new("5F8A3A"), QWood = new("3F5E2A"), QWater = new("3E6E8E"), QWall = new("8B5A3C");
 
     /// <summary>The strip a zone's name stands in, above or below the map, px.</summary>
-    private static float QMapStrip => QLarge ? 28.0f : 22.0f;
+    private static float QMapStrip => Ui.Large ? 28.0f : 22.0f;
 
     /// <summary>What the ground outside the zones fades to.</summary>
     private static readonly Color QFaint = new("2E352B");
@@ -1643,7 +1622,7 @@ public sealed partial class Tank3DBench
         zoned.UnionWith(foe);
         // its own dark ground, or none where it stands straight on a panel (the hangar's)
         if (ground)
-            c.DrawRect(new Rect2(Vector2.Zero, c.Size), QInset);
+            c.DrawRect(new Rect2(Vector2.Zero, c.Size), Ui.Inset);
         for (int r = 0; r < map.Rows; r++)
             for (int q = 0; q < map.Columns; q++)
             {
@@ -1663,22 +1642,22 @@ public sealed partial class Tank3DBench
             }
         foreach (Vector2I cell in foe)
         {
-            c.DrawColoredPolygon(Hex(cell, 1.0f), new Color(QRed, 0.22f));
+            c.DrawColoredPolygon(Hex(cell, 1.0f), new Color(Ui.Danger, 0.22f));
             // the hatching, a stroke across each hex
-            c.DrawLine(hex[1].Lerp(hex[2], 0.5f), hex[4].Lerp(hex[5], 0.5f), new Color(QRed, 0.55f), 1.5f);
+            c.DrawLine(hex[1].Lerp(hex[2], 0.5f), hex[4].Lerp(hex[5], 0.5f), new Color(Ui.Danger, 0.55f), 1.5f);
         }
         foreach (Vector2I cell in own)
-            c.DrawColoredPolygon(Hex(cell, 1.0f), new Color(QOlive, 0.18f));
-        QuickMapRing(c, own, QOlive.Lightened(0.35f), w, Mid, Hex);
-        QuickMapRing(c, foe, QRed, w, Mid, Hex);
+            c.DrawColoredPolygon(Hex(cell, 1.0f), new Color(Ui.Accent, 0.18f));
+        QuickMapRing(c, own, Ui.Accent.Lightened(0.35f), w, Mid, Hex);
+        QuickMapRing(c, foe, Ui.Danger, w, Mid, Hex);
         if (map.Arena.Point is { } point)
         {
-            c.DrawCircle(Mid(point.Cell), w * 0.3f, QAmber);
-            c.DrawArc(Mid(point.Cell), w * 0.46f, 0, Mathf.Tau, 24, QAmber, 2.0f);
+            c.DrawCircle(Mid(point.Cell), w * 0.3f, Ui.Extra);
+            c.DrawArc(Mid(point.Cell), w * 0.46f, 0, Mathf.Tau, 24, Ui.Extra, 2.0f);
         }
         if (!labels)
             return;
-        Font font = QuickPad.BoldFont;
+        Font font = Ui.BoldFont;
         void Chip(string text, IReadOnlyList<Vector2I> zone, Color ink, bool top)
         {
             if (zone.Count == 0)
@@ -1687,18 +1666,18 @@ public sealed partial class Tank3DBench
             foreach (Vector2I v in zone)
                 x += Mid(v).X;
             x /= zone.Count;
-            Vector2 size = font.GetStringSize(text, HorizontalAlignment.Left, -1, QSize(12)) + new Vector2(16, 4);
+            Vector2 size = font.GetStringSize(text, HorizontalAlignment.Left, -1, Ui.Size(12)) + new Vector2(16, 4);
             float y = top ? (strip - size.Y) * 0.5f : c.Size.Y - strip + (strip - size.Y) * 0.5f;
             // kept inside the map's box; a name wider than the box stands centred over it
             float left = size.X >= c.Size.X ? (c.Size.X - size.X) * 0.5f : Mathf.Clamp(x - size.X * 0.5f, 0, c.Size.X - size.X);
             var rect = new Rect2(new Vector2(left, y), size);
-            c.DrawRect(rect, QPanelC);
+            c.DrawRect(rect, Ui.Panel);
             c.DrawRect(rect, ink, false, 1.0f);
-            c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(QSize(12)) + 2), text, HorizontalAlignment.Left, -1, QSize(12), ink);
+            c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(Ui.Size(12)) + 2), text, HorizontalAlignment.Left, -1, Ui.Size(12), ink);
         }
         // the own zone is the bottom one, the map being turned so
-        Chip(L.T("quick.zone_own"), own, QOlive.Lightened(0.35f), top: false);
-        Chip(L.T("quick.zone_foe"), foe, QRed, top: true);
+        Chip(L.T("quick.zone_own"), own, Ui.Accent.Lightened(0.35f), top: false);
+        Chip(L.T("quick.zone_foe"), foe, Ui.Danger, top: true);
     }
 
     /// <summary>A zone's outer edges, the ones its hexes share with a hex not
@@ -1752,7 +1731,7 @@ public sealed partial class Tank3DBench
         foreach ((Color c, string name) in new[]
                  {
                      (QField, L.T("quick.legend_field")), (QField.Lightened(0.32f), L.T("quick.legend_height")), (QWood, L.T("quick.legend_forest")),
-                     (QWater, L.T("quick.legend_water")), (QWall, L.T("quick.legend_wall")), (QAmber, L.T("quick.point")),
+                     (QWater, L.T("quick.legend_water")), (QWall, L.T("quick.legend_wall")), (Ui.Extra, L.T("quick.point")),
                  })
         {
             var row = new HBoxContainer();
@@ -1762,7 +1741,7 @@ public sealed partial class Tank3DBench
                 Form = QuickPad.Shape.Hex, Rim = c, Fill = c, CustomMinimumSize = new Vector2(13, 11),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter, MouseFilter = Control.MouseFilterEnum.Ignore,
             });
-            row.AddChild(QText(name, 12, QMuted));
+            row.AddChild(Ui.Text(name, 12, Ui.Muted));
             grid.AddChild(row);
         }
         return grid;
@@ -1770,38 +1749,9 @@ public sealed partial class Tank3DBench
 
     // --- the bits ------------------------------------------------------------------
 
-    /// <summary>The hangar's pages (<c>--hangar</c> past the lobby) set in its type scale.</summary>
-    private static bool QLarge;
+    private static Label QEyebrow(string text) => Ui.Text(text.ToUpperInvariant(), 11, Ui.Muted, bold: true);
 
-    /// <summary>The hangar's type scale (author 2026-11-03, after XAG 101: 18 px of glyph
-    /// at 1080p on a PC is the floor, a font size of 17 in this 1600×900 layout): five
-    /// steps the screens' sizes go to by role - caption 17 (kinds, meta lines, kickers),
-    /// body 18, subhead 20, heading 22, title 28. The lobby and the old build keep theirs.</summary>
-    private static int QSize(int size) => !QLarge ? size : size switch
-    {
-        <= 12 => 17,
-        13 => 18,
-        <= 16 => 20,
-        <= 18 => 22,
-        <= 22 => 28,
-        _ => size,
-    };
-
-    private static Label QText(string text, int size, Color ink, bool bold = false, bool wrap = false)
-    {
-        var l = new Label { Text = text, AutowrapMode = wrap ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off };
-        l.AddThemeFontSizeOverride("font_size", QSize(size));
-        l.AddThemeColorOverride("font_color", ink);
-        if (bold)
-            l.AddThemeFontOverride("font", QuickPad.BoldFont);
-        if (wrap)
-            l.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        return l;
-    }
-
-    private static Label QEyebrow(string text) => QText(text.ToUpperInvariant(), 11, QMuted, bold: true);
-
-    private static Label QHint(string text, bool wrap = false) => QText(text, 13, QMuted, wrap: wrap);
+    private static Label QHint(string text, bool wrap = false) => Ui.Text(text, 13, Ui.Muted, wrap: wrap);
 
     /// <summary>The prototype's buttons: plain, picked (a choice made), primary.</summary>
     private static QuickPad QBtn(string text, Action clicked, bool primary = false, bool small = false, bool pressed = false)
@@ -1809,12 +1759,12 @@ public sealed partial class Tank3DBench
         bool picked = pressed;
         var b = new QuickPad
         {
-            Text = text, FontSize = QSize(primary ? 16 : small ? 13 : 14), Bold = primary,
-            Rim = primary ? QOlive : picked ? QOlive : QLine,
-            Fill = primary ? QOlive : picked ? QSel : QInset,
-            Ink = primary ? QOnOlive : QInk,
-            HoverRim = QOlive,
-            HoverFill = primary ? QOlive.Lightened(0.08f) : null,
+            Text = text, FontSize = Ui.Size(primary ? 16 : small ? 13 : 14), Bold = primary,
+            Rim = primary ? Ui.Accent : picked ? Ui.Accent : Ui.Line,
+            Fill = primary ? Ui.Accent : picked ? Ui.AccentFill : Ui.Inset,
+            Ink = primary ? Ui.OnAccent : Ui.Ink,
+            HoverRim = Ui.Accent,
+            HoverFill = primary ? Ui.Accent.Lightened(0.08f) : null,
         };
         b.Fit(primary ? new Vector2(22, 11) : small ? new Vector2(10, 5) : new Vector2(14, 8));
         b.Clicked += clicked;
@@ -1826,8 +1776,8 @@ public sealed partial class Tank3DBench
     {
         var b = new QuickPad
         {
-            Text = text, FontSize = QSize(13), Rim = QLine, Fill = QPanelC, Ink = QInk,
-            HoverRim = clicked is null ? null : QOlive,
+            Text = text, FontSize = Ui.Size(13), Rim = Ui.Line, Fill = Ui.Panel, Ink = Ui.Ink,
+            HoverRim = clicked is null ? null : Ui.Accent,
             MouseFilter = clicked is null ? Control.MouseFilterEnum.Ignore : Control.MouseFilterEnum.Stop,
         }.Fit(new Vector2(10, 4));
         if (clicked is not null)
@@ -1835,38 +1785,6 @@ public sealed partial class Tank3DBench
         return b;
     }
 
-    /// <summary>A panel round <paramref name="inner"/>: the prototype's square box with its line.</summary>
-    /// <param name="band">A band across the box's top, under its rim, <c>High</c> tall and
-    /// flush with its edges: the inner's first child stands on it (the top margin goes).
-    /// Read each draw, so a hover can change its colour.</param>
-    private static PanelContainer QBox(Control inner, Color bg, float pad, Color? rim = null,
-                                       Func<(Color Fill, Color? Line, float High)>? band = null)
-    {
-        // the rim drawn over the fill in whole screen pixels (QuickPad.DrawRim), not the
-        // style's border: that is whole layout pixels, 1.25 screen pixels in a
-        // 2000-wide window, and fell on one pixel or two by where the panel stood
-        var box = new StyleBoxFlat { BgColor = bg, BorderColor = rim ?? QLine };
-        box.SetContentMarginAll(pad);
-        if (band is not null)
-            box.ContentMarginTop = 0;
-        var panel = new PanelContainer();
-        panel.AddThemeStyleboxOverride("panel", box);
-        panel.Draw += () =>
-        {
-            if (band?.Invoke() is { } b)
-            {
-                panel.DrawRect(new Rect2(0, 0, panel.Size.X, b.High), b.Fill);
-                if (b.Line is { } line)
-                {
-                    float t = QuickPad.RimLayout(panel, 1);
-                    panel.DrawRect(new Rect2(0, b.High - t, panel.Size.X, t), line);
-                }
-            }
-            QuickPad.DrawRim(panel, panel.Size, box.BorderColor, 1.0f);
-        };
-        panel.AddChild(inner);
-        return panel;
-    }
 
     // --- the squads on the board ---------------------------------------------------
 
@@ -1922,7 +1840,7 @@ public sealed partial class Tank3DBench
         var sheet = new VBoxContainer();
         sheet.AddThemeConstantOverride("separation", 10);
         sheet.AddChild(QEyebrow(L.T("quick.reveal_eyebrow")));
-        sheet.AddChild(QText(L.T("quick.toss", mineFirst ? L.T("quick.toss_you") : L.T("quick.toss_ai")), 22, QInk, bold: true));
+        sheet.AddChild(Ui.Text(L.T("quick.toss", mineFirst ? L.T("quick.toss_you") : L.T("quick.toss_ai")), 22, Ui.Ink, bold: true));
         sheet.AddChild(QHint(L.T("quick.reveal_next", q.Map, QuickMode(q.Map))));
         var cols = new HBoxContainer();
         cols.AddThemeConstantOverride("separation", 14);
@@ -1935,7 +1853,7 @@ public sealed partial class Tank3DBench
         sheet.AddChild(go);
         var over = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Stop };
         over.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        over.AddChild(QBox(sheet, QPanelC, 18));
+        over.AddChild(Ui.Box(sheet, Ui.Panel, 18));
         _qReveal = over;
         layer.AddChild(over);
         Log.Print($"tank3d: quick: revealed - the AI {q.AiDoctrine?.Name}: {QuickSquad.Said(q.Ai)}");
@@ -1948,14 +1866,14 @@ public sealed partial class Tank3DBench
         var col = new VBoxContainer { CustomMinimumSize = new Vector2(380, 0) };
         col.AddThemeConstantOverride("separation", 8);
         col.AddChild(QEyebrow(first ? L.T("quick.moves_first") : L.T("quick.moves_second")));
-        col.AddChild(QText(title, 18, SideInk(side), bold: true));
+        col.AddChild(Ui.Text(title, 18, SideInk(side), bold: true));
         col.AddChild(QHint(L.T("quick.reveal_spent", QuickSquad.Spent(squad), budget, extra)));
         foreach (QuickSquad.Slot s in squad)
         {
             if (s.Empty)
                 continue;
             QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
-            col.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
+            col.AddChild(new ColorRect { Color = Ui.Line, CustomMinimumSize = new Vector2(0, 1) });
             var row = new HBoxContainer();
             row.AddThemeConstantOverride("separation", 12);
             row.AddChild(new TextureRect
@@ -1966,13 +1884,13 @@ public sealed partial class Tank3DBench
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             });
             var text = new VBoxContainer();
-            text.AddChild(QText($"{c.Name} · {(s.Level > 0 ? L.T("quick.reveal_branch", c.BranchOf(s.Branch)?.Name ?? "", s.Level) : L.T("quick.neutral"))}", 14, QInk, bold: true));
+            text.AddChild(Ui.Text($"{c.Name} · {(s.Level > 0 ? L.T("quick.reveal_branch", c.BranchOf(s.Branch)?.Name ?? "", s.Level) : L.T("quick.neutral"))}", 14, Ui.Ink, bold: true));
             foreach (QuickSquad.Upgrade u in QuickSquad.UpgradesOf(s))
-                text.AddChild(QText($"•  {u.Name}{(u.Flag is null ? " *" : "")}", 13, QMuted));
+                text.AddChild(Ui.Text($"•  {u.Name}{(u.Flag is null ? " *" : "")}", 13, Ui.Muted));
             row.AddChild(text);
             col.AddChild(row);
         }
-        return QBox(col, QPanelC, 14, first ? QOlive : QLine);
+        return Ui.Box(col, Ui.Panel, 14, first ? Ui.Accent : Ui.Line);
     }
 
     // --- the script ----------------------------------------------------------------

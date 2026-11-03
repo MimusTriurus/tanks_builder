@@ -105,12 +105,12 @@ public sealed partial class Tank3DBench
         };
         _acts.AddThemeConstantOverride("separation", 18);
         HBoxContainer move;
-        (_groupMove, move) = Group(GroupShape.Diamond, MoveInk);
+        (_groupMove, move) = Group(GroupShape.Diamond, Ui.Move);
         // the move (2026-11-01): the other modes off, the click the move's
         _actMove = ActButton(move, "move", L.T("acts.move"), "1", toggle: true, MoveOn);
         MoveBadgeBuild(_actMove);
         HBoxContainer attack;
-        (_groupAttack, attack) = Group(GroupShape.Circle, AttackInk);
+        (_groupAttack, attack) = Group(GroupShape.Circle, Ui.Attack);
         _attackAct = AttackToggle;
         _actAttack = ActButton(attack, "attack", L.T("acts.attack"), "2", toggle: true, _attackAct);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode
@@ -137,7 +137,7 @@ public sealed partial class Tank3DBench
 
     /// <summary>Screen pixels to a layout pixel: the 1600 × 900 layout stretched to
     /// the window (<c>canvas_items</c>) - 1.6 on a 2560 × 1440 screen.</summary>
-    private float ScreenScale() => QuickPad.ScreenScale(GetWindow());
+    private float ScreenScale() => Ui.ScreenScale(GetWindow());
 
     /// <summary>The icons rasterised at the pixels they take on screen: the
     /// panel is laid out at 1600 × 900 and stretched with the window
@@ -232,9 +232,6 @@ public sealed partial class Tank3DBench
 
     private readonly Dictionary<PanelContainer, GroupArt> _groupArt = new();
 
-    /// <summary>The move's group: the move zone's blue, lighter - its own ink
-    /// is dark for a mark on the panel's black.</summary>
-    private static readonly Color MoveInk = new(0.31f, 0.61f, 0.91f);
     private static readonly Color MarkLine = new(0.086f, 0.075f, 0.059f);
     private static readonly Color MarkSpent = new(0.23f, 0.24f, 0.20f);
     /// <summary>The mark's row over the frames, px; the mark straddles the frame's top edge.</summary>
@@ -469,8 +466,6 @@ public sealed partial class Tank3DBench
 
     // --- the attack's zone ----------------------------------------------------------
 
-    /// <summary>The attack's zone ink: orange - between the ambush's red and the bonus acts' amber.</summary>
-    private static readonly Color AttackInk = new(1.0f, 0.47f, 0.12f);
     private readonly List<Vector2I> _attackCells = new();
     private (Vector2I Here, int Reach, int Smoke, int Unit) _attackKey;
     private bool _attackFound;
@@ -503,18 +498,18 @@ public sealed partial class Tank3DBench
         // on the relief as the move's zone is: off the hexes' edges
         if (_relief is not null)
         {
-            ReliefZoneShow(AttackInk);
+            ReliefZoneShow(Ui.Attack);
             return;
         }
         if (_attackCells.Count == 0)
             return;
         Vector2[] corner = Corners();
         mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-        var tint = new Color(AttackInk, ZoneTone);
+        var tint = new Color(Ui.Attack, ZoneTone);
         foreach (Vector2I cell in _zoneFill)
             ZoneCell(mesh, tint, cell, corner);
         ZoneBand(corner, 1);
-        var line = new Color(AttackInk, 0.95f);
+        var line = new Color(Ui.Attack, 0.95f);
         for (int i = 0; i < _band.Count; i++)
         {
             mesh.SurfaceSetColor(line);
@@ -777,12 +772,12 @@ public sealed partial class Tank3DBench
         if (_moveBadge is not { } c || _badgeSteps < 0)
             return;
         var mid = new Vector2(c.Size.X - BadgeIn, c.Size.Y - BadgeIn);
-        Color fill = _badgeOff ? MarkSpent : _badgeCut ? BadgeCut : MoveInk;
+        Color fill = _badgeOff ? MarkSpent : _badgeCut ? BadgeCut : Ui.Move;
         // the ink's rim first, as the group's mark is drawn (MarkAt)
         c.DrawCircle(mid, BadgeR + 1.5f, MarkLine);
         c.DrawCircle(mid, BadgeR, fill);
         if (_badgeRoad)
-            c.DrawArc(mid, BadgeR + 3.0f, 0.0f, Mathf.Tau, 24, MoveInk, 1.5f, true);
+            c.DrawArc(mid, BadgeR + 3.0f, 0.0f, Mathf.Tau, 24, Ui.Move, 1.5f, true);
         Font font = ThemeDB.FallbackFont;
         const int size = 13;
         float w = font.GetStringSize(_badgeText, HorizontalAlignment.Left, -1, size).X;
