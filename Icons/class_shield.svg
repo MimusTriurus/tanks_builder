@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="4.9 193.2 360.0 360.0">
+  <title>class_shield</title>
+  <defs>
+    <linearGradient id="face_lit" gradientUnits="userSpaceOnUse" x1="66.30" y1="260.50" x2="303.60" y2="485.90"><stop offset="0" stop-color="#c3c8cb"/><stop offset="0.55" stop-color="#a6acb0"/><stop offset="1" stop-color="#8c9296"/></linearGradient>
+    <clipPath id="face_clip"><path d="M 135.53 284.50 L234.37 284.50 L279.60 311.92 L279.60 416.14 L214.00 461.90 L155.90 461.90 L90.30 416.14 L90.30 311.92 Z"/></clipPath>
+  </defs>
+  <path id="frame" d="M 128.82 260.50 L241.08 260.50 L303.60 298.40 L303.60 428.66 L221.54 485.90 L148.36 485.90 L66.30 428.66 L66.30 298.40 Z M 133.01 275.50 L236.89 275.50 L288.60 306.85 L288.60 420.83 L216.83 470.90 L153.07 470.90 L81.30 420.83 L81.30 306.85 Z" fill="#15160f" fill-rule="evenodd" stroke="#15160f" stroke-width="1.5" stroke-linejoin="round"/>
+  <g id="bevel">
+    <path d="M 133.01 275.50 L 236.89 275.50 L 234.37 284.50 L 135.53 284.50 Z" fill="#e4e8ea"/>
+    <path d="M 236.89 275.50 L 288.60 306.85 L 279.60 311.92 L 234.37 284.50 Z" fill="#cdd2d5"/>
+    <path d="M 288.60 306.85 L 288.60 420.83 L 279.60 416.14 L 279.60 311.92 Z" fill="#a9afb3"/>
+    <path d="M 288.60 420.83 L 216.83 470.90 L 214.00 461.90 L 279.60 416.14 Z" fill="#858b8f"/>
+    <path d="M 216.83 470.90 L 153.07 470.90 L 155.90 461.90 L 214.00 461.90 Z" fill="#92989c"/>
+    <path d="M 153.07 470.90 L 81.30 420.83 L 90.30 416.14 L 155.90 461.90 Z" fill="#a3a9ad"/>
+    <path d="M 81.30 420.83 L 81.30 306.85 L 90.30 311.92 L 90.30 416.14 Z" fill="#c8cdd0"/>
+    <path d="M 81.30 306.85 L 133.01 275.50 L 135.53 284.50 L 90.30 311.92 Z" fill="#d9dddf"/>
+  </g>
+  <path id="face" d="M 135.53 284.50 L234.37 284.50 L279.60 311.92 L279.60 416.14 L214.00 461.90 L155.90 461.90 L90.30 416.14 L90.30 311.92 Z" fill="url(#face_lit)"/>
+  <path id="sheen" d="M 109.0 260.5 L 175.5 260.5 L 66.3 400.2 L 66.3 328.1 Z" fill="#ffffff" opacity="0.16" clip-path="url(#face_clip)"/>
+</svg>
