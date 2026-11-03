@@ -67,7 +67,7 @@ tree_gen.grid([1, 2, 3, 4, 5, 6])   # живые спрайтовые дерев
    поджигает, ПКМ валит ([godot/docs/props.md](../../godot/docs/props.md), «Tree3D»). Снимок
    для сравнения — `-- --capture <png> --capture-at 60`, пожар целиком — `-- --burn 2,1
    --record <dir>`. После прогона — `run/main_scene` в `project.godot` на месте
-   ([godot/CLAUDE.md](../../godot/CLAUDE.md), «Ловушка запуска»).
+   ([godot/CLAUDE.md](../../godot/CLAUDE.md), «Launch trap»).
 4. **Закоммитить** `assets/Models/Trees/` вместе с правкой `tree_gen.py` одним коммитом:
    модель и генератор, который её сделал, должны совпадать. `.glb` уходят в LFS сами
    (`.gitattributes`); `git lfs status` перед коммитом покажет их как `LFS:`, а не `Git:`. Шесть

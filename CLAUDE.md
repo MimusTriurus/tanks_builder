@@ -1,79 +1,81 @@
-# Board of Tanks — два цеха и контракт между ними
+# Board of Tanks — two workshops and the contract between them
 
-Пошаговая тактика про танки на гексагональном поле. В репозитории два цеха, и у
-каждого свой CLAUDE.md, который грузится по каталогу:
+Turn-based tank tactics on a hex board. The repository holds two workshops; each
+has its own CLAUDE.md, loaded by directory.
 
-| каталог | что это | CLAUDE.md |
+**Talk to the user in Russian.** Code identifiers, logs and these instruction
+files are English; `docs/`, the GDD, commit messages and player text stay as
+they are (Russian docs, both languages in `godot/data/lang/`).
+
+## Hard rules
+
+- **Never report success from a return value.** The pipeline: composite the
+  layers and look at the picture. The bench: a capture or `--selftest`.
+- **Never `git stash`.** The Blender pipeline writes `Sprites/` in parallel;
+  for an A/B, copy the one file out of `HEAD`.
+- **Never commit `godot/project.godot`** and never `git checkout` it: it carries
+  the user's own uncommitted edit. Stage files by name, not `git add -A`.
+- **Commit only when asked, never push.** By default a commit goes straight to
+  `main` (see "Task pipeline" for the exception).
+- **No `python` on this machine** — it is the Microsoft Store stub: it prints
+  "Python", exits 49 and does nothing. Edit files with Edit; for a script use
+  `py -3`.
+- **Don't touch the user's running Godot or Blender processes.**
+- **Fibery means `fibery-studio` only** (stendhal-syndrome-studio.fibery.io,
+  from `.mcp.json` and `godot/.mcp.json`). Any other Fibery connection in the
+  session — e.g. the claude.ai connector to the wargaming workspace — is off
+  limits for this project: no reads, no writes.
+
+## Map
+
+| path | what | instructions |
 |---|---|---|
-| `pipeline/` | конвейер спрайтов в Blender: из `.glb` от генератора — послойные изометрические атласы | [pipeline/CLAUDE.md](pipeline/CLAUDE.md) |
-| `godot/` | стенд на Godot 4.7 mono (C#): танки едут, стреляют и горят на доске | [godot/CLAUDE.md](godot/CLAUDE.md) |
-| `docs/gdd/` | правила игры (GDD), общие для обоих цехов | [docs/gdd/index.md](docs/gdd/index.md) |
-| `assets/` | исходники: `Input3D/` (.glb), `Parts3D/`, `Scenes/` (.blend, LFS), `Images/`, `Sounds/` (не в git); `Models/Trees/` — модели деревьев генератора для `Tree3D`, `Models/Mine/` — мина ТМ-62 (`pipeline/mine_tm62.py`) для `Tank3D`; `Models/Bunker/` — бункер для `Tank3D` (`bunker.glb` + `bunker.json`, пишет `pipeline/bunker_break.py`); `Fonts/` — шрифты интерфейса стенда с лицензиями (какой у языка — `_font` в `godot/data/lang/*.json`) | [pipeline/docs/assets.md](pipeline/docs/assets.md) |
-| `Icons/` | иконки действий HUD 3D-стенда: на действие `<имя>.vectorcraft` (исходник VectorCraft с вариантами), выбранный `<имя>.svg` (его читает стенд, `AssetRoot.Icons`) и PNG `_64`/`_128`; `out/` — черновые превью | [godot/docs/hud3d-plan.md](godot/docs/hud3d-plan.md) |
-| `Sprites/` | **контракт 2D-линии (устаревшей)**: атласы, которые конвейер пишет и спрайтовые сцены стенда читают | ниже |
-| `Models/` | **контракт 3D-линии (основной)**: игровые 3D-варианты танков, `<TAG>/{tank.glb,tank.json}`: конвейер пишет (`export_game`), `Tank3D` читает; `.glb` через Git LFS, сайдкар текстом | [pipeline/docs/repro.md](pipeline/docs/repro.md), [godot/docs/tank3d.md](godot/docs/tank3d.md) |
+| `pipeline/` | Blender sprite/model pipeline: from generator `.glb` to layered isometric atlases and 3D game variants | [pipeline/CLAUDE.md](pipeline/CLAUDE.md) |
+| `godot/` | Godot 4.7 mono (C#) bench: tanks drive, shoot and burn on the board | [godot/CLAUDE.md](godot/CLAUDE.md) |
+| `docs/gdd/` | game rules (GDD), shared by both workshops | [docs/gdd/index.md](docs/gdd/index.md) |
+| `assets/` | sources: `Input3D/` (.glb), `Parts3D/`, `Scenes/` (.blend, LFS), `Images/`, `Sounds/` (not in git); `Models/Trees/`, `Models/Mine/`, `Models/Bunker/` for the 3D bench; `Fonts/` with licences | [pipeline/docs/assets.md](pipeline/docs/assets.md) |
+| `Icons/` | HUD action icons: `<name>.vectorcraft` source, chosen `<name>.svg` (read by the bench via `AssetRoot.Icons`), PNG `_64`/`_128`; `out/` is drafts | [godot/docs/hud3d-plan.md](godot/docs/hud3d-plan.md) |
+| `Models/` | **3D contract (main line)**: `<TAG>/{tank.glb,tank.json}`; the pipeline writes it (`export_game`), `Tank3D` reads it; `.glb` via Git LFS, sidecar as text | [pipeline/docs/repro.md](pipeline/docs/repro.md), [godot/docs/tank3d.md](godot/docs/tank3d.md) |
+| `Sprites/` | **2D contract (legacy)**: atlases the pipeline writes and the sprite scenes read | [pipeline/docs/pipeline.md](pipeline/docs/pipeline.md), «Контракт `Sprites/`» |
 
-## Основная линия — 3D, спрайтовая устарела
+A change to a contract (`Models/`, `Sprites/`) is read on the other side, so it
+lands in one commit on both sides.
 
-Решено 2026-09-27: стенд уходит со спрайтовых атласов на 3D-юниты (cel shading,
-до десяти танков на экране, ленты звеньями). **Основная работа идёт с 3D-танками**:
-сцена `Tank3D.tscn` и модели `Models/<TAG>/`, которые конвейер собирает через
-`/repro` (`build_game` → `export_game`).
+## 3D is the main line; sprites are legacy
 
-**2D-вариант — танк-спрайт из атласов `Sprites/`** (харнесс `Main`, танковые
-стенды `TankTest*`, стенд событий и остальные спрайтовые сцены, а в конвейере
-`/tank` и `/sprites`) — **устаревший**. Он остаётся в репозитории, но новое под
-него не делается; эффект, механика или правка, которые нужны танку, делаются
-на 3D-модели. Если задача не говорит, о какой сцене речь, — речь о 3D.
+Decided 2026-09-27: the bench moved from sprite atlases to 3D units (cel
+shading, up to ten tanks on screen, tracks as links). **Main work is on 3D
+tanks**: the `Tank3D.tscn` scene and `Models/<TAG>/`, built by `/repro`
+(`build_game` → `export_game`).
 
-## Контракт `Sprites/`
+The 2D variant — tank sprites from `Sprites/` (the `Main` harness, `TankTest*`,
+the events bench and the other sprite scenes; `/tank` and `/sprites` in the
+pipeline) — is **legacy**. It stays in the repo, nothing new is built for it;
+an effect, mechanic or fix a tank needs is made on the 3D model. If a task
+doesn't say which scene, it means 3D.
 
-Контракт устаревшей 2D-линии; всё ниже верно, пока спрайтовые сцены живы.
+## Where things go
 
-Папка на танк, `Sprites/<TAG>/{hull,turret,hex,...}_atlas.{png,json}`. Живых
-наборов пять: LTP, MTP, HTP, TDP, HMP. `Obsolete/` лежит на диске и не в git.
+- **A new section goes into the doc whose subject it touches.** A CLAUDE.md
+  gets only what is true before you know what you are touching.
+- `.claude/commands/`: `/tank`, `/sprites`, `/repro` (pipeline), `/gdd-sync`
+  (GDD), `/task` (task pipeline). `.claude/hooks/godot_status.py`: after a
+  command that launched Godot, reports engine rewrites of `project.godot` /
+  `.csproj` (godot/CLAUDE.md, "Launch trap").
+- `out/` anywhere is scratch output, not in git.
 
-- **Корпус, башня и тайл делят одну ось вращения** — погон. Спрайты кладутся
-  друг на друга в точке `anchor_px`, и это единственное, что стенд знает о
-  геометрии танка.
-- **Машина без башни не отдаёт слоя башни.** У каземата (TDP, HMP) приваренная
-  рубка лежит в слое корпуса, `turret_atlas` и `wreck_turret_atlas` не пишутся, а
-  обломок отдаёт `wreck_barrel` — провисший ствол. Отсутствие слоя и есть факт:
-  `AtlasSet.HasTurretLayer` обязан совпадать с `MovementProfile.Turreted`, и
-  самопроверка это требует. Довод — [pipeline/docs/tank-scene.md](pipeline/docs/tank-scene.md).
-- **Шагов 24, у всех слоёв танка сразу.** Фронт — `front_dir = 270`, гекс
-  плоскотоповый, азимут 0, наклон 30°. Довод и цена — [pipeline/CLAUDE.md](pipeline/CLAUDE.md).
-- Стенд находит папку как `<repo>/Sprites` от своего `res://`, а ассеты как
-  `<repo>/assets/Images/...` (`AssetRoot.cs`). Переносить эти каталоги — значит
-  править одну константу там.
+## Task pipeline (only when asked)
 
-Что меняется в конвейере, читается стендом, и наоборот, — поэтому правки
-контракта живут в одном коммите с обеих сторон.
+Only when the user asks for the pipeline does a change become a `BoT/Work Item`
+card (`BOT-N`). It reaches `main` through a `feat/` or `fix/BOT-N-slug` branch
+and a pull request; every commit there starts with `BOT-N: `, checked by the
+hooks in `.githooks/` (which also call the Git LFS hooks). Enable them once per
+clone: `git config core.hooksPath .githooks`. Steps, card fields and template —
+[docs/workflow.md](docs/workflow.md); driven by `/task`.
 
-## Что общее у обоих цехов
+## GDD mirror in Fibery
 
-- **Никогда не рапортовать успех по возвращаемому значению.** Конвейер — сложить
-  слои и посмотреть картинку; стенд — снимок или `--selftest`. Подробности у
-  каждого в своём CLAUDE.md.
-- **Новый раздел пишется в тот док, чей предмет он трогает.** Сюда попадает
-  только то, что верно про оба цеха до того, как узнал, что трогаешь.
-- `.claude/commands/` — `/tank`, `/sprites` и `/repro` для конвейера, `/gdd-sync` для GDD, `/task` для
-  пайплайна задач; `.claude/hooks/` — хук стенда на переписанный
-  `project.godot`. `out/` где угодно — черновой вывод, не в git.
-- **По умолчанию коммит идёт прямо в `main`.** Только когда пользователь
-  просит пайплайн, изменение становится карточкой `BoT/Work Item` (`BOT-N`).
-  Она доходит до `main` через ветку `feat/` или `fix/BOT-N-slug` и pull
-  request. На такой ветке каждый коммит начинается с `BOT-N: `; это
-  проверяют хуки в `.githooks/`, и они же зовут хуки Git LFS. Включаются хуки
-  один раз на клон: `git config core.hooksPath .githooks`. Шаги, поля
-  карточки и шаблон — в [docs/workflow.md](docs/workflow.md), ведёт их
-  команда `/task`.
-- **Fibery — только `fibery-studio`** (stendhal-syndrome-studio.fibery.io, из
-  `.mcp.json` и `godot/.mcp.json`). Другие подключения Fibery в сессии, например коннектор
-  claude.ai к рабочему пространству wargaming, этот проект не трогает: ни
-  читать, ни писать.
-- **GDD зеркалится в Fibery** — пространство BoT, папка GDD, документ на файл
-  `docs/gdd/*.md`. Источник правды — git: копии перезаписываются целиком
-  командой `/gdd-sync`, правка в Fibery до следующей синхронизации не доживёт.
-  Как она устроена и где карта файл → документ — в
-  [.claude/commands/gdd-sync.md](.claude/commands/gdd-sync.md).
+The GDD is mirrored into Fibery — space BoT, folder GDD, one document per
+`docs/gdd/*.md`. Git is the source of truth: `/gdd-sync` overwrites the copies
+whole, so an edit made in Fibery is lost at the next sync. How it works and the
+file → document map — [.claude/commands/gdd-sync.md](.claude/commands/gdd-sync.md).

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/godot_status.py\""
+            "command": "py -3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/godot_status.py\""
           }
         ]
       }

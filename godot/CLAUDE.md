@@ -1,220 +1,188 @@
-# Стенд на Godot
+# Godot bench
 
-Проект на Godot 4.7.2 mono, C#. Проверяет то, чего не видно на статичной
-картинке: независимость башни, отсутствие «гуляния» оси, поведение при
-движении по полю. Конвейер, который делает его спрайты и модели, — в
-[pipeline/CLAUDE.md](../pipeline/CLAUDE.md); контракт между ними (`Models/`,
-`Sprites/`, `assets/`) — в [корневом CLAUDE.md](../CLAUDE.md).
+Godot 4.7.2 mono, C#. Checks what a still picture can't: turret independence,
+no axis "wander", behaviour while driving across the board. The pipeline that
+makes its models is in [pipeline/CLAUDE.md](../pipeline/CLAUDE.md); the
+contract between them and the repo-wide hard rules are in the
+[root CLAUDE.md](../CLAUDE.md).
 
-**Основная работа — 3D-танк: `res://scenes/Tank3D.tscn`, [docs/tank3d.md](docs/tank3d.md).**
-Сцены, где танк — спрайт из атласа (`Main`, `TankTest`, `WaterTankTest`,
-`WallTankTest`, `CaponTest`, `Events*` и прочие спрайтовые), — **устаревшая
-2D-линия** (решение 2026-09-27, корневой CLAUDE.md, «Основная линия — 3D»):
-новое под них не делается, эффект или механика для танка делаются на модели.
-Доски, правила и разделяемые модули (`HexField`, `Gunnery`, `MovementProfile`,
-`Terrain`, `Stage3D`…) общие и не устарели.
+## Hard rules
 
-**Основной режим доски — рельеф, от пандусов отказались** (решение
-пользователя, 2026-11-01). Уровни соединены склонами: подъём или спуск на
-уровень — обычный шаг с любой стороны (`HexField.Slopes`). Стены, капонир и
-бункер стоят на ровной площадке своей клетки (`Relief.Pad`, BOT-12).
-Карты, их честность и правила проверяются в этом режиме. `Tank3D` и `Match3D`
-открываются на рельефе по умолчанию, призмы с пандусами и стенами — флаг
-`--ramps`; ядро правил (`--battle-run`) играет на той же доске, с морем вокруг.
-Подробности — [docs/relief.md](docs/relief.md).
+- **Run `--selftest` only when the user explicitly asks.** To verify a change
+  otherwise, use a capture (`--capture`, needs a window) or the scene itself.
+- **Main work is the 3D tank: `res://scenes/Tank3D.tscn`, [docs/tank3d.md](docs/tank3d.md).**
+  Scenes where the tank is an atlas sprite (`scenes/legacy/`) are the legacy
+  2D line: nothing new for them. Boards, rules and shared modules (`HexField`,
+  `Gunnery`, `MovementProfile`, `Terrain`, `Stage3D`…) are shared and current.
+- **The board's main mode is relief; ramps are gone** (user's decision,
+  2026-11-01). Levels join by slopes: up or down a level is an ordinary step
+  from any side (`HexField.Slopes`). Walls, the caponier and the bunker stand on
+  their cell's flat pad (`Relief.Pad`, BOT-12). Maps, their fairness and rules
+  are judged in this mode. `Tank3D` and `Match3D` open on relief by default;
+  prisms with ramps and walls are `--ramps`; the rules core (`--battle-run`)
+  plays on the same board with sea around. Details — [docs/relief.md](docs/relief.md).
+- **Player text only via keys** in `data/lang/ru.json` and `en.json` ("Game text").
+- **Screens take colours, sizes and rims from `Ui` by role; the only tooltip is
+  `UiTip`** ("UI — one theme").
+- **Frame code allocates nothing; the 3D line prints with `Log.Print`**
+  ("Frame code" below).
 
-## Тесты
-- Запускай Self-test только в случае если я об этом прошу явно
-
-## Где что лежит
-
-Ниже — запуск, его ловушка и правило про корни сцен. Всё остальное разложено по
-темам и **грузится по ссылке, а не всегда**:
-
-| док | о чём | когда открывать |
-|---|---|---|
-| [docs/gdd/index.md](../docs/gdd/index.md) | **правила игры** (GDD): доска, юниты, состояния, партия — четыре файла, плюс противоречия и неопределённости | правишь правила или сверяешь стенд с ними |
-| [docs/architecture.md](docs/architecture.md) | раскрой каждого файла; что общее у восьми корней, а что принадлежит сцене; `--sprites`, пять танков на поле и что понадобилось, чтобы добавить класс | ищешь, где что живёт, или переносишь код между корнями |
-| [docs/terrain.md](docs/terrain.md) | два слота клетки: `Foundation`, `Cover`, состояния, `terrain.json`, кто их читает | правишь то, чем клетка является или чего она стоит |
-| [docs/board.md](docs/board.md) | `BoardMap`, пять карт, `Abbey`, `--map-report`, пандусы и уровень моря | правишь карту или пишешь новую |
-| [docs/bench.md](docs/bench.md) | `TankTick`, доски `test` и `water`, панель бенча, его флаги | трогаешь `TankBench` или тик танка |
-| [docs/events.md](docs/events.md) | стенд событий: доска `events`, `events.json`, `Fleet`, снимок флагом; чего ещё нет | делаешь эффект под событие правил или кнопку к нему |
-| [docs/wall.md](docs/wall.md) | `Wall.tscn`: `WallKit`/`Fall`/`Stack`/`Bench`, раскладка кладки, физика обвала, тень, `--solved`; капонир (`CaponKit`, `--capon`, бетонобой) | как стена построена и как она рушится |
-| [docs/wall-bench.md](docs/wall-bench.md) | `WallTankTest`: таран, ворота тарана, HE/AP, секции, тур, `WallProp`, `WallHulls` | танк против стены |
-| [docs/water.md](docs/water.md) | брод, ватерлиния по колонкам, бок пруда, пена и кромка, кильватер, гребень, `Ripples` | всё мокрое |
-| [docs/props.md](docs/props.md) | тени по солнцу, `Grove`, `Wildfire`, `PropFamily`/`PropTier`, полоса убранства, `WoodBench` | деревья, кусты, камни, пожар в лесу |
-| [docs/motion.md](docs/motion.md) | `MovementProfile`, клевок, тряска, дрожание, гусеницы, выхлоп, поворот башни, пожар, обломок, обзор | как танк едет и что при этом шевелится |
-| [docs/combat.md](docs/combat.md) | выстрел, отдача, тряска камеры, пыль (`ProcKick`), попадание, рикошет (`ProcSpall`), разрыв HE (`ProcSlam`), пробитие (`ProcPierce`), отметина, пять классов и рубка без башни, звук, снаряд, трассер, прицельный луч, снаряд в гекс и таран | всё, что стреляет и во что попадает |
-| [docs/ui.md](docs/ui.md) | **управление: пять жестов и все клавиши**, пять танков на поле, контактная тень, кольцо выделения, размер класса, боковая панель, `panel/classes/walls.json` | что нарисовано поверх доски и чем это крутят |
-| [docs/blast.md](docs/blast.md) | `Effects.tscn`/`EffectsBench`, `SheetBlast` (единственный взрыв на доске), `ToonBlast` (рисованный, BotW), `ProcBall` (шар из текста доски), волна `ProcWave`, воронки, чем делать взрывы, какие типы нужны, три референса | делаешь или правишь взрыв |
-| [docs/tank3d.md](docs/tank3d.md) | `Tank3D.tscn`: 3D-танк из `Models/` с эффектами стенда на объёмной доске `Stage3D`, **без атласа** — `ITankShape` и `ModelShape`, живая карта высот, cel shading и обводка (`Toon`), огонь, дым, выхлоп, пыль гусениц, колея (`CelRuts`), глубокая вода — плывёт и тонет (`Tank3DBench.Water`, карта `events` с прудом), всплеск `CelSplash`, кильватер и бурун `CelWake`, пена ватерлинии на броне, рябь `CelRipples`, пена и блики воды ступенями (`Stage3D.CelWater`), таран второй модели (`Tank3DBench.Ram`: касание по корпусам, сдвиг на гекс, окалина со шва, юз), выстрел, снаряд в полёте с трассером (`CelShell`, `Tank3DBench.Shell`: бросок вдоль ствола, навес миномёта, исход по `Gunnery`), попадания со следами, разрыв фугаса и гибель в том же стиле (`CelBurn`, `CelExhaust`, `CelDust`, `CelShot`, `CelHit`, `CelBlast`, `CelDeath`, облако `CelCloud`), масштаб от гекса и класса, трава и лес на доске (`Tank3DBench.Wood`, общая с `Tree3D` модель дерева `TreeModel`), кирпичные стены и таран стены, бетонный капонир — въезд по оси, щель, бетонобой мины (`Tank3DBench.Walls`, `WallProp` стенда событий), на нём шестигранный бункер из `assets/Models/Bunker` — обрушение внутрь, уход под землю в пыли, плита основания (`BunkerProp`), панель выбора танка, правило карточки и её изгиб у земли, подложка тени, клавиши и `--do` | трогаешь 3D-юнит, переносишь эффект на него или меняешь, что построенные эффекты спрашивают у танка |
-| [docs/editor.md](docs/editor.md) | редактор карт: восемь вкладок, `MapRules`, формат `maps/*.json`, `map-*` | правишь правила карты или сам редактор |
-| [docs/editor3d-plan.md](docs/editor3d-plan.md) | план перевода редактора на 3D-линию: как сейчас, как должно быть, этапы 0–5, что берём у ratel | берёшься за этап плана редактора |
-| [docs/editor-ux-plan.md](docs/editor-ux-plan.md) | план удобства редактора: что мешает автору, паттерны редакторов карт, этапы 0–5 (панель проблем, Play-in-Editor, выделение и буфер, симметрия, сервис, пресеты), вопросы к автору | правишь, как с редактором работать, а не что он рисует |
-| [docs/rocks-plan.md](docs/rocks-plan.md) | план скал рельефа: тип (меса, ярданги, бараньи лбы, нынешние гребни), палитра, климат карты; этапы С0–С7, формат 3 с блоком `rocks`, вопросы к автору | берёшься за вид скалы на рельефе |
-| [docs/walls-relief-plan.md](docs/walls-relief-plan.md) | план стен, капонира и бункера на рельефе (выполнен 2026-11-02, BOT-12): как было (нигде не стояли, покрытие очищалось), почему (склон лежит под кладкой), площадка `Relief.Pad`, этапы С0–С5 с итогом, решения автора | разбираешь, почему клетка кладки ровная и чем это решено |
-| [docs/map-format3-plan.md](docs/map-format3-plan.md) | план формата карты 3: облик отдельно от правила; блоки `floor` (пол под лесом, миной, на холме), `climate`, `rocks`, `soil` (облик грунта на карту и по клеткам), `roads` (дороги путями по граням, `Foundation.Road`), `wood`/`trees` (породы); отказ незнакомых ключей; решения автора, этапы Ф1–Ф7 (сделаны), карта со всеми блоками `maps/format3.json` и её замер | трогаешь формат `maps/*.json` или берёшься за скалы, грунт, дороги, породы в карте |
-| [docs/hud3d-plan.md](docs/hud3d-plan.md) | HUD хода на 3D-стенде: как он устроен сейчас, этапы 1–4 (сделаны) и надстройки — выбор, зона и лента пути, призрак и розы, цель и превью, значки, панель юнита и окно под курсором; «Дальше» — чего из макета ещё нет | трогаешь выбор, приказ или прицел на `Tank3D` |
-| [docs/new_style.md](docs/new_style.md) | новый стиль: фото-ассеты (ambientCG, Poly Haven) на рельефе под флагами, выключены по умолчанию; что подключено (`--bed` — дно галькой, `--earth` — грунт, `--crag` — скалы, `--sand` — песок, `--forest` — земля под лесом, `--road-photo` — дороги), что скачано и почему не подключено, что искать дальше, порядок подключения следующего ассета | подключаешь текстуру или ассет нового стиля |
-| [docs/upgrade-icons-plan.md](docs/upgrade-icons-plan.md) | план иконок апгрейдов: у каких из 22 есть иконка, 17 недостающих по три партии с пятью мотивами на каждую, стиль, проверка на 36 px, пары, которые легко спутать, вопросы к автору | рисуешь иконку апгрейда или решаешь, где её показать |
-| [docs/ai-plan.md](docs/ai-plan.md) | план ИИ противника: что ИИ решает по GDD, чего нет в коде (ядро правил как данных, засада, дым, апгрейды, расстановка), три слоя `Battle` → `Ai` → стенд, оценка и карта угроз, поиск, координация отряда, уровни сложности, этапы И0–И7, тактические задачи, вопросы к автору | берёшься за ИИ, ядро правил партии или самоигру для баланса |
-| [docs/battle-core-plan.md](docs/battle-core-plan.md) | доработки перед ИИ: пробелы П-1…П-25 (состояние партии не данные, исходы по физике, расхождения стенда с GDD, нет засады, дыма, апгрейдов, пата, расстановки, точки), решения Р-1…Р-5, этапы Д1–Д10 — от `UnitId` и `IHexBoard` до ядра `Battle`, теневого режима и слоя команд | берёшься за ядро правил партии, расхождение стенда с GDD или недостающую механику |
-| [docs/selftest.md](docs/selftest.md) | `--selftest`, фильтр по темам, что именно утверждается | добавляешь проверку или разбираешь падение |
-| [docs/perf.md](docs/perf.md) | производительность 3D-стенда: секции `Prof` и custom monitors, оверлей F3, прогон `--perf` со сводкой и сравнением с baseline, сценарии `blast` и `stress`, эталоны в `perf/` (пять прогонов, `--perf-merge`), что показал первый прогон | меряешь, что стоит кадр, или проверяешь, не стало ли медленнее |
-
-| [docs/HEX_TILES_3D.md](docs/HEX_TILES_3D.md) | пандусы и вода на стенде: карта, правило прохода, брод, ватерлиния | многоуровневый рельеф на доске |
-| [docs/relief.md](docs/relief.md) | `--relief` (BOT-11): доска одним гладким мешем по образцу MA_ContentMaker — поля `Relief`, меш и гекс-сетка в шейдере, вода листом, уровни без рамп (`HexField.Slopes`), танк и трава на рельефе (`HexField.Surface`, `Grass3D.Ground`) | трогаешь рельеф или то, что на нём стоит |
-
-**Новый раздел пишется в тот док, чей предмет он трогает.** Сюда попадает
-только то, что верно до того, как узнал, что трогаешь.
-
-## Раскладка каталога
-
-| каталог | что там |
-|---|---|
-| `scenes/` | сцены 3D-линии и инструменты: `Tank3D`, `Match3D`, `Tree3D`, `Relief3D`, `Editor` |
-| `scenes/legacy/` | спрайтовые сцены устаревшей 2D-линии: `Main`, `Abbey`, `TankTest*`, `CaponTest`, `Events*`, `Effects`, `Wood`, `Wall`, `Relief` |
-| `scripts/` | C# по предмету, не по линии (2D и 3D делят почти всё): `core` — инфраструктура и панель; `rules` — правила GDD; `board` — поле, карты, рельеф; `stage3d` — объёмная доска; `water`, `props`, `walls`; `tank` — танк и его часы, общие для обеих линий; `sprite` — атлас и спрайт танка (2D); `tank3d` — 3D-модель и `Tank3DBench.*`; `cel` — cel-эффекты 3D; `effects` — `Proc*` и взрывы листом; `editor`; `benches` — корни остальных сцен; `test` — `SelfTest` |
-| `data/` | настройки стенда, читаемые с диска (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets`, `match` (числа партии: пат), `lang/ru.json` и `lang/en.json` (текст игры, см. «Текст игры») |
-| `maps/`, `perf/` | карты `maps/*.json` ([docs/editor.md](docs/editor.md)) и эталоны `--perf` ([docs/perf.md](docs/perf.md)) |
-| `tools/` | `stage_sounds.sh` и `render/` — вспомогательные скрипты вне движка |
-
-Пути сцен, на которые код переходит сам (редактор ↔ стенд ↔ партия), — константы
-в `Session`; остальные называются только в командной строке. Новый `.cs` кладётся
-в папку своего предмета; пространство имён одно, `TankSpriteTest`, от папки не
-зависит.
-
-## Запуск
+## Launch
 
 ```
 dotnet build
-"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/legacy/Main.tscn
+"D:\Soft\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --path "D:\Projects\AgentCoding\BlenderMCP\godot" res://scenes/Tank3D.tscn
 ```
 
-**Оба пути абсолютные, сцена — позиционным аргументом, всегда.** Относительный
-`--path` верен только из корня репозитория; из любого другого каталога Godot
-молча открывает менеджер проектов с нулевым кодом возврата, и `--selftest`
-читается как «проверки перестали печатать». Движка в `PATH` нет. На
-`run/main_scene` полагаться нельзя — см. ловушку ниже. Самопроверка идёт под
-`--headless`, снимки (`--capture`) — только с окном:
-[docs/selftest.md](docs/selftest.md).
+**Both paths absolute, the scene positional, always.** A relative `--path` is
+right only from the repo root; from anywhere else Godot silently opens the
+project manager with exit code 0, and `--selftest` reads as "the checks stopped
+printing". The engine is not on `PATH`. Never rely on `run/main_scene` (see the
+trap below). Selftest runs `--headless`; captures (`--capture`) need a window —
+[docs/selftest.md](docs/selftest.md). A throw in `_Ready` under `--headless`
+hangs the process instead of failing it: run long launches in the background.
 
-Сцены: `res://scenes/legacy/Main.tscn` — харнесс (ABBEY — он же с `-- --map abbey` либо
-`res://scenes/legacy/Abbey.tscn`, [docs/board.md](docs/board.md)); `res://scenes/legacy/TankTest.tscn`,
-`res://scenes/legacy/WaterTankTest.tscn`, `res://scenes/legacy/WallTankTest.tscn`, `res://scenes/legacy/CaponTest.tscn` — танковый
-стенд, на воде, против стены и миномёт против капонира ([docs/bench.md](docs/bench.md),
-[docs/wall-bench.md](docs/wall-bench.md));
-`res://scenes/legacy/Effects.tscn` — взрыв ([docs/blast.md](docs/blast.md));
-`res://scenes/legacy/EventsTank.tscn`, `res://scenes/legacy/EventsField.tscn`, `res://scenes/legacy/EventsOverlay.tscn` —
-стенд событий: пять танков и все виды клеток, кнопка панели = событие правил
-([docs/events.md](docs/events.md)); `res://scenes/legacy/Wood.tscn`,
-`res://scenes/legacy/Wall.tscn`, `res://scenes/legacy/Relief.tscn`, `res://scenes/Relief3D.tscn`, `res://scenes/Editor.tscn`;
-`res://scenes/Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md));
-`res://scenes/Match3D.tscn` — партия на нём: две стороны (зелёные и коричневые), по танку на спавн, на доске 10 × 10, по умолчанию учебная расстановка `drill10` (рикошет, взрыв в кучке), ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»); с `-- --quick` — быстрый бой против ИИ: лобби и сборка отряда на бюджет перед расстановкой (там же, «Быстрый бой против ИИ»), с `-- --hangar` — то же со сборкой в ангаре (там же, «Сборка в ангаре»);
-`res://scenes/Tree3D.tscn` — модели деревьев генератора на объёмной доске: лесной пожар, падение от тарана и четыре способа травы ([docs/props.md](docs/props.md), «Tree3D»).
-`--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели, а
-не класс ([docs/architecture.md](docs/architecture.md)).
+Scenes, their flags and the legacy list — [docs/architecture.md](docs/architecture.md),
+«Сцены и как их открыть». The ones used most: `Tank3D.tscn`; `Match3D.tscn`
+(a match; `-- --quick` quick battle vs AI, `-- --hangar` with the hangar);
+`Tree3D.tscn`; `Editor.tscn`. Language: `-- --lang ru|en` (default English).
 
-## Ловушка запуска
+## Launch trap
 
-Godot, запущенный другой сборкой движка, переписывает `project.godot` **и**
-`TankSpriteTest.csproj`: версию в `config/features` и в `Godot.NET.Sdk` он ведёт
-за собой, а заодно уводит `run/main_scene` на сцену, открытую последней, — в том
-числе при позиционном запуске.
+Godot started by a different engine build rewrites `project.godot` **and**
+`TankSpriteTest.csproj`: it carries the version in `config/features` and in
+`Godot.NET.Sdk`, and also moves `run/main_scene` to the last opened scene —
+even on a positional launch.
 
-- **Версия — правка, а не порча.** Откатывать её вслепую значит вернуть проект
-  на движок, которого на машине нет.
-- **`run/main_scene` — порча.** Позиционное имя сцены защищает от последствия,
-  а не от записи, поэтому после прогона поле надо вернуть.
-- **Третья запись версии — `NuGet.config`** (путь до `GodotSharp/Tools/nupkgs`
-  той же сборки). Движок её не трогает никогда, пара расходится молча, а
-  `NU1301` заговорит только на чистой машине, где 4.7.2 ещё не лежит в
-  `~/.nuget/packages`. Ведётся руками и сверяется глазами с двумя другими.
+- **The version is a fix, not damage.** Reverting it blindly points the project
+  at an engine that isn't on the machine.
+- **`run/main_scene` is damage.** A positional scene guards against the effect,
+  not the write, so after a run restore that one line — never `git checkout`
+  the file: it holds the user's edit (`run/main_run_args`).
+- **The third version record is `NuGet.config`** (path to
+  `GodotSharp/Tools/nupkgs` of the same build). The engine never touches it, so
+  the pair drifts silently and `NU1301` speaks only on a clean machine without
+  4.7.2 in `~/.nuget/packages`. Kept by hand, checked by eye against the other two.
 
-Хук `.claude/hooks/godot_status.py` печатает `git status` по обоим файлам после
-каждой команды, запускавшей движок, — но только внутри Claude Code; из
-терминала `git status` после прогона остаётся за тобой.
+The hook `.claude/hooks/godot_status.py` reports, after every command that
+launched the engine, a changed `run/main_scene` or engine version (only those
+lines; the user's edit is ignored) — inside Claude Code only.
 
-## Корни сцен и правило между ними
+## Layout
 
-Корней одиннадцать: `Main` (харнесс, две сцены), `TankBench` (четыре), `EventBench`
-(три), `WoodBench`, `WallBench`, `ReliefBench`, `Relief3D`, `EffectsBench`,
-`MapEditor`, `Tank3DBench`, `Tree3DBench`. Семь наследуют `SceneRoot`; два рельефных
-объявлены схематичными, `Tank3DBench` и `Tree3DBench` — пилоты на Node3D со своими
-флагами снимка.
+| dir | contents |
+|---|---|
+| `scenes/` | 3D line scenes and tools: `Tank3D`, `Match3D`, `Tree3D`, `Relief3D`, `Editor` |
+| `scenes/legacy/` | legacy 2D sprite scenes |
+| `scripts/` | C# by subject, not by line: `core` (infrastructure, `Ui`, `UiTip`, `L`), `rules` (GDD rules, `Battle`), `board` (field, maps, relief), `stage3d`, `water`, `props`, `walls`, `tank` (shared by both lines), `sprite` (2D), `tank3d` (`Tank3DBench.*`), `cel` (3D cel effects), `effects`, `editor`, `benches`, `test` (`SelfTest`) |
+| `data/` | bench settings read from disk (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets`, `match`, `lang/` |
+| `maps/`, `perf/` | maps `maps/*.json` ([docs/editor.md](docs/editor.md)) and `--perf` baselines ([docs/perf.md](docs/perf.md)) |
+| `tools/` | helper scripts outside the engine |
 
-**Ни один разделяемый модуль не знает, какая сцена его запустила.** Проверяется
-грепом: кода, обращающегося к `Main.` из чужого файла, ровно одно место —
-`SelfTest`. Единственное объявленное исключение между корнями —
-`Session`: редактор жмёт Run и меняет сцену на 3D-стенд (`Ctrl+F5` — на партию), они кнопкой
-`Edit  F5` возвращает. Раскрой — [docs/architecture.md](docs/architecture.md).
+A new `.cs` goes in its subject's folder; the namespace is one, `TankSpriteTest`,
+regardless of folder. Scene paths the code switches to itself (editor ↔ bench ↔
+match) are constants in `Session`.
 
-## Текст игры — в `data/lang/`
+`scripts/test/SelfTest.cs` contains a NUL byte, so git treats it as binary and
+won't normalise line endings: write it with LF or the diff churns 16k lines.
 
-Всё, что видит игрок на 3D-линии, — ключи в `data/lang/ru.json` и
-`data/lang/en.json`, в коде `L.T("ключ", …)` (`{0}` — подстановка) и `L.N("ключ", n)`
-(массив форм числа: по-русски одно / несколько / много, по-английски one / other);
-загрузчик — `scripts/core/L.cs`. Язык — флаг `-- --lang ru|en`, без него английский
-(`L.Default`); ключа нет в языке — берётся русский, нет и его — на экране сам ключ,
-а в логе строка `lang: no "…"`.
-- **У языка свой шрифт** — `"_font"` в его файле, имя файла в `assets/Fonts/`
-  (рядом лицензия). У английского — Black Ops One из ratel (OFL); он только
-  латиница, поэтому у `ru.json` шрифта нет и остаётся шрифт Godot. `L.Apply()` в
-  начале `Tank3DBench.Build` ставит его в `ThemeDB.FallbackFont` и в шрифт темы по
-  умолчанию — им пишут и контролы, и `DrawString`; `Ui.BoldFont` — он же,
-  без утолщения. Он шире прежнего: строка без переноса в узкой рамке должна
-  обрезаться многоточием (`TextOverrunBehavior`), а не вылезать.
-- **Новый текст для игрока — только ключом в оба файла**, префикс — часть имени
-  файла (`hangar.`, `match.`, `squad.`…). Фразу целиком одним ключом с
-  плейсхолдерами, а не склейкой кусков: в английском другой порядок слов.
-- **Код не сравнивает показанный текст**: вид апгрейда — `Upgrade.Ability`/`Attack`,
-  заголовок ветки ищется по `meta q_branch`, а не по названию.
-- Не переводятся: логи (`Log.Print`, `GD.PrintErr`), исключения, токены `--do` и
-  `--quick-do`, теги и id (`LTP`, `raid`), устаревшая 2D-линия и `panel.json`.
+## Scene roots
 
-## Интерфейс — одна тема, `Ui`
+**No shared module knows which scene started it.** Checked by grep: code that
+reaches `Main.` from another file exists in exactly one place — `SelfTest`. The
+one declared exception between roots is `Session`: the editor presses Run and
+switches to the 3D bench (`Ctrl+F5` — to a match), and they return with the
+`Edit  F5` button. The roots and the full breakdown — [docs/architecture.md](docs/architecture.md).
 
-Экраны 3D-линии (лобби, сборка, ангар, HUD партии) берут цвета, кегли, рамки и
-начертания из `scripts/core/Ui.cs` по роли — `Ui.Accent`, `Ui.Line`, `Ui.Size(13)`,
-`Ui.DrawRim`, — а не своим литералом: один цвет значит одно на всех экранах. Нужна
-новая роль — она добавляется туда, с тем, что значит. Подсказка у элемента интерфейса
-одна — `UiTip` (`scripts/core/UiTip.cs`: задержка, клюв, кольцо, тело `UiTip.Box`), не
-своя и не движка. Перевод HUD партии на тему —
-этапы в [docs/tank3d.md](docs/tank3d.md) («Тема — `Ui`»).
+## Game text — `data/lang/`
 
-## Код кадра не выделяет память
+Everything the player sees on the 3D line is a key in `data/lang/ru.json` and
+`data/lang/en.json`; in code `L.T("key", …)` (`{0}` substitution) and
+`L.N("key", n)` (plural forms: Russian one / few / many, English one / other);
+loader `scripts/core/L.cs`. A key missing in a language falls back to Russian,
+then to the key itself on screen with `lang: no "…"` in the log.
 
-То, что идёт каждый кадр (`_Process`, тики эффектов, HUD), не создаёт мусор:
-каждые ~13 МБ выделенного C# собирает gen0 за 10–25 мс посреди обычного кадра.
-После BOT-3 медиана — ~6 КБ за кадр, и сборок за партию почти нет. Чтобы так и
-оставалось:
-- параметр шейдера — `mat.Param("имя", v)` (`ShaderParams`), не
-  `SetShaderParameter("имя", v)`: строка там каждый раз становится новым
-  `StringName`;
-- в тике нет LINQ, лямбд над локальными (`Find`/`Exists`/`Where`), `new[] { … }`,
-  `new List`/`HashSet` — поле и `Clear()`, цикл по индексу; `foreach` по
-  `IReadOnlyList` упаковывает перечислитель;
-- текст собирается, когда меняется то, что он говорит (как `HudStamp`), а не
-  каждый кадр.
+- **Each language has its font** — `"_font"` in its file, a file name in
+  `assets/Fonts/` (licence alongside). English uses Black Ops One (OFL, Latin
+  only), so `ru.json` has no font and keeps Godot's. `L.Apply()` at the start of
+  `Tank3DBench.Build` sets it as `ThemeDB.FallbackFont` and the default theme
+  font; `Ui.BoldFont` is the same face. It is wider: a non-wrapping line in a
+  narrow frame must clip with an ellipsis (`TextOverrunBehavior`), not overflow.
+- **New player text is a key in both files**, the prefix is part of the name
+  (`hangar.`, `match.`, `squad.`…). A whole phrase is one key with
+  placeholders, never glued pieces: English word order differs.
+- **Code never compares displayed text**: an upgrade's kind is
+  `Upgrade.Ability`/`Attack`, a branch header is found by `meta q_branch`.
+- Not translated: logs (`Log.Print`, `GD.PrintErr`), exceptions, `--do` and
+  `--quick-do` tokens, tags and ids (`LTP`, `raid`), the legacy 2D line and
+  `panel.json`.
 
-Кто выделяет — видно по секции: `kb:` в `frames.csv`, `section_alloc_kb` в
-`summary.json`, КБ в оверлее F3 ([docs/perf.md](docs/perf.md)).
+## UI — one theme, `Ui`
 
-**3D-линия печатает через `Log.Print`, не `GD.Print`.**
-- Отладочная сборка сбрасывает stdout после каждого `GD.Print`, и сброс ждёт,
-  пока читатель pipe заберёт данные: строка в кадре стоила до 300 мс, от прогона
-  к прогону по-разному (BOT-7, BOT-8).
-- `Log.Print` кладёт строку в очередь, а печатает её свой поток, по порядку.
-  Стенд дожидается очереди в `_ExitTree`, так что выход строк не теряет.
-- Это касается `Tank3DBench*`, `Stage3D`, `Grass3D` и `BunkerProp`, и нового
-  кода 3D-линии тоже. `GD.PrintErr` идёт напрямую.
-- То, что меряется с модели, всё равно считается один раз на тег, как
-  `Tank3DBench.MeasureRig`, а не на каждом ходу.
+3D-line screens (lobby, squad, hangar, match HUD) take colours, type sizes,
+rims and faces from `scripts/core/Ui.cs` by role — `Ui.Accent`, `Ui.Line`,
+`Ui.Size(13)`, `Ui.DrawRim` — never their own literal: one colour means one
+thing on every screen (olive = selected, amber = beyond base/buy). A new role
+is added there, with what it means. The tooltip on a UI element is one —
+`UiTip` (`scripts/core/UiTip.cs`: delay, beak, ring, body `UiTip.Box`), not a
+local one and not the engine's. History of the move — [docs/tank3d.md](docs/tank3d.md),
+«Тема — `Ui`».
 
-## Управление
+## Frame code
 
-Пять жестов мыши, и все пять решают по тому, что стоит на клетке, а не по
-модификатору; `TAB` — боковая панель со всем тем же списками и слайдерами;
-`R` сброс, `F12` скриншот, `ESC` отмена приказа. Полный список клавиш —
-[docs/ui.md](docs/ui.md), «Управление». **Свободных одиночных клавиш больше
-нет:** следующему переключателю нужен модификатор либо ряд панели без клавиши.
+What runs every frame (`_Process`, effect ticks, HUD) makes no garbage: every
+~13 MB allocated, C# runs a gen0 collection of 10–25 ms mid-frame. After BOT-3
+the median is ~6 KB per frame. To keep it so:
+
+- shader parameter — `mat.Param("name", v)` (`ShaderParams`), not
+  `SetShaderParameter("name", v)`: the string becomes a new `StringName` each time;
+- no LINQ in a tick, no lambdas over locals (`Find`/`Exists`/`Where`), no
+  `new[] { … }`, `new List`/`HashSet` — a field and `Clear()`, an index loop;
+  `foreach` over `IReadOnlyList` boxes the enumerator;
+- text is rebuilt when what it says changes (like `HudStamp`), not every frame;
+- what is measured off a model is computed once per tag, like
+  `Tank3DBench.MeasureRig`.
+
+Who allocates shows per section: `kb:` in `frames.csv`, `section_alloc_kb` in
+`summary.json`, KB in the F3 overlay ([docs/perf.md](docs/perf.md)).
+
+**The 3D line prints with `Log.Print`, not `GD.Print`.** The debug build
+flushes stdout after each `GD.Print` and waits for the pipe reader: one line in
+a frame cost up to 300 ms (BOT-7, BOT-8). `Log.Print` queues the line for its
+own thread, and the bench drains the queue in `_ExitTree`. This covers
+`Tank3DBench*`, `Stage3D`, `Grass3D`, `BunkerProp` and all new 3D-line code.
+`GD.PrintErr` goes direct.
+
+## Controls
+
+Five mouse gestures, all deciding by what stands on the cell, not by a
+modifier; `TAB` — side panel; `R` reset, `F12` screenshot, `ESC` cancel order.
+Full key list — [docs/ui.md](docs/ui.md), «Управление». **No free single keys
+remain:** the next toggle needs a modifier or a panel row without a key.
+
+## Docs — load on demand
+
+Topic docs are in Russian; open one when its "when" matches.
+
+| doc | when |
+|---|---|
+| [../docs/gdd/index.md](../docs/gdd/index.md) | changing game rules or checking the bench against them |
+| [docs/architecture.md](docs/architecture.md) | finding where code lives, the scene list and roots, moving code between roots |
+| [docs/tank3d.md](docs/tank3d.md) | anything on the 3D unit, `Tank3DBench`, match, quick battle, hangar, `--do` |
+| [docs/hud3d-plan.md](docs/hud3d-plan.md) | selection, orders or aiming on `Tank3D` |
+| [docs/relief.md](docs/relief.md) | relief or what stands on it |
+| [docs/terrain.md](docs/terrain.md) | what a cell is or costs (`Foundation`, `Cover`, `terrain.json`) |
+| [docs/board.md](docs/board.md) | `BoardMap`, maps, `--map-report`, sea level |
+| [docs/editor.md](docs/editor.md) | the map editor, `MapRules`, `maps/*.json` |
+| [docs/selftest.md](docs/selftest.md) | adding a check or reading a failure |
+| [docs/perf.md](docs/perf.md) | measuring frame cost, `--perf`, baselines |
+| [docs/combat.md](docs/combat.md) | shots, hits, ricochet, HE, pierce, ramming |
+| [docs/motion.md](docs/motion.md) | how a tank drives and what moves meanwhile |
+| [docs/blast.md](docs/blast.md) | explosions |
+| [docs/props.md](docs/props.md) | trees, bushes, rocks, forest fire, `Tree3D` |
+| [docs/water.md](docs/water.md) | anything wet |
+| [docs/ui.md](docs/ui.md) | controls, keys, side panel |
+| [docs/effects-2d-vs-3d.md](docs/effects-2d-vs-3d.md) | which sprite-line effect already exists on the 3D tank |
+| [docs/new_style.md](docs/new_style.md) | photo assets of the new style (`--bed`, `--earth`…) |
+| [docs/bench.md](docs/bench.md), [docs/events.md](docs/events.md), [docs/wall.md](docs/wall.md), [docs/wall-bench.md](docs/wall-bench.md), [docs/HEX_TILES_3D.md](docs/HEX_TILES_3D.md) | legacy 2D benches, walls, ramps |
+| plans: [ai-plan](docs/ai-plan.md), [battle-core-plan](docs/battle-core-plan.md), [editor3d-plan](docs/editor3d-plan.md), [editor-ux-plan](docs/editor-ux-plan.md), [rocks-plan](docs/rocks-plan.md), [map-format3-plan](docs/map-format3-plan.md), [walls-relief-plan](docs/walls-relief-plan.md), [upgrade-icons-plan](docs/upgrade-icons-plan.md) | taking up a stage of that plan |

@@ -20,7 +20,7 @@
 
 - **Fibery:** рабочее пространство `stendhal-syndrome-studio`, пространство
   **BoT**, база `BoT/Work Item`, вид *Board* (доска по состояниям). Доступ —
-  только через MCP-сервер `fibery-studio` (корневой `CLAUDE.md`, «Fibery»).
+  только через MCP-сервер `fibery-studio` (корневой `CLAUDE.md`, «Hard rules»).
   В том же пространстве лежат зеркала GDD (`/gdd-sync`) — это документы, а не
   база, и пайплайн их не трогает.
 - **GitHub:** `MimusTriurus/tanks_builder`, базовая ветка `main`.

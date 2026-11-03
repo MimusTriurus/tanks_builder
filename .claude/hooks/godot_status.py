@@ -1,17 +1,20 @@
 """PostToolUse hook for Bash/PowerShell.
 
 After any command that launched the Godot engine, report whether it rewrote
-the two tracked files it likes to rewrite: ``run/main_scene`` in
-``project.godot`` (damage) and the engine version in ``project.godot`` /
-``TankSpriteTest.csproj`` (a fix, not damage). The rule itself is in
-godot/CLAUDE.md, "Ловушка запуска"; this only saves the manual
-``git status`` the rule used to demand after every run.
+the lines it likes to rewrite: ``run/main_scene`` in ``project.godot``
+(damage) and the engine version in ``project.godot`` (``config/features``) or
+``TankSpriteTest.csproj`` (``Godot.NET.Sdk``) - a fix, not damage. The rule
+itself is in godot/CLAUDE.md, "Launch trap".
 
-Wired from .claude/settings.json::
+Only those keys are reported: ``project.godot`` usually carries the user's own
+uncommitted edit (``run/main_run_args``), which is theirs and not a finding.
+
+Wired from .claude/settings.json through the ``py`` launcher - ``python`` on
+this machine is the Microsoft Store stub, which prints "Python" and exits 49::
 
     "hooks": {"PostToolUse": [{"matcher": "Bash|PowerShell", "hooks": [
         {"type": "command",
-         "command": "python \\"$CLAUDE_PROJECT_DIR/.claude/hooks/godot_status.py\\""}]}]}
+         "command": "py -3 \\"$CLAUDE_PROJECT_DIR/.claude/hooks/godot_status.py\\""}]}]}
 """
 import json
 import os
@@ -21,6 +24,7 @@ import sys
 
 WATCHED = ("godot/project.godot", "godot/TankSpriteTest.csproj")
 GODOT = re.compile(r"godot[^\s\"']*\.exe", re.IGNORECASE)
+KEYS = re.compile(r"^[+-](run/main_scene|config/features|.*Godot\.NET\.Sdk)")
 
 
 def launched_godot(payload):
@@ -28,19 +32,22 @@ def launched_godot(payload):
     return bool(GODOT.search(command))
 
 
-def changed_files(root):
+def changed_lines(root):
     out = subprocess.run(
-        ["git", "-C", root, "status", "--short", "--", *WATCHED],
+        ["git", "-C", root, "diff", "-U0", "--", *WATCHED],
         capture_output=True, text=True, check=False)
-    return out.stdout.strip()
+    return "\n".join(
+        line for line in out.stdout.splitlines()
+        if KEYS.match(line) and not line.startswith(("+++", "---")))
 
 
 def message(changed):
     return (
-        "Godot rewrote tracked files during that run:\n" + changed + "\n"
+        "Godot rewrote tracked lines during that run:\n" + changed + "\n"
         "A changed run/main_scene is damage: name the scene positionally and "
-        "restore the field. A changed engine version is a fix, not damage: do "
-        "not revert it blindly (godot/CLAUDE.md, Ловушка запуска).")
+        "restore that one line (never git checkout the file - it holds the "
+        "user's edit). A changed engine version is a fix, not damage: do not "
+        "revert it blindly (godot/CLAUDE.md, Launch trap).")
 
 
 def emit(changed):
@@ -58,7 +65,7 @@ def main():
         return 0
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.normpath(os.path.join(here, "..", ".."))
-    changed = changed_files(root)
+    changed = changed_lines(root)
     if changed:
         emit(changed)
     return 0

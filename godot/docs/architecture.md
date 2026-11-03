@@ -594,3 +594,40 @@ cel-шейдере в рамке детали, удар рикошета и пр
 
 Последнее и есть цена, которую стоило заплатить: два новых класса нашли в старом
 коде одно место, где допущение выдавало себя за правило.
+
+## Сцены и как их открыть
+
+Перенесено сюда из godot/CLAUDE.md 2026-11-03. Запуск — там, «Launch»; сцена
+всегда позиционным аргументом.
+
+- `res://scenes/Tank3D.tscn` — 3D-танк с эффектами стенда ([tank3d.md](tank3d.md)).
+- `res://scenes/Match3D.tscn` — партия на нём: две стороны (зелёные и
+  коричневые), по танку на спавн, доска 10 × 10, по умолчанию учебная
+  расстановка `drill10`; ход, огонь, смена хода ([tank3d.md](tank3d.md),
+  «Партия»). С `-- --quick` — быстрый бой против ИИ: лобби и сборка отряда на
+  бюджет перед расстановкой («Быстрый бой против ИИ»); с `-- --hangar` — то же
+  со сборкой в ангаре («Сборка в ангаре»).
+- `res://scenes/Tree3D.tscn` — модели деревьев генератора на объёмной доске:
+  лесной пожар, падение от тарана, четыре способа травы ([props.md](props.md),
+  «Tree3D»).
+- `res://scenes/Relief3D.tscn`, `res://scenes/Editor.tscn` ([relief.md](relief.md),
+  [editor.md](editor.md)).
+- Устаревшие 2D, в `scenes/legacy/`: `Main.tscn` — харнесс (ABBEY — он же с
+  `-- --map abbey` либо `Abbey.tscn`, [board.md](board.md)); `TankTest`,
+  `WaterTankTest`, `WallTankTest`, `CaponTest` — танковый стенд, на воде, против
+  стены и миномёт против капонира ([bench.md](bench.md),
+  [wall-bench.md](wall-bench.md)); `Effects` — взрыв ([blast.md](blast.md));
+  `EventsTank`, `EventsField`, `EventsOverlay` — стенд событий
+  ([events.md](events.md)); `Wood`, `Wall`, `Relief`.
+
+`--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели,
+а не класс («Спрайты взаймы и пять танков на поле» ниже).
+
+## Корни сцен
+
+Перенесено из godot/CLAUDE.md 2026-11-03. Корней одиннадцать: `Main` (харнесс,
+две сцены), `TankBench` (четыре), `EventBench` (три), `WoodBench`, `WallBench`,
+`ReliefBench`, `Relief3D`, `EffectsBench`, `MapEditor`, `Tank3DBench`,
+`Tree3DBench`. Семь наследуют `SceneRoot`; два рельефных объявлены
+схематичными, `Tank3DBench` и `Tree3DBench` — пилоты на Node3D со своими
+флагами снимка. Правило между ними — в godot/CLAUDE.md, «Scene roots».
