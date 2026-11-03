@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -96,6 +98,71 @@ public sealed partial class Tank3DBench
             if (q.Squad[i].Empty)
                 QuickStageDrop(i);
         return page;
+    }
+
+    // --- the loading screen ----------------------------------------------------------
+
+    /// <summary>The hangar's loading screen (author 2026-11-03: the hangar still
+    /// stuttered): black, a line saying what is loading and a bar, over the screens
+    /// while every class's view is loaded and drawn - its shaders compiled - and every
+    /// icon the hangar shows is rasterised, so nothing the hangar does later loads,
+    /// compiles or rasterises. A frame between steps, for the bar to move.</summary>
+    private async Task QuickHangarLoading()
+    {
+        var veil = new CanvasLayer { Name = "QuickLoading", Layer = 40 };
+        AddChild(veil);
+        var black = new ColorRect { Color = Colors.Black, MouseFilter = Control.MouseFilterEnum.Stop };
+        black.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        veil.AddChild(black);
+        var middle = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        middle.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        veil.AddChild(middle);
+        var col = new VBoxContainer { CustomMinimumSize = new Vector2(560, 0) };
+        col.AddThemeConstantOverride("separation", 14);
+        middle.AddChild(col);
+        var head = QText(L.T("loading.title"), 28, QInk, bold: true);
+        head.HorizontalAlignment = HorizontalAlignment.Center;
+        col.AddChild(head);
+        var bar = new ProgressBar { ShowPercentage = false, CustomMinimumSize = new Vector2(560, 12), MinValue = 0 };
+        bar.AddThemeStyleboxOverride("background", new StyleBoxFlat { BgColor = QPanelC });
+        bar.AddThemeStyleboxOverride("fill", new StyleBoxFlat { BgColor = QOlive });
+        col.AddChild(bar);
+        var what = QText("", 18, QMuted);
+        what.HorizontalAlignment = HorizontalAlignment.Center;
+        col.AddChild(what);
+
+        // every icon the hangar draws, at every size it draws it
+        var icons = new List<(string Name, int Px)>();
+        foreach (QuickSquad.Class c in QuickSquad.Classes)
+        {
+            icons.Add((QuickClassIcon(c), (int)QhTabIcon));
+            icons.Add((QuickClassIcon(c), 48));
+            foreach (QuickSquad.Branch b in c.Branches)
+                foreach (QuickSquad.Upgrade u in b.Levels)
+                    if (u.Icon.Length > 0 && !icons.Contains((u.Icon, 32)))
+                        icons.Add((u.Icon, 32));
+        }
+        int views = QuickStageWanted().Count, done = 0;
+        bar.MaxValue = views * 2 + icons.Count;
+        ulong from = Time.GetTicksMsec();
+        await QuickStageWarm((name, drawn) =>
+        {
+            what.Text = drawn ? L.T("loading.shaders", name) : L.T("loading.model", name);
+            bar.Value = ++done;
+        });
+        what.Text = L.T("loading.icons");
+        for (int i = 0; i < icons.Count; i++)
+        {
+            QIcon(icons[i].Name, icons[i].Px);
+            bar.Value = ++done;
+            if (i % 6 == 5)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+        what.Text = L.T("loading.ready");
+        bar.Value = bar.MaxValue;
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        Log.Print($"tank3d: hangar: loaded in {Time.GetTicksMsec() - from} ms - {views} views, {icons.Count} icons");
+        veil.QueueFree();
     }
 
     // --- top: «В бой» ---------------------------------------------------------------

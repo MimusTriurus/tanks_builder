@@ -142,9 +142,10 @@ public sealed partial class Tank3DBench
         foreach (string side in new[] { "left", "right", "top", "bottom" })
             _qRoot.AddThemeConstantOverride($"margin_{side}", 22);
         _qLayer.AddChild(_qRoot);
-        QuickShow();
+        // the hangar loads all it will show behind a loading screen first
         if (_qHangar)
-            QuickStageWarm();
+            await QuickHangarLoading();
+        QuickShow();
         QuickArt();
         QuickScript();
         Log.Print($"tank3d: quick: the screens - {(back ? "back to the build" : "the lobby")}, maps {string.Join(", ", pool)}");
@@ -168,7 +169,7 @@ public sealed partial class Tank3DBench
                     QuickShow();
                 // the spares were drawn for the old size: warmed anew for this one
                 QuickSpareFree();
-                QuickStageWarm();
+                await QuickStageWarm();
             }
         }
         foreach (int at in _qStage.Keys.ToArray())
@@ -366,33 +367,61 @@ public sealed partial class Tank3DBench
                 v.RenderTargetUpdateMode = on ? SubViewport.UpdateMode.Always : SubViewport.UpdateMode.Disabled;
     }
 
-    /// <summary>Views of every class, as many as a ready squad has of it, less those the
-    /// podium holds, loaded now and parked: the hangar's start pays for the loads once,
-    /// a change of class or of ready squad later takes them.</summary>
-    private void QuickStageWarm()
+    /// <summary>The views <see cref="QuickStageWarm"/> has yet to make: every class, as
+    /// many as a squad may have of it (<see cref="QuickSquad.SameClass"/> - the player may
+    /// take two of any), less those held or parked.</summary>
+    private List<QuickSquad.Class> QuickStageWanted()
     {
-        ulong from = Time.GetTicksMsec();
-        int made = 0;
+        var wanted = new List<QuickSquad.Class>();
         foreach (QuickSquad.Class c in QuickSquad.Classes)
         {
-            // as many as a ready squad has of the class (two light tanks in one), one at least
-            int want = Math.Max(1, QuickSquad.Companies.Max(o => o.Slots.Count(s => s.Class == c.Tag)));
+            int want = QuickSquad.SameClass;
             int have = _qStage.Values.Count(s => s.Class == c.Tag && s.Side == _qs.Player)
                        + _qSpare.Count(s => s.Class == c.Tag && s.Side == _qs.Player);
-            // each held on a slot of its own till all are made: parked at once, the
-            // second would take the first back out of the spares
-            int held = 0;
-            for (; have < want; have++, held++)
-            {
-                if (QuickStage(-1 - held, c.Tag, _qs.Player, QhView) is null)
-                    break;
-                made++;
-            }
-            for (int k = 0; k < held; k++)
-                QuickStageDrop(-1 - k);
+            for (; have < want; have++)
+                wanted.Add(c);
         }
+        return wanted;
+    }
+
+    /// <summary>The views <see cref="QuickStageWanted"/> names, loaded and parked: the
+    /// hangar's start pays for the loads once, a change of class or of ready squad
+    /// later takes them. Each is drawn for <see cref="QWarmFrames"/> frames before it
+    /// is parked - a view parked undrawn compiled its shaders the frame it was first
+    /// shown, the hitch the spares were meant to take away (author 2026-11-03).
+    /// <paramref name="said"/> hears each step: the loading screen's line and bar.</summary>
+    private async Task QuickStageWarm(Action<string, bool>? said = null)
+    {
+        if (_qLayer is null)
+            return;
+        ulong from = Time.GetTicksMsec();
+        List<QuickSquad.Class> wanted = QuickStageWanted();
+        // each held on a slot of its own till all are made: parked at once, the
+        // second of a class would take the first back out of the spares
+        int made = 0;
+        foreach (QuickSquad.Class c in wanted)
+        {
+            said?.Invoke(c.Name, false);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (_qLayer is null || QuickStage(-1 - made, c.Tag, _qs.Player, QhView) is not { } box)
+                continue;
+            said?.Invoke(c.Name, true);
+            // drawn where the screens are, under the loading screen's black
+            _qLayer.AddChild(box);
+            _qLayer.MoveChild(box, 0);
+            for (int f = 0; f < QWarmFrames; f++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            box.GetParent()?.RemoveChild(box);
+            made++;
+        }
+        for (int k = 0; k < made; k++)
+            QuickStageDrop(-1 - k);
         Log.Print($"tank3d: hangar: {made} spare views warmed in {Time.GetTicksMsec() - from} ms");
     }
+
+    /// <summary>Frames a view is drawn for before it is parked: the first compiles its
+    /// shaders, the next shows it is done.</summary>
+    private const int QWarmFrames = 3;
 
     private void QuickSpareFree()
     {
