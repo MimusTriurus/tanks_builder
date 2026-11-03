@@ -476,41 +476,45 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>The caption over a machine on the ring (author 2026-11-03): its class
-    /// in full, under it its branch and its level as rank chevrons; the price is the
-    /// head's and the tree's, not said here. Larger and lit on the front one.</summary>
+    /// in full, under it its branch, and its level as rank chevrons beside both
+    /// lines, a sleeve's patch; the price is the head's and the tree's, not said
+    /// here. Larger and lit on the front one.</summary>
     private Control QuickHangarCaption(QuickSquad.Slot o, bool front)
     {
         var box = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Alignment = BoxContainer.AlignmentMode.Center };
         box.AddThemeConstantOverride("separation", 2);
-        Label Line(string text, int size, Color ink)
+        Label Line(string text, int size, Color ink, bool left)
         {
             var l = QText(text, size, ink, bold: true);
-            l.HorizontalAlignment = HorizontalAlignment.Center;
-            l.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+            l.HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+            l.SizeFlagsHorizontal = left ? Control.SizeFlags.ShrinkBegin : Control.SizeFlags.ShrinkCenter;
             return l;
         }
         if (o.Empty)
         {
-            box.AddChild(Line(L.T("hangar.empty"), front ? 15 : 12, front ? QInk : QMuted));
+            box.AddChild(Line(L.T("hangar.empty"), front ? 15 : 12, front ? QInk : QMuted, false));
             return box;
         }
         QuickSquad.Class c = QuickSquad.ClassOf(o.Class!);
-        box.AddChild(Line(c.Name, front ? 17 : 13, front ? QInk : QMuted));
-        var branch = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, MouseFilter = Control.MouseFilterEnum.Ignore };
-        branch.AddThemeConstantOverride("separation", 6);
         QuickSquad.Branch? br = c.BranchOf(o.Branch);
         bool lit = br is not null && o.Level > 0;
-        var said = Line(lit ? br!.Name : L.T("hangar.no_upgrades"), front ? 14 : 11, front ? QOlive : QMuted);
-        said.VerticalAlignment = VerticalAlignment.Center;
-        branch.AddChild(said);
-        if (lit)
-            branch.AddChild(new QuickRank
-            {
-                Level = o.Level, Wide = front ? 30 : 20, Lit = QAmber, Dim = new Color(QMuted, 0.7f),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-            });
-        box.AddChild(branch);
-        return box;
+        int big = front ? 17 : 13, small = front ? 14 : 11;
+        box.AddChild(Line(c.Name, big, front ? QInk : QMuted, lit));
+        box.AddChild(Line(lit ? br!.Name : L.T("hangar.no_upgrades"), small, front ? QOlive : QMuted, lit));
+        if (!lit)
+            return box;
+        // the chevrons stand as tall as the two lines, from the class's top to the branch's foot
+        Font font = QuickPad.FontOf(true);
+        float high = font.GetHeight(big) + font.GetHeight(small) + 2;
+        var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        row.AddThemeConstantOverride("separation", front ? 12 : 8);
+        row.AddChild(new QuickRank
+        {
+            Level = o.Level, High = high, Lit = QAmber, Dim = new Color(QMuted, 0.35f),
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        });
+        row.AddChild(box);
+        return row;
     }
 
     /// <summary>A class's icon in <c>Icons/</c>: <c>class_LT</c> and so on.</summary>
