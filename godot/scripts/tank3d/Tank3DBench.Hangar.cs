@@ -36,6 +36,10 @@ public sealed partial class Tank3DBench
     /// <summary>When the window last changed size, ms; 0, settled.</summary>
     private ulong _qhResized;
 
+    /// <summary>The card of the ready squad the squad was taken from, lit on the sheet;
+    /// the podium opens off it (<see cref="QuickHangarBridge"/>). Null with none.</summary>
+    private QuickPad? _qhLinked;
+
     /// <summary>The slot on the podium.</summary>
     private int _qhAt;
 
@@ -72,6 +76,12 @@ public sealed partial class Tank3DBench
     {
         QuickSetup q = _qs;
         _qhAt = Math.Clamp(_qhAt, 0, QuickSquad.Size - 1);
+        _qhLinked = null;
+        // a slot whose class changed lets its view go first, so a class moving to
+        // another slot finds it parked instead of loading a second one
+        for (int i = 0; i < q.Squad.Length; i++)
+            if (_qStage.TryGetValue(i, out var had) && had.Class != q.Squad[i].Class)
+                QuickStageDrop(i);
         var page = new VBoxContainer();
         page.AddThemeConstantOverride("separation", 12);
         page.AddChild(QuickHangarTop());
@@ -171,8 +181,8 @@ public sealed partial class Tank3DBench
         PanelContainer door = QBox(col, QPanelC, 14);
         door.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
         var rim = (StyleBoxFlat)door.GetThemeStylebox("panel");
-        door.MouseEntered += () => rim.BorderColor = QOlive;
-        door.MouseExited += () => rim.BorderColor = QLine;
+        door.MouseEntered += () => { rim.BorderColor = QOlive; door.QueueRedraw(); };
+        door.MouseExited += () => { rim.BorderColor = QLine; door.QueueRedraw(); };
         door.GuiInput += e =>
         {
             if (e is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true })
@@ -195,8 +205,13 @@ public sealed partial class Tank3DBench
         {
             Rim = QLine, Fill = QInset, Glow = QSel.Lightened(0.15f), MouseFilter = Control.MouseFilterEnum.Pass, Focusable = false,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(420, 360), ClipContents = true,
+            CustomMinimumSize = new Vector2(420, 360),
         };
+        // the models cut to the podium by a layer of their own, not by the podium: a
+        // clip there cut its own rim's outer screen pixel off on the right
+        var ring = new Control { MouseFilter = Control.MouseFilterEnum.Ignore, ClipContents = true };
+        ring.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        stage.AddChild(ring);
 
         // the three on the ring, in slot order; the picks over them all, for the clicks
         for (int k = 0; k < q.Squad.Length; k++)
@@ -210,7 +225,7 @@ public sealed partial class Tank3DBench
                     Text = !b.Empty ? "" : k == at ? L.T("hangar.slot_empty_front", k + 1) : L.T("hangar.slot_empty", k + 1),
                     Picture = b.Empty ? null : QuickArtOf(b.Class!, q.Player),
                 };
-            stage.AddChild(view);
+            ring.AddChild(view);
             _qhRing[k].View = view;
         }
         for (int k = 0; k < q.Squad.Length; k++)
@@ -278,8 +293,43 @@ public sealed partial class Tank3DBench
             strip.Position = new Vector2((size.X - strip.Size.X) * 0.5f, size.Y - QhStripHigh + 8);
             QuickHangarRing();
         };
+        // the ready squad the squad was taken from opens into the podium like a tab
+        // (author 2026-11-03): the podium's rim takes the card's, a bridge joins them
+        if (_qhLinked is { } card)
+        {
+            stage.Rim = card.Rim;
+            stage.RimWidth = card.RimWidth;
+            var bridge = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
+            // the stage's first child: over its rim, under all else on it
+            stage.AddChild(bridge);
+            stage.MoveChild(bridge, 0);
+            bridge.Draw += () => QuickHangarBridge(bridge, card, stage);
+            card.ItemRectChanged += bridge.QueueRedraw;
+            stage.ItemRectChanged += bridge.QueueRedraw;
+        }
         _qhStage = stage;
         return stage;
+    }
+
+    /// <summary>The tab's bridge from the chosen card to the podium, on the podium's
+    /// first layer: the card's fill from its right edge across the gap and both panels'
+    /// rims into the podium, edged above and below by the card's rim, so the card,
+    /// the bridge and the podium's rim make one outline; across the bridge the card's fill
+    /// turns to the podium's, done by the joint (author 2026-11-03), so there is no seam.</summary>
+    private static void QuickHangarBridge(Control on, QuickPad card, QuickPad stage)
+    {
+        if (!IsInstanceValid(card) || !card.IsInsideTree())
+            return;
+        Transform2D to = on.GetGlobalTransform().AffineInverse();
+        Rect2 c = card.GetGlobalRect(), s = stage.GetGlobalRect();
+        float t = QuickPad.RimLayout(on, card.RimWidth);
+        Vector2 a = to * new Vector2(c.End.X - t, c.Position.Y), b = to * new Vector2(s.Position.X + t, c.End.Y);
+        // the card's fill, from its own edge, turned to the podium's by the joint
+        Color fill = card.Fill, end = stage.Fill, rim = card.Rim;
+        on.DrawPolygon(new[] { new Vector2(a.X, a.Y + t), new Vector2(b.X, a.Y + t), new Vector2(b.X, b.Y - t), new Vector2(a.X, b.Y - t) },
+                       new[] { fill, end, end, fill });
+        on.DrawRect(new Rect2(a.X, a.Y, b.X - a.X, t), rim);
+        on.DrawRect(new Rect2(a.X, b.Y - t, b.X - a.X, t), rim);
     }
 
     /// <summary>Each frame of the screens: the ring turned on toward the slot in
@@ -339,7 +389,7 @@ public sealed partial class Tank3DBench
             name.Size = name.GetCombinedMinimumSize();
             name.Position = new Vector2(middle.X - name.Size.X * 0.5f, middle.Y - QhView.Y * scale * 0.42f + 22 - name.Size.Y);
         }
-        // the far ones drawn first: the views are the podium's first children,
+        // the far ones drawn first: the views are the ring layer's children,
         // moved among themselves - a z index would lift them over the tips and dialogs too
         for (int place = 0; place < n; place++)
         {
@@ -349,7 +399,7 @@ public sealed partial class Tank3DBench
                     && (far < 0 || _qhNear[i] < _qhNear[far]))
                     far = i;
             if (far >= 0 && _qhRing[far].View!.GetIndex() != place)
-                stage.MoveChild(_qhRing[far].View, place);
+                _qhRing[far].View!.GetParent().MoveChild(_qhRing[far].View, place);
         }
     }
 
@@ -407,6 +457,7 @@ public sealed partial class Tank3DBench
             pad.RimWidth = kept ? 2 : 1;
             if (kept)
                 pad.Fill = QSel;
+            _qhLinked = pad;
         }
         pad.Clicked += () => QuickHangarPick(c);
         QTip(pad, () => QTipBox(L.T("quick.preset_tip", Pts(start)), c.Name,

@@ -124,6 +124,12 @@ public sealed partial class Tank3DBench
             q.Map = _mapName;
         if (!pool.Contains(q.Map) && pool.Count > 0)
             q.Map = pool[0];
+        // the hangar opens on the first ready squad, taken (author 2026-11-03), not empty
+        if (_qHangar && !back && q.Budget >= QuickSquad.Size * QuickSquad.CompanyLevel)
+        {
+            q.Preset = QuickSquad.Companies[0];
+            q.Squad = QuickSquad.OfCompany(q.Preset);
+        }
         _qs = q;
         _qPage = back ? QuickPage.Build : QuickPage.Lobby;
         _qLayer = new CanvasLayer { Name = "QuickScreens", Layer = 20 };
@@ -137,6 +143,8 @@ public sealed partial class Tank3DBench
             _qRoot.AddThemeConstantOverride($"margin_{side}", 22);
         _qLayer.AddChild(_qRoot);
         QuickShow();
+        if (_qHangar)
+            QuickStageWarm();
         QuickArt();
         QuickScript();
         Log.Print($"tank3d: quick: the screens - {(back ? "back to the build" : "the lobby")}, maps {string.Join(", ", pool)}");
@@ -158,10 +166,14 @@ public sealed partial class Tank3DBench
                 _qhResized = 0;
                 if (_qPage != QuickPage.Lobby)
                     QuickShow();
+                // the spares were drawn for the old size: warmed anew for this one
+                QuickSpareFree();
+                QuickStageWarm();
             }
         }
         foreach (int at in _qStage.Keys.ToArray())
             QuickStageDrop(at);
+        QuickSpareFree();
         _qLayer.QueueFree();
         _qLayer = null;
         _qRoot = _qOver = null;
@@ -293,6 +305,18 @@ public sealed partial class Tank3DBench
             return had.Box;
         }
         QuickStageDrop(at);
+        // a view the hangar keeps spare for the class: no model loaded, no hitch
+        for (int i = 0; i < _qSpare.Count; i++)
+        {
+            var spare = _qSpare[i];
+            if (spare.Class != cls || spare.Side != side || spare.Px != size || !IsInstanceValid(spare.Box))
+                continue;
+            _qSpare.RemoveAt(i);
+            QuickStageLive(spare.Box, true);
+            _qStage[at] = spare;
+            QuickStageTurn();
+            return spare.Box;
+        }
         string? model = Lineup.Pairs.FirstOrDefault(p => p.Class == cls).Model;
         if (_qLayer is null || model is null)
             return null;
@@ -326,10 +350,71 @@ public sealed partial class Tank3DBench
         return box;
     }
 
+    /// <summary>The hangar's views a slot let go, kept by class - up to as many as a
+    /// squad may have of one - and drawing nothing until a slot takes one back: a model
+    /// loads in 220-400 ms, and a ready squad changed reloaded two or three, a hitch of
+    /// half a second to a second (author 2026-11-03). Warmed for every class at the
+    /// hangar's start (<see cref="QuickStageWarm"/>), freed with the screens or when the
+    /// window's size, and with it the views', changes.</summary>
+    private readonly List<(string Class, Side Side, Vector2I Px, SubViewportContainer Box, Node3D Rig)> _qSpare = new();
+
+    /// <summary>A view drawing every frame, or parked drawing nothing.</summary>
+    private static void QuickStageLive(SubViewportContainer box, bool on)
+    {
+        foreach (Node n in box.GetChildren())
+            if (n is SubViewport v)
+                v.RenderTargetUpdateMode = on ? SubViewport.UpdateMode.Always : SubViewport.UpdateMode.Disabled;
+    }
+
+    /// <summary>Views of every class, as many as a ready squad has of it, less those the
+    /// podium holds, loaded now and parked: the hangar's start pays for the loads once,
+    /// a change of class or of ready squad later takes them.</summary>
+    private void QuickStageWarm()
+    {
+        ulong from = Time.GetTicksMsec();
+        int made = 0;
+        foreach (QuickSquad.Class c in QuickSquad.Classes)
+        {
+            // as many as a ready squad has of the class (two light tanks in one), one at least
+            int want = Math.Max(1, QuickSquad.Companies.Max(o => o.Slots.Count(s => s.Class == c.Tag)));
+            int have = _qStage.Values.Count(s => s.Class == c.Tag && s.Side == _qs.Player)
+                       + _qSpare.Count(s => s.Class == c.Tag && s.Side == _qs.Player);
+            // each held on a slot of its own till all are made: parked at once, the
+            // second would take the first back out of the spares
+            int held = 0;
+            for (; have < want; have++, held++)
+            {
+                if (QuickStage(-1 - held, c.Tag, _qs.Player, QhView) is null)
+                    break;
+                made++;
+            }
+            for (int k = 0; k < held; k++)
+                QuickStageDrop(-1 - k);
+        }
+        Log.Print($"tank3d: hangar: {made} spare views warmed in {Time.GetTicksMsec() - from} ms");
+    }
+
+    private void QuickSpareFree()
+    {
+        foreach (var spare in _qSpare)
+            if (IsInstanceValid(spare.Box))
+                spare.Box.Free();
+        _qSpare.Clear();
+    }
+
     private void QuickStageDrop(int at)
     {
         if (!_qStage.Remove(at, out var had) || !IsInstanceValid(had.Box))
             return;
+        // the hangar's view parked for the next slot of its class, not thrown away
+        if (_qHangar && _qLayer is not null && had.Box.HasMeta("q_px")
+            && _qSpare.Count(s => s.Class == had.Class && s.Side == had.Side) < QuickSquad.SameClass)
+        {
+            had.Box.GetParent()?.RemoveChild(had.Box);
+            QuickStageLive(had.Box, false);
+            _qSpare.Add(had);
+            return;
+        }
         if (had.Box.IsInsideTree())
             had.Box.QueueFree();
         else
@@ -1502,11 +1587,14 @@ public sealed partial class Tank3DBench
     /// <summary>A panel round <paramref name="inner"/>: the prototype's square box with its line.</summary>
     private static PanelContainer QBox(Control inner, Color bg, float pad, Color? rim = null)
     {
+        // the rim drawn over the fill in whole screen pixels (QuickPad.DrawRim), not the
+        // style's border: that is whole layout pixels, 1.25 screen pixels in a
+        // 2000-wide window, and fell on one pixel or two by where the panel stood
         var box = new StyleBoxFlat { BgColor = bg, BorderColor = rim ?? QLine };
-        box.SetBorderWidthAll(1);
         box.SetContentMarginAll(pad);
         var panel = new PanelContainer();
         panel.AddThemeStyleboxOverride("panel", box);
+        panel.Draw += () => QuickPad.DrawRim(panel, panel.Size, box.BorderColor, 1.0f);
         panel.AddChild(inner);
         return panel;
     }

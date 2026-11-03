@@ -135,7 +135,7 @@ public partial class QuickPad : Control
         {
             DrawRect(new Rect2(Vector2.Zero, s), new Color(fill, fill.A * a));
             if (RimWidth > 0)
-                DrawRect(new Rect2(Vector2.Zero, s), new Color(rim, rim.A * a), false, RimWidth);
+                DrawRim(this, s, new Color(rim, rim.A * a), RimWidth);
         }
         if (focus)
         {
@@ -179,6 +179,38 @@ public partial class QuickPad : Control
             for (int i = 0; i < lines.Length; i++)
                 DrawString(font, new Vector2(pad, top + i * line), lines[i], Align, s.X - 2 * pad, FontSize, new Color(Ink, Ink.A * a));
         }
+    }
+
+    /// <summary>A box's rim, <paramref name="px"/> layout pixels rounded to whole screen
+    /// pixels, inside its edges, whatever the window stretches the layout by: four
+    /// filled strips of whole screen pixels each cover that many pixel rows, where a
+    /// layout pixel's line (1.25 screen pixels in a 2000-wide window) covered one
+    /// or two by where it stood, and two boxes' rims differed (author 2026-11-03).</summary>
+    public static void DrawRim(CanvasItem on, Vector2 size, Color color, float px)
+    {
+        float t = RimLayout(on, px);
+        on.DrawRect(new Rect2(0, 0, size.X, t), color);
+        on.DrawRect(new Rect2(0, size.Y - t, size.X, t), color);
+        on.DrawRect(new Rect2(0, t, t, size.Y - 2 * t), color);
+        on.DrawRect(new Rect2(size.X - t, t, t, size.Y - 2 * t), color);
+    }
+
+    /// <summary>A rim of <paramref name="px"/> layout pixels as <see cref="DrawRim"/> draws
+    /// it: rounded to whole screen pixels, one at least, given back in layout pixels.</summary>
+    public static float RimLayout(CanvasItem on, float px)
+    {
+        float k = on.GetViewport() is Window w ? ScreenScale(w) : 1.0f;
+        return Mathf.Max(1.0f, Mathf.Round(px * k)) / k;
+    }
+
+    /// <summary>Screen pixels to a layout pixel in <paramref name="w"/>: the 1600 × 900
+    /// layout stretched to the window (<c>canvas_items</c>) - 1.6 on a 2560 × 1440 screen.</summary>
+    public static float ScreenScale(Window w)
+    {
+        Vector2I size = w.Size, layout = w.ContentScaleSize;
+        float stretch = layout.X > 0 && layout.Y > 0
+            ? Mathf.Min(size.X / (float)layout.X, size.Y / (float)layout.Y) : 1.0f;
+        return Mathf.Max(0.01f, stretch * w.ContentScaleFactor);
     }
 
     /// <summary>The class icons' frame octagon (Icons/out/src/build_classes.sh,
