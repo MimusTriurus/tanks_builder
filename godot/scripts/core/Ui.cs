@@ -87,6 +87,29 @@ public static class Ui
     /// <see cref="Line"/>, the tip being over the panels.</summary>
     public static readonly Color TipRim = new("98A18F");
 
+    /// <summary>A tip's last line, what a click would do or why it cannot: an amber
+    /// lighter than <see cref="Extra"/>, for its size on <see cref="TipBg"/>.</summary>
+    public static readonly Color TipState = new("E9B860");
+
+    /// <summary>A tip's surface (<see cref="UiTip"/>): its fill, a soft shadow under it,
+    /// 11 round its content; the rim is drawn on it in whole screen pixels.</summary>
+    public static readonly StyleBoxFlat TipStyle = NewTipStyle();
+
+    private static StyleBoxFlat NewTipStyle()
+    {
+        var style = new StyleBoxFlat { BgColor = TipBg, ShadowColor = new Color(0, 0, 0, 0.28f), ShadowSize = 12 };
+        style.SetContentMarginAll(11);
+        return style;
+    }
+
+    /// <summary>A tip's surface drawn into a canvas: a card a unit's leader runs to
+    /// (<c>Tank3DBench.Peek</c>), as <see cref="UiTip"/>'s box looks.</summary>
+    public static void DrawTip(CanvasItem on, Rect2 r)
+    {
+        on.DrawStyleBox(TipStyle, r);
+        DrawRim(on, r, TipRim, 1.0f);
+    }
+
     // --- type -----------------------------------------------------------------------
 
     /// <summary>The type scale (author 2026-11-03, after XAG 101: 18 px of glyph at
@@ -111,7 +134,11 @@ public static class Ui
     public static bool Large;
 
     /// <summary>A screen's old size to its step of the scale when <see cref="Large"/>.</summary>
-    public static int Size(int size) => !Large ? size : size switch
+    public static int Size(int size) => Size(size, Large);
+
+    /// <summary>A screen's old size to its step of the scale when <paramref name="large"/>:
+    /// the match's tips are always in it, whatever screen came before.</summary>
+    public static int Size(int size, bool large) => !large ? size : size switch
     {
         <= 12 => Caption,
         13 => Body,
@@ -201,11 +228,13 @@ public static class Ui
 
     /// <summary>A line of text in the scale: <paramref name="size"/> is the role's
     /// size before <see cref="Size"/> - or, with <paramref name="step"/>, a step of
-    /// the scale taken as it is (<see cref="Body"/> and the rest: the match's HUD).</summary>
-    public static Label Text(string text, int size, Color ink, bool bold = false, bool wrap = false, bool step = false)
+    /// the scale taken as it is (<see cref="Body"/> and the rest: the match's HUD); with
+    /// <paramref name="large"/>, in the large scale whatever <see cref="Large"/> says.</summary>
+    public static Label Text(string text, int size, Color ink, bool bold = false, bool wrap = false, bool step = false,
+                             bool large = false)
     {
         var l = new Label { Text = text, AutowrapMode = wrap ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off };
-        l.AddThemeFontSizeOverride("font_size", step ? size : Size(size));
+        l.AddThemeFontSizeOverride("font_size", step ? size : Size(size, large || Large));
         l.AddThemeColorOverride("font_color", ink);
         if (bold)
             l.AddThemeFontOverride("font", BoldFont);

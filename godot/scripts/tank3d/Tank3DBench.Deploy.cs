@@ -779,14 +779,12 @@ public sealed partial class Tank3DBench
         var says = Ui.Text("", Ui.Body, Ui.Ink, step: true);
         says.VerticalAlignment = VerticalAlignment.Center;
         row.AddChild(says);
-        QuickPad reset = HudButton(L.T("deploy.reset"), DeployReset);
-        reset.TooltipText = L.T("deploy.reset_tip");
+        QuickPad reset = HudButton(L.T("deploy.reset"), DeployReset, L.T("deploy.reset_tip"));
         row.AddChild(reset);
         // a quick battle: back to the squad, the setup kept (Tank3DBench.Quick)
         if (_quick is not null)
         {
-            QuickPad back = HudButton(L.T("deploy.back"), QuickBackToBuild);
-            back.TooltipText = L.T("deploy.back_tip");
+            QuickPad back = HudButton(L.T("deploy.back"), QuickBackToBuild, L.T("deploy.back_tip"));
             row.AddChild(back);
         }
         pad.AddChild(row);
@@ -797,8 +795,10 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>A word's button over the board, as the hangar's (<c>QBtn</c>): the theme's
-    /// box, a body's size whatever the screens' scale, the olive rim under the pointer.</summary>
-    private static QuickPad HudButton(string text, System.Action clicked)
+    /// box, a body's size whatever the screens' scale, the olive rim under the pointer;
+    /// <paramref name="tip"/> in the match's tip over it (<see cref="UiTip"/>), not the
+    /// engine's tooltip.</summary>
+    private QuickPad HudButton(string text, System.Action clicked, string tip)
     {
         var b = new QuickPad
         {
@@ -806,6 +806,14 @@ public sealed partial class Tank3DBench
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
         }.Fit(new Vector2(14, 8));
         b.Clicked += clicked;
+        b.Over += (p, on) =>
+        {
+            if (!on)
+                _hudTips?.Hide(p);
+            else
+                _hudTips?.Show(p, p.GetGlobalRect, () => UiTip.Box("", text, tip, large: true), UiTip.Prefer.Above,
+                               mark: lit => { p.Mark = lit ? Ui.TipRim : null; p.QueueRedraw(); });
+        };
         return b;
     }
 

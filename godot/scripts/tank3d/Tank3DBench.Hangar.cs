@@ -503,7 +503,7 @@ public sealed partial class Tank3DBench
         };
         arrow.Clicked += () => { _qhAt = to; QuickShow(); };
         QuickSquad.Slot s = _qs.Squad[to];
-        QTip(arrow, () => QTipBox(dir < 0 ? L.T("hangar.prev_tank") : L.T("hangar.next_tank"), L.T("hangar.slot", to + 1),
+        QTip(arrow, () => UiTip.Box(dir < 0 ? L.T("hangar.prev_tank") : L.T("hangar.next_tank"), L.T("hangar.slot", to + 1),
             s.Empty ? L.T("hangar.slot_unset") : QuickSquad.ClassOf(s.Class!).Name, null, null));
         return arrow;
     }
@@ -548,7 +548,7 @@ public sealed partial class Tank3DBench
             _qhLinked = pad;
         }
         pad.Clicked += () => QuickHangarPick(c);
-        QTip(pad, () => QTipBox(L.T("quick.preset_tip", Pts(start)), c.Name,
+        QTip(pad, () => UiTip.Box(L.T("quick.preset_tip", Pts(start)), c.Name,
             string.Join("\n", c.Slots.Select(x => L.T("quick.preset_slot", QuickSquad.ClassOf(x.Class).Short, QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name, QuickSquad.CompanyLevel))),
             null, short_ ? L.T("hangar.preset_short", q.Budget, Pts(start))
                 : L.T("quick.preset_note", $"{char.ToUpper(c.Play[0])}{c.Play[1..]}",
@@ -672,7 +672,7 @@ public sealed partial class Tank3DBench
         QuickHangarUnit(col, s);
         var box = Ui.Box(col, Ui.Panel, 14);
         // the tips stand beside the panel, the tree stays open
-        box.SetMeta(QTipBeside, true);
+        box.SetMeta(UiTip.Beside, true);
         return box;
     }
 

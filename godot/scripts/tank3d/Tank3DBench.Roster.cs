@@ -15,8 +15,8 @@ namespace TankSpriteTest;
 /// over the hull (<see cref="Sign"/>). The one in play is framed in the
 /// side's colour; the ones that cannot be taken now are dimmed; a destroyed
 /// one is grey and crossed.</item>
-/// <item><b>The card</b> - the unit's panel beside its icon, only while the
-/// pointer rests on the icon (<see cref="RosterDwell"/>), gone as it leaves
+/// <item><b>The card</b> - the unit's panel beside its icon in the match's tip
+/// (<see cref="UiTip"/>: its wait, its beak, the icon ringed), gone as the pointer leaves
 /// (the author's note, 2026-10-30). The one in play's has the turn in it.</item>
 /// <item><b>A click</b> takes the unit, as the left button on its hull does
 /// (<see cref="MatchTakes"/>), and the view flies to it
@@ -29,10 +29,6 @@ namespace TankSpriteTest;
 public sealed partial class Tank3DBench
 {
     private const float RosterLeft = 12.0f, RosterIcon = 76.0f, RosterGap = 8.0f;
-    /// <summary>How long the pointer rests on an icon before its card shows, s.</summary>
-    private const float RosterDwell = 0.4f;
-    /// <summary>The card stands this far right of the column.</summary>
-    private const float RosterCardOff = 18.0f;
 
     private static readonly Color RosterHull = new(0.20f, 0.21f, 0.19f);
     private static readonly Color RosterGrey = new(0.48f, 0.48f, 0.46f);
@@ -56,9 +52,8 @@ public sealed partial class Tank3DBench
     private Control? _roster;
     private readonly RosterSlot[] _rosterSlots = new RosterSlot[8];
     private int _rosterCount;
-    /// <summary>The icon under the pointer and how long it has been, or -1.</summary>
+    /// <summary>The icon under the pointer, or -1.</summary>
     private int _rosterOver = -1;
-    private float _rosterDwelt;
     /// <summary><c>--do roster-hover=N</c>: the icon held, from 0; -1 for none.</summary>
     private int _rosterHeld = -1;
     /// <summary>The pointer is on the column: the board under it reads nothing (<c>UnderTick</c>).</summary>
@@ -124,9 +119,11 @@ public sealed partial class Tank3DBench
         if (over != _rosterOver)
         {
             _rosterOver = over;
-            _rosterDwelt = 0.0f;
+            RosterTip(over);
         }
-        _rosterDwelt = _rosterHeld >= 0 ? RosterDwell : _rosterDwelt + dt;
+        // the card says the turn as it goes: redrawn while up
+        if (_hudTips is { Showing: true } tips && Array.IndexOf(_rosterTipKeys, tips.For) >= 0)
+            tips.Body?.QueueRedraw();
         _roster.QueueRedraw();
     }
 
@@ -252,20 +249,57 @@ public sealed partial class Tank3DBench
             if (badge != Badge.None)
                 Sign(c, badge, box.Position + new Vector2(RosterIcon - 12.0f, 12.0f), 8.0f, a: a);
         }
+    }
 
-        // the card: only while the pointer rests on an icon, gone as it leaves
-        int shown = _rosterOver >= 0 && _rosterDwelt >= RosterDwell ? _rosterOver : -1;
-        if (shown < 0 || shown >= _rosterCount || _rosterSlots[shown].Fate == Fate.Destroyed)
+    /// <summary>The roster's tip keys, one an icon: the card shown tells which icon is its.</summary>
+    private readonly object[] _rosterTipKeys = { new(), new(), new(), new(), new(), new(), new(), new() };
+    /// <summary>The icon whose card the tip holds.</summary>
+    private int _rosterTipAt = -1;
+
+    /// <summary>The card of icon <paramref name="over"/> in the match's tip (<see cref="UiTip"/>):
+    /// beside the icon, its beak to it, the icon ringed, after the tips' wait; gone as the
+    /// pointer leaves (the author's note, 2026-10-30). None for a destroyed one.</summary>
+    private void RosterTip(int over)
+    {
+        if (_hudTips is null || _roster is null)
+            return;
+        if (over < 0 || over >= _rosterCount || _rosterSlots[over].Fate == Fate.Destroyed)
+        {
+            if (Array.IndexOf(_rosterTipKeys, _hudTips.For) >= 0)
+            {
+                _hudTips.Hold = false;
+                _hudTips.Hide(null);
+            }
+            return;
+        }
+        _rosterTipAt = over;
+        _hudTips.Hold = _rosterHeld >= 0;
+        int i = over;
+        _hudTips.Show(_rosterTipKeys[i], () => RosterIconRect(i), RosterCardBody);
+    }
+
+    private Rect2 RosterIconRect(int i) =>
+        new(_roster!.GetGlobalRect().Position + new Vector2(0.0f, i * (RosterIcon + RosterGap)), RosterIcon, RosterIcon);
+
+    /// <summary>The card's body: the unit's panel, drawn each frame the tip is up (the
+    /// one in play's says its turn as it goes), the tip's own surface round it.</summary>
+    private Control RosterCardBody()
+    {
+        // the tip's margins (Ui.TipStyle, 11) round it: the card as large as the hull's
+        var c = new Control { CustomMinimumSize = new Vector2(PeekW - 22.0f, PeekH - 22.0f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        c.Draw += () => RosterCardDraw(c);
+        return c;
+    }
+
+    private void RosterCardDraw(Control c)
+    {
+        int shown = _rosterTipAt;
+        if (shown < 0 || shown >= _rosterCount)
             return;
         RosterSlot u = _rosterSlots[shown];
-        float rowMid = shown * (RosterIcon + RosterGap) + RosterIcon * 0.5f;
-        float above = c.Position.Y;
-        float top = Mathf.Clamp(rowMid - 26.0f, -above + 8.0f,
-                                Mathf.Max(-above + 8.0f, c.GetViewportRect().Size.Y - above - PeekH - 8.0f));
-        var card = new Rect2(RosterIcon + RosterCardOff, top, PeekW, PeekH);
-        // a short leader from the icon into the card's title
-        c.DrawLine(new Vector2(RosterIcon + 2.0f, rowMid), new Vector2(card.Position.X, rowMid), PeekShade, 4.0f);
-        c.DrawLine(new Vector2(RosterIcon + 2.0f, rowMid), new Vector2(card.Position.X, rowMid), PeekLine, 1.6f);
+        // drawn over the tip's margins, laid out as the hull's card is
+        var card = new Rect2(-11.0f, -11.0f, PeekW, PeekH);
+        Font font = ThemeDB.FallbackFont;
         MovementProfile ucls = RosterClass(u);
         if (u.Riding)
         {
@@ -275,12 +309,12 @@ public sealed partial class Tank3DBench
                 (_cardTitle, _cardName) = PanelNames(_profile, _modelTag);
             }
             UnitPanel(c, font, card, _profile, _cardTitle, _cardName, _side,
-                      BadgeOf(_unitId, _fate, CellHere), turn: true);
+                      BadgeOf(_unitId, _fate, CellHere), turn: true, PanelSurface.None);
         }
         else
         {
             var (title, name) = RosterNames(ucls, u.Tag);
-            UnitPanel(c, font, card, ucls, title, name, _mt.Turn, BadgeOf(u.Id, u.Fate, u.Cell), turn: false);
+            UnitPanel(c, font, card, ucls, title, name, _mt.Turn, BadgeOf(u.Id, u.Fate, u.Cell), turn: false, PanelSurface.None);
         }
     }
 

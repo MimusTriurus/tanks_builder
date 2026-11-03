@@ -89,8 +89,6 @@ public sealed partial class Tank3DBench
     private QuickModal _qModal;
     private CanvasLayer? _qLayer;
     private Control? _qRoot, _qOver;
-    private PanelContainer? _qTip;
-    private QuickPad? _qTipFor;
     private bool _qGo;
     private readonly Dictionary<string, BoardMap> _qMaps = new();
     private int _qArtLeft;
@@ -125,6 +123,8 @@ public sealed partial class Tank3DBench
         foreach (string side in new[] { "left", "right", "top", "bottom" })
             _qRoot.AddThemeConstantOverride($"margin_{side}", 22);
         _qLayer.AddChild(_qRoot);
+        _qTips = new UiTip();
+        _qLayer.AddChild(_qTips);
         // the hangar loads all it will show behind a loading screen first
         if (_qHangar)
             await QuickHangarLoading();
@@ -161,7 +161,7 @@ public sealed partial class Tank3DBench
         _qLayer.QueueFree();
         _qLayer = null;
         _qRoot = _qOver = null;
-        _qTip = null;
+        _qTips = null;
 
         // the AI builds now, blind to the player's squad (meta.md)
         q.AiDoctrine = q.Doctrine is int d ? QuickSquad.Doctrines[d]
@@ -444,7 +444,7 @@ public sealed partial class Tank3DBench
     {
         if (_qRoot is null || _qLayer is null)
             return;
-        QuickTipHide(null);
+        _qTips?.Hide(null);
         // the live models out of the old page before it goes, for the new one to take
         foreach (var stage in _qStage.Values)
             if (IsInstanceValid(stage.Box))
@@ -676,7 +676,7 @@ public sealed partial class Tank3DBench
                 L.T("quick.replace_text", company.Name, QuickSquad.CompanyLevel),
                 L.T("quick.replace"), () => q.Squad = QuickSquad.OfCompany(company)));
             b.Disabled = q.Budget < start;
-            QTip(b, () => QTipBox(L.T("quick.preset_tip", Pts(start)), company.Name,
+            QTip(b, () => UiTip.Box(L.T("quick.preset_tip", Pts(start)), company.Name,
                 string.Join("\n", company.Slots.Select(s => L.T("quick.preset_slot", QuickSquad.ClassOf(s.Class).Short, QuickSquad.ClassOf(s.Class).BranchOf(s.Branch)!.Name, QuickSquad.CompanyLevel))),
                 null, L.T("quick.preset_note", $"{char.ToUpper(company.Play[0])}{company.Play[1..]}",
                       q.Budget > start ? L.T("quick.preset_left", Pts(q.Budget - start)) : L.T("quick.preset_all"))));
@@ -935,7 +935,7 @@ public sealed partial class Tank3DBench
         var box = Ui.Box(col, Ui.Panel, 12);
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         box.SizeFlagsStretchRatio = 1.0f;
-        box.SetMeta(QTipBeside, true);
+        box.SetMeta(UiTip.Beside, true);
         return box;
     }
 
@@ -1023,7 +1023,7 @@ public sealed partial class Tank3DBench
         };
         string ups = string.Join("\n", b.Levels.Select((u, i) => u.Flag is null
             ? L.T("quick.branch_tip_missing", i + 1, u.Name) : $"{i + 1}. {u.Name}"));
-        QTip(head, () => QTipBox(L.T("quick.branch_tip", b.Tag), b.Name, ups, null,
+        QTip(head, () => UiTip.Box(L.T("quick.branch_tip", b.Tag), b.Name, ups, null,
             chosen ? L.T("quick.branch_chosen") : other ? L.T("quick.branch_move", s.Level) : L.T("quick.branch_first")));
         col.AddChild(head);
         // the box's own top margin, given up to the band, under it instead
@@ -1085,7 +1085,7 @@ public sealed partial class Tank3DBench
                 : shortOf ? L.T("quick.lvl_short", Pts(need - left))
                 : other ? L.T("quick.lvl_switch", b.Name, l)
                 : need > 0 ? L.T("quick.lvl_buy", l, Pts(need)) : L.T("quick.lvl_back", l);
-            QTip(hex, () => QTipBox(L.T("quick.level_tip", b.Name, level), u.Name, u.Text, (u.Kind, Pts(level)),
+            QTip(hex, () => UiTip.Box(L.T("quick.level_tip", b.Name, level), u.Name, u.Text, (u.Kind, Pts(level)),
                                     state + (u.Flag is null ? L.T("quick.lvl_dash_note") : "")));
             col.AddChild(hex);
             // under the node, close to it: its name, then the link down to the next node
@@ -1238,7 +1238,7 @@ public sealed partial class Tank3DBench
     private static string QRoman(int n) => n switch { 0 => "0", 1 => "I", 2 => "II", 3 => "III", 4 => "IV", _ => "V" };
 
     private Control QuickClassTip(QuickSquad.Class c, bool full, string? note = null) =>
-        QTipBox(L.T("quick.class_tip", c.Short, c.Duty), c.Name, c.Role, null, full ? L.T("quick.class_full") : note,
+        UiTip.Box(L.T("quick.class_tip", c.Short, c.Duty), c.Name, c.Role, null, full ? L.T("quick.class_full") : note,
                 QuickClassRows(c), L.T("quick.trait", c.Trait));
 
     /// <summary>A class's numbers as label and value: the tip's table, the hangar's sheet.</summary>
@@ -1344,215 +1344,37 @@ public sealed partial class Tank3DBench
 
     // --- the tooltip ---------------------------------------------------------------
 
-    /// <summary>The prototype's floating tip on <paramref name="pad"/>, built when the pointer comes on.</summary>
+    /// <summary>The screens' tips: the game's one (<see cref="UiTip"/>), on their layer.</summary>
+    private UiTip? _qTips;
+
+    /// <summary>The tip on <paramref name="pad"/>, built when it shows. Beside the pad -
+    /// or beside its card, level with the pad (<see cref="UiTip.Beside"/>); the pad
+    /// ringed by its own shape, unless it has none of its own: a branch's head is its
+    /// band, and a ring round the pad inside it stood off the band's edges.</summary>
     private void QTip(QuickPad pad, Func<Control> build) =>
         pad.Over += (p, on) =>
         {
-            if (on)
-                QuickTipShow(p, build());
-            else
-                QuickTipHide(p);
-        };
-
-    private async void QuickTipShow(QuickPad pad, Control body)
-    {
-        QuickTipHide(null);
-        if (_qLayer is null)
-        {
-            body.Free();
-            return;
-        }
-        // the first tip waits for the pointer to rest (author 2026-11-03: a tip on every
-        // pass of the pointer flashed over the screen); once one is up, the next one along
-        // comes at once, as the system's tooltips do
-        int seq = ++_qTipSeq;
-        _qTipFor = pad;
-        if (Time.GetTicksMsec() > _qTipWarmTill)
-        {
-            await ToSignal(GetTree().CreateTimer(QTipWait), SceneTreeTimer.SignalName.Timeout);
-            if (seq != _qTipSeq || _qTipFor != pad || !IsInstanceValid(pad) || _qLayer is null)
+            if (_qTips is null)
+                return;
+            if (!on)
             {
-                body.Free();
+                _qTips.Hide(p);
                 return;
             }
-        }
-        var style = new StyleBoxFlat { BgColor = Ui.TipBg, ShadowColor = new Color(0, 0, 0, 0.28f), ShadowSize = 12 };
-        style.SetContentMarginAll(11);
-        _qTip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Modulate = new Color(1, 1, 1, 0) };
-        _qTip.AddThemeStyleboxOverride("panel", style);
-        // a rim (the tip is a surface over the others, and over the page's own dark it
-        // lost its edge) and a beak on the side toward its pad, level with the pad's
-        // middle (author 2026-11-03: a tip beside the card stood apart from its node).
-        // The rim and the ring round the pad one colour, Ui.TipRim: they read as a pair
-        PanelContainer rimmed = _qTip;
-        rimmed.Draw += () =>
-        {
-            Ui.DrawRim(rimmed, rimmed.Size, Ui.TipRim, 1.0f);
-            QuickTipBeak(rimmed);
+            bool shaped = p.Form != QuickPad.Shape.Box || p.RimWidth > 0;
+            _qTips.Show(p, p.GetGlobalRect, build, UiTip.Prefer.Beside, () => QuickTipNear(p),
+                        shaped ? on => { p.Mark = on ? Ui.TipRim : null; p.QueueRedraw(); } : null, ring: false);
         };
-        _qTip.AddChild(body);
-        _qLayer.AddChild(_qTip);
-        PanelContainer tip = _qTip;
-        // a wrapped label first measures itself at no width - a word a line,
-        // the screen's height - and settles only once laid out; a container
-        // never shrinks by itself, so the tip is cut back to its content and
-        // placed anew each time that settles
-        tip.MinimumSizeChanged += () => Callable.From(() => QuickTipPlace(tip, pad)).CallDeferred();
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        QuickTipPlace(tip, pad);
-        if (IsInstanceValid(tip) && _qTip == tip)
-        {
-            tip.Modulate = Colors.White;
-            // the pad the tip tells of, ringed as long as the tip is up - one with a shape
-            // of its own: a branch's head is its band, and a ring round the pad inside it
-            // stood off the band's edges (the beak says it there)
-            if (IsInstanceValid(pad) && (pad.Form != QuickPad.Shape.Box || pad.RimWidth > 0))
-            {
-                pad.Mark = Ui.TipRim;
-                pad.QueueRedraw();
-            }
-        }
-    }
 
-    /// <summary>Which side of the tip its beak stands on, and where along it, px.</summary>
-    private Side4 _qTipBeak;
-    private float _qTipBeakAt;
-
-    private enum Side4 { None, Left, Right, Top, Bottom }
-
-    /// <summary>The beak: a short triangle out of the tip's side toward its pad, filled as
-    /// the tip and rimmed as it, its base cutting the rim so the two read as one outline.</summary>
-    private void QuickTipBeak(Control tip)
+    /// <summary>The rect a pad's tip stands by: the pad's, or its card's across at the
+    /// pad's height.</summary>
+    private static Rect2 QuickTipNear(QuickPad pad)
     {
-        if (_qTipBeak == Side4.None)
-            return;
-        const float half = 7, reach = 8;
-        float t = Ui.RimLayout(tip, 1), a = _qTipBeakAt;
-        Vector2 s = tip.Size;
-        (Vector2 b0, Vector2 apex, Vector2 b1, Vector2 inward) = _qTipBeak switch
-        {
-            Side4.Left => (new Vector2(0, a - half), new Vector2(-reach, a), new Vector2(0, a + half), new Vector2(t, 0)),
-            Side4.Right => (new Vector2(s.X, a - half), new Vector2(s.X + reach, a), new Vector2(s.X, a + half), new Vector2(-t, 0)),
-            Side4.Top => (new Vector2(a - half, 0), new Vector2(a, -reach), new Vector2(a + half, 0), new Vector2(0, t)),
-            _ => (new Vector2(a - half, s.Y), new Vector2(a, s.Y + reach), new Vector2(a + half, s.Y), new Vector2(0, -t)),
-        };
-        tip.DrawColoredPolygon(new[] { b0 + inward, apex, b1 + inward }, Ui.TipBg);
-        tip.DrawPolyline(new[] { b0, apex, b1 }, Ui.TipRim, t, true);
-    }
-
-    /// <summary>The tip cut to its content and put beside the pad, else under it, inside the screen.
-    /// A pad inside a machine's card has it beside the card, level with the pad:
-    /// the tree the player is about to click stays open.</summary>
-    private void QuickTipPlace(PanelContainer tip, QuickPad pad)
-    {
-        if (!IsInstanceValid(tip) || !IsInstanceValid(pad) || _qTip != tip)
-            return;
-        tip.ResetSize();
-        Node? card = pad;
-        while (card is not null && !card.HasMeta(QTipBeside))
-            card = card.GetParent();
         Rect2 own = pad.GetGlobalRect();
-        Rect2 r = card is Control box ? new Rect2(box.GetGlobalRect().Position.X, own.Position.Y, box.Size.X, own.Size.Y) : own;
-        Vector2 ts = tip.Size, vs = GetViewport().GetVisibleRect().Size;
-        float x = r.End.X + 10, y = r.Position.Y;
-        _qTipBeak = Side4.Left;
-        if (x + ts.X > vs.X - 8)
-        {
-            x = r.Position.X - ts.X - 10;
-            _qTipBeak = Side4.Right;
-        }
-        if (x < 8)
-        {
-            x = Mathf.Clamp(r.GetCenter().X - ts.X * 0.5f, 8, vs.X - ts.X - 8);
-            y = r.End.Y + 8;
-            _qTipBeak = Side4.Top;
-            if (y + ts.Y > vs.Y - 8)
-            {
-                y = r.Position.Y - ts.Y - 8;
-                _qTipBeak = Side4.Bottom;
-            }
-        }
-        tip.Position = new Vector2(x, Mathf.Clamp(y, 8, Mathf.Max(8, vs.Y - ts.Y - 8)));
-        // the beak at the pad's own middle (not the card's), kept clear of the tip's corners
-        Vector2 mid = own.GetCenter();
-        bool across = _qTipBeak is Side4.Left or Side4.Right;
-        _qTipBeakAt = across ? Mathf.Clamp(mid.Y - tip.Position.Y, 12, ts.Y - 12)
-                             : Mathf.Clamp(mid.X - tip.Position.X, 12, ts.X - 12);
-        tip.QueueRedraw();
-    }
-
-    /// <summary>The meta that puts a tip beside this control rather than its pad.</summary>
-    private static readonly StringName QTipBeside = "quick_tip_beside";
-
-    /// <summary>How long the pointer rests before the first tip, s (the common 0.4-0.5).</summary>
-    private const float QTipWait = 0.45f;
-
-    /// <summary>After a tip goes, how long the next comes at once, ms.</summary>
-    private const ulong QTipWarm = 400;
-
-    /// <summary>The tips stay warm till then (ticks, ms): the next one shows at once.</summary>
-    private ulong _qTipWarmTill;
-
-    /// <summary>Counts the shows and hides: a waiting show that is no longer the last gives up.</summary>
-    private int _qTipSeq;
-
-    private void QuickTipHide(QuickPad? pad)
-    {
-        if (pad is not null && pad != _qTipFor)
-            return;
-        _qTipSeq++;
-        if (_qTip is not null)
-            _qTipWarmTill = Math.Max(_qTipWarmTill, Time.GetTicksMsec() + QTipWarm);
-        if (_qTipFor is { } was && IsInstanceValid(was) && was.Mark is not null)
-        {
-            was.Mark = null;
-            was.QueueRedraw();
-        }
-        _qTip?.QueueFree();
-        _qTip = null;
-        _qTipFor = null;
-    }
-
-    /// <summary>A tip's body: the kicker, the head, the text, a row of kind
-    /// and cost, a table, a closing line and the state in amber.</summary>
-    private static Control QTipBox(string kicker, string head, string text, (string Kind, string Cost)? row, string? state,
-                                   (string, string)[]? table = null, string? coda = null)
-    {
-        var col = new VBoxContainer { CustomMinimumSize = new Vector2(300, 0) };
-        col.AddThemeConstantOverride("separation", 5);
-        col.AddChild(Ui.Text(kicker.ToUpperInvariant(), 11, Ui.TipMuted, bold: true));
-        col.AddChild(Ui.Text(head, 17, Ui.TipInk, bold: true));
-        col.AddChild(Ui.Text(text, 13, Ui.TipInk, wrap: true));
-        if (table is not null)
-        {
-            var grid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            grid.AddThemeConstantOverride("h_separation", 10);
-            foreach ((string k, string v) in table)
-            {
-                var kl = Ui.Text(k, 12, Ui.TipMuted);
-                kl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-                grid.AddChild(kl);
-                var vl = Ui.Text(v, 12, Ui.TipInk, bold: true);
-                vl.HorizontalAlignment = HorizontalAlignment.Right;
-                grid.AddChild(vl);
-            }
-            col.AddChild(grid);
-        }
-        if (coda is not null)
-            col.AddChild(Ui.Text(coda, 13, Ui.TipInk, wrap: true));
-        if (row is var (kind, cost))
-        {
-            col.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.12f), CustomMinimumSize = new Vector2(0, 1) });
-            var r = new HBoxContainer();
-            var kl = Ui.Text(kind, 12, Ui.TipMuted);
-            kl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-            r.AddChild(kl);
-            r.AddChild(Ui.Text(cost, 12, Ui.TipInk, bold: true));
-            col.AddChild(r);
-        }
-        if (state is not null)
-            col.AddChild(Ui.Text(state, 12, new Color("E9B860"), wrap: true));
-        return col;
+        Node? card = pad;
+        while (card is not null && !card.HasMeta(UiTip.Beside))
+            card = card.GetParent();
+        return card is Control box ? new Rect2(box.GetGlobalRect().Position.X, own.Position.Y, box.Size.X, own.Size.Y) : own;
     }
 
     // --- the minimap ---------------------------------------------------------------
@@ -1934,7 +1756,8 @@ public sealed partial class Tank3DBench
                     QuickShow();
                     for (int f = 0; f < 2; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                    _qTipWarmTill = ulong.MaxValue;
+                    if (_qTips is not null)
+                        _qTips.Hold = true;
                     QuickPadAt(Slot(p[1]), p[2], (int)F(p[3], 1))?.GrabFocus();
                     continue;
                 case "drop" when p.Length > 3:
@@ -1977,13 +1800,14 @@ public sealed partial class Tank3DBench
                     for (int f = 0; f < 2; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                     // a script's tip at once: the shot after it does not wait out the rest
-                    _qTipWarmTill = ulong.MaxValue;
+                    if (_qTips is not null)
+                        _qTips.Hold = true;
                     QuickPointAt(Slot(p[1]), p[2], (int)F(p[3], 1));
                     continue;
                 case "shot" when p.Length > 1:
                     for (int f = 0; f < 600 && _qArtLeft > 0; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                    if (_qTip is null)
+                    if (_qTips is not { Showing: true })
                         QuickShow();
                     for (int f = 0; f < 6; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);

@@ -25,12 +25,10 @@ public sealed partial class Tank3DBench
     /// <summary>The leader's slant leg and how far the card stands off its
     /// knee, px.</summary>
     private const float PeekLeg = 46.0f, PeekReach = 22.0f;
-    private const float PeekFadeTime = 0.12f;
-    /// <summary>How long the pointer rests on a unit before its card starts
-    /// to fade in, s (the author's note, 2026-10-30): a pointer passing over
-    /// the board on its way somewhere does not flash cards. The roster's
-    /// icons wait as long (<c>RosterDwell</c>).</summary>
-    private const float PeekDelay = 0.4f;
+    /// <summary>The fade in and how long the pointer rests on a unit before its card
+    /// starts to fade in, s - the tips' (<see cref="UiTip"/>): a pointer passing over the
+    /// board on its way somewhere does not flash cards (the author's note, 2026-10-30).</summary>
+    private const float PeekFadeTime = UiTip.Fade, PeekDelay = UiTip.Wait;
     /// <summary>How long the pointer has rested on the unit shown.</summary>
     private float _peekWait;
 
@@ -250,11 +248,15 @@ public sealed partial class Tank3DBench
     /// sign stands in the title row.
     /// </summary>
     private void UnitPanel(Control c, Font font, Rect2 box, MovementProfile profile, string title, string name,
-                           Side side, Badge badge, bool turn)
+                           Side side, Badge badge, bool turn, PanelSurface surface = PanelSurface.Tip)
     {
         float left = box.Position.X, top = box.Position.Y;
-        // the theme's box (Ui): square, its rim in whole screen pixels, the board a shade through
-        Ui.DrawBox(c, box, Ui.PanelOver);
+        // the tip's surface (Ui.DrawTip) for a card that tells of a unit, the panel's for the
+        // bench's standing one, none inside a tip that has its own (the roster's)
+        if (surface == PanelSurface.Tip)
+            Ui.DrawTip(c, box);
+        else if (surface == PanelSurface.Panel)
+            Ui.DrawBox(c, box, Ui.PanelOver);
 
         // the side's colour down the edge, in a match
         if (Match)
@@ -291,6 +293,8 @@ public sealed partial class Tank3DBench
         y += PeekPlateStep;
         PeekPlate(c, font, profile, x + PeekIndent, slots, y, L.T("peek.rear"), Gunnery.Plate.Rear);
     }
+
+    private enum PanelSurface { Tip, Panel, None }
 
     /// <summary>The card's padding, its rows' steps and a plate's indent, px; a label's
     /// baseline under its row's middle - a caption's x-height about the slots' middle.</summary>
