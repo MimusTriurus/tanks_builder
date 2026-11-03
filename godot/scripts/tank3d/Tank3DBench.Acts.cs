@@ -80,9 +80,8 @@ public sealed partial class Tank3DBench
     private readonly Dictionary<HBoxContainer, HBoxContainer> _keyRows = new();
     private readonly List<(Button Button, Control Slot, Label Cap)> _actKeys = new();
     /// <summary>The key caps' row under the frames, px in the layout.</summary>
-    private const float KeyRowPx = 24.0f;
+    private const float KeyRowPx = 30.0f;
 
-    private static readonly Color SlotDim = new(0.42f, 0.43f, 0.40f);
     /// <summary>A spent button's key cap: dimmed with it.</summary>
     private static readonly Color KeyOff = new(1.0f, 1.0f, 1.0f, 0.4f);
     /// <summary>The icon's side on a button in the 1600 × 900 layout, px; on
@@ -183,17 +182,21 @@ public sealed partial class Tank3DBench
     /// pressed - and darker, dim, when it is off.</summary>
     private static void ActStyle(Button b, int rim)
     {
-        b.AddThemeStyleboxOverride("normal", ActBox(new Color(0.46f, 0.48f, 0.41f), rim));
-        b.AddThemeStyleboxOverride("hover", ActBox(CardPale, rim));
-        b.AddThemeStyleboxOverride("pressed", ActBox(CardSpend, 2));
-        b.AddThemeStyleboxOverride("hover_pressed", ActBox(CardSpend, 2));
-        // spent: the box darker and its rim dim, the key's number grey
-        StyleBoxFlat off = ActBox(SlotDim, rim);
-        off.BgColor = new Color(0.17f, 0.18f, 0.15f, 0.9f);
-        b.AddThemeStyleboxOverride("disabled", off);
+        // the theme's square face (Ui), its rim drawn on it in whole screen pixels by
+        // the button's state: a style's border fell on one screen pixel or two
+        StyleBoxFlat face = Ui.Fill(Ui.Face, 8.0f, 2.0f);
+        b.AddThemeStyleboxOverride("normal", face);
+        b.AddThemeStyleboxOverride("hover", face);
+        b.AddThemeStyleboxOverride("pressed", face);
+        b.AddThemeStyleboxOverride("hover_pressed", face);
+        // spent: the face down to the panel's dark and its rim grey, the key's number grey
+        b.AddThemeStyleboxOverride("disabled", Ui.Fill(Ui.Panel, 8.0f, 2.0f));
+        Ui.Rimmed(b, () => b.Disabled ? (Ui.Spent, rim)
+                         : b.ButtonPressed ? (CardSpend, 2)
+                         : b.IsHovered() ? (Ui.Ink, rim) : (Ui.Line, rim));
         b.AddThemeColorOverride("font_pressed_color", CardSpend);
         b.AddThemeColorOverride("font_hover_pressed_color", CardSpend);
-        b.AddThemeColorOverride("font_disabled_color", SlotDim);
+        b.AddThemeColorOverride("font_disabled_color", Ui.Spent);
     }
 
     /// <summary>The icon of <paramref name="art"/> at <paramref name="px"/>,
@@ -252,8 +255,12 @@ public sealed partial class Tank3DBench
         };
         column.AddChild(mark);
         var frame = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        // the theme's square frame (Ui): the panel's dark, half through, its rim in the
+        // group's colour while the slot is to be had, grey once spent - whole screen pixels
+        frame.AddThemeStyleboxOverride("panel", Ui.Fill(new Color(Ui.Panel, 0.55f), 6.0f, 6.0f));
         var art = new GroupArt { Mark = mark, Shape = shape, Ink = ink };
         _groupArt[frame] = art;
+        Ui.Rimmed(frame, () => art.Open ? (art.Ink, 2.0f) : (Ui.Spent, 1.0f));
         mark.Draw += () => MarkDraw(art);
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         _rowGroup[row] = art;
@@ -275,14 +282,12 @@ public sealed partial class Tank3DBench
         return (frame, row);
     }
 
-    /// <summary>A key's cap: a small dark box with the digit, as the frames are drawn.</summary>
-    private static StyleBoxFlat KeyCap()
+    /// <summary>A key's cap: a small dark box with the digit, as the frames are drawn -
+    /// square, its grey rim in whole screen pixels (the theme's, Ui).</summary>
+    private static void KeyCap(Label cap)
     {
-        var box = new StyleBoxFlat { BgColor = new Color(0.08f, 0.085f, 0.075f, 0.8f), BorderColor = SlotDim };
-        box.SetBorderWidthAll(1);
-        box.SetCornerRadiusAll(4);
-        box.ContentMarginLeft = box.ContentMarginRight = 5.0f;
-        return box;
+        cap.AddThemeStyleboxOverride("normal", Ui.Fill(new Color(Ui.Panel, 0.8f), 6.0f));
+        Ui.Rimmed(cap, () => (Ui.Spent, 1.0f));
     }
 
     /// <summary>A button on or off: off - its slot spent - it is grey and
@@ -325,11 +330,11 @@ public sealed partial class Tank3DBench
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            CustomMinimumSize = new Vector2(20.0f, 20.0f),
+            CustomMinimumSize = new Vector2(26.0f, 26.0f),
         };
-        cap.AddThemeFontSizeOverride("font_size", 13);
-        cap.AddThemeColorOverride("font_color", CardPale);
-        cap.AddThemeStyleboxOverride("normal", KeyCap());
+        cap.AddThemeFontSizeOverride("font_size", Ui.Caption);
+        cap.AddThemeColorOverride("font_color", Ui.Ink);
+        KeyCap(cap);
         slot.AddChild(cap);
         _keyRows[row].AddChild(slot);
         b.Resized += () => slot.CustomMinimumSize = new Vector2(b.Size.X, 0.0f);
@@ -338,7 +343,7 @@ public sealed partial class Tank3DBench
         // the act's card under the pointer (Tank3DBench.ActTips)
         ActTipHook(b, row, icon, name);
         b.AddThemeConstantOverride("icon_max_width", ActIconPx);
-        b.AddThemeFontSizeOverride("font_size", b.Icon is null ? 16 : 14);
+        b.AddThemeFontSizeOverride("font_size", Ui.Body);
         ActStyle(b, 1);
         b.Pressed += pressed;
         row.AddChild(b);
@@ -377,28 +382,16 @@ public sealed partial class Tank3DBench
         return image.LoadSvgFromString(System.IO.File.ReadAllText(path), px / 64.0f) == Error.Ok ? image : null;
     }
 
-    private static StyleBoxFlat ActBox(Color rim, int width)
-    {
-        // a mid olive, not the black of the frames: the icons' ink and shadow
-        // are near-black and vanished on it (2026-11-01)
-        var box = new StyleBoxFlat { BgColor = new Color(0.27f, 0.29f, 0.23f, 0.95f), BorderColor = rim };
-        box.SetBorderWidthAll(width);
-        box.SetCornerRadiusAll(8);
-        box.ContentMarginLeft = box.ContentMarginRight = 8.0f;
-        return box;
-    }
-
     /// <summary>A group's frame: in its colour while its slot is to be had,
-    /// dim once spent; its mark filled, or a hollow grey one.</summary>
+    /// dim once spent; its mark filled, or a hollow grey one. The frame's rim is
+    /// drawn by its state (<see cref="Group"/>): here the state, and a redraw.</summary>
     private void GroupStyle(PanelContainer frame, bool open)
     {
         GroupArt art = _groupArt[frame];
-        StyleBoxFlat box = ActBox(open ? art.Ink : SlotDim, open ? 2 : 1);
-        box.BgColor = new Color(0.08f, 0.085f, 0.075f, 0.55f);
-        box.SetCornerRadiusAll(12);
-        box.ContentMarginLeft = box.ContentMarginRight = box.ContentMarginTop = box.ContentMarginBottom = 6.0f;
-        frame.AddThemeStyleboxOverride("panel", box);
+        if (art.Open == open)
+            return;
         art.Open = open;
+        frame.QueueRedraw();
         art.Mark.QueueRedraw();
     }
 
@@ -417,7 +410,7 @@ public sealed partial class Tank3DBench
     /// across its middle: the frame's mark and the act's card's (Tank3DBench.ActTips).</summary>
     private static void MarkAt(CanvasItem c, Vector2 mid, GroupShape shape, Color group, bool open, float r)
     {
-        Color rim = open ? MarkLine : SlotDim, fill = open ? group : MarkSpent;
+        Color rim = open ? MarkLine : Ui.Spent, fill = open ? group : MarkSpent;
         float ink = r / 3.0f;
         if (shape == GroupShape.Circle)
         {
@@ -783,6 +776,6 @@ public sealed partial class Tank3DBench
         float w = font.GetStringSize(_badgeText, HorizontalAlignment.Left, -1, size).X;
         float ascent = font.GetAscent(size), descent = font.GetDescent(size);
         c.DrawString(font, new Vector2(mid.X - w * 0.5f, mid.Y + (ascent - descent) * 0.5f), _badgeText,
-                     HorizontalAlignment.Left, -1, size, _badgeOff ? SlotDim : MarkLine);
+                     HorizontalAlignment.Left, -1, size, _badgeOff ? Ui.Spent : MarkLine);
     }
 }

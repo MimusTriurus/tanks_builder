@@ -31,6 +31,18 @@ public static class Ui
     /// <summary>A panel's and a box's rim, 3:1 on <see cref="Panel"/>.</summary>
     public static readonly Color Line = new("667160");
 
+    /// <summary>A panel over the match's board: <see cref="Panel"/>, the board a
+    /// shade through it.</summary>
+    public static readonly Color PanelOver = new(Panel, 0.92f);
+
+    /// <summary>A button's face over the board: an olive light enough for the icons'
+    /// near-black ink, which vanished on the panel's dark (2026-11-01).</summary>
+    public static readonly Color Face = new(0.27f, 0.29f, 0.23f);
+
+    /// <summary>What is spent or off: a slot used this turn, its rim and its key - grey,
+    /// no colour.</summary>
+    public static readonly Color Spent = new(0.42f, 0.43f, 0.40f);
+
     // --- text -----------------------------------------------------------------------
 
     public static readonly Color Ink = new("DEE4D5");
@@ -77,21 +89,35 @@ public static class Ui
 
     // --- type -----------------------------------------------------------------------
 
-    /// <summary>Screens set in the large scale (<see cref="Size"/>): the hangar's pages
-    /// past the lobby. The lobby and the old build keep their sizes.</summary>
-    public static bool Large;
-
     /// <summary>The type scale (author 2026-11-03, after XAG 101: 18 px of glyph at
     /// 1080p on a PC is the floor, a font size of 17 in the 1600 × 900 layout): five
-    /// steps the screens' sizes go to by role - caption 17 (kinds, meta lines,
-    /// kickers), body 18, subhead 20, heading 22, title 28.</summary>
+    /// steps by role, and a display size over them.</summary>
+    /// <remarks>Caption: kinds, meta lines, kickers, key caps, a slot's label.</remarks>
+    public const int Caption = 17;
+    /// <remarks>Body: what is read - a tip's text, a button's word.</remarks>
+    public const int Body = 18;
+    /// <remarks>Subhead: a group's or a branch's name.</remarks>
+    public const int Subhead = 20;
+    /// <remarks>Heading: a panel's or a card's name.</remarks>
+    public const int Heading = 22;
+    /// <remarks>Title: a page's name.</remarks>
+    public const int Title = 28;
+    /// <remarks>Display: a banner over the board (the round, the winner).</remarks>
+    public const int Display = 36;
+
+    /// <summary>Screens set in the large scale (<see cref="Size"/>): the hangar's pages
+    /// past the lobby. The lobby and the old build keep their sizes. The match's HUD
+    /// takes the steps by name, always in the scale.</summary>
+    public static bool Large;
+
+    /// <summary>A screen's old size to its step of the scale when <see cref="Large"/>.</summary>
     public static int Size(int size) => !Large ? size : size switch
     {
-        <= 12 => 17,
-        13 => 18,
-        <= 16 => 20,
-        <= 18 => 22,
-        <= 22 => 28,
+        <= 12 => Caption,
+        13 => Body,
+        <= 16 => Subhead,
+        <= 18 => Heading,
+        <= 22 => Title,
         _ => size,
     };
 
@@ -110,14 +136,48 @@ public static class Ui
     /// filled strips of whole screen pixels each cover that many pixel rows, where a
     /// layout pixel's line (1.25 screen pixels in a 2000-wide window) covered one
     /// or two by where it stood, and two boxes' rims differed (author 2026-11-03).</summary>
-    public static void DrawRim(CanvasItem on, Vector2 size, Color color, float px)
+    public static void DrawRim(CanvasItem on, Vector2 size, Color color, float px) =>
+        DrawRim(on, new Rect2(Vector2.Zero, size), color, px);
+
+    /// <summary>The rim of <paramref name="r"/>, as <see cref="DrawRim(CanvasItem, Vector2, Color, float)"/>:
+    /// for a box drawn inside another's canvas (the match's cards).</summary>
+    public static void DrawRim(CanvasItem on, Rect2 r, Color color, float px)
     {
         float t = RimLayout(on, px);
-        on.DrawRect(new Rect2(0, 0, size.X, t), color);
-        on.DrawRect(new Rect2(0, size.Y - t, size.X, t), color);
-        on.DrawRect(new Rect2(0, t, t, size.Y - 2 * t), color);
-        on.DrawRect(new Rect2(size.X - t, t, t, size.Y - 2 * t), color);
+        Vector2 p = r.Position, s = r.Size;
+        on.DrawRect(new Rect2(p.X, p.Y, s.X, t), color);
+        on.DrawRect(new Rect2(p.X, p.Y + s.Y - t, s.X, t), color);
+        on.DrawRect(new Rect2(p.X, p.Y + t, t, s.Y - 2 * t), color);
+        on.DrawRect(new Rect2(p.X + s.X - t, p.Y + t, t, s.Y - 2 * t), color);
     }
+
+    /// <summary>A box drawn into a canvas: its fill and its rim of 1 (<see cref="Line"/>
+    /// unless given), square, the rim in whole screen pixels.</summary>
+    public static void DrawBox(CanvasItem on, Rect2 r, Color fill, Color? rim = null, float px = 1.0f)
+    {
+        on.DrawRect(r, fill);
+        DrawRim(on, r, rim ?? Line, px);
+    }
+
+    /// <summary>A style with a fill and nothing else, for a container or a button
+    /// whose rim is drawn on it in whole screen pixels (<see cref="Rimmed"/>): a
+    /// style's border is in whole layout pixels and fell on one screen pixel or two.</summary>
+    public static StyleBoxFlat Fill(Color bg, float padX = 0, float padY = 0)
+    {
+        var box = new StyleBoxFlat { BgColor = bg };
+        box.ContentMarginLeft = box.ContentMarginRight = padX;
+        box.ContentMarginTop = box.ContentMarginBottom = padY;
+        return box;
+    }
+
+    /// <summary>A rim drawn on <paramref name="c"/> each time it draws, in the colour
+    /// and width <paramref name="rim"/> says then: a button's by its state.</summary>
+    public static void Rimmed(Control c, System.Func<(Color Color, float Px)> rim) =>
+        c.Draw += () =>
+        {
+            (Color color, float px) = rim();
+            DrawRim(c, c.Size, color, px);
+        };
 
     /// <summary>A rim of <paramref name="px"/> layout pixels as <see cref="DrawRim"/> draws
     /// it: rounded to whole screen pixels, one at least, given back in layout pixels.</summary>
@@ -140,11 +200,12 @@ public static class Ui
     // --- pieces ---------------------------------------------------------------------
 
     /// <summary>A line of text in the scale: <paramref name="size"/> is the role's
-    /// size before <see cref="Size"/>.</summary>
-    public static Label Text(string text, int size, Color ink, bool bold = false, bool wrap = false)
+    /// size before <see cref="Size"/> - or, with <paramref name="step"/>, a step of
+    /// the scale taken as it is (<see cref="Body"/> and the rest: the match's HUD).</summary>
+    public static Label Text(string text, int size, Color ink, bool bold = false, bool wrap = false, bool step = false)
     {
         var l = new Label { Text = text, AutowrapMode = wrap ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off };
-        l.AddThemeFontSizeOverride("font_size", Size(size));
+        l.AddThemeFontSizeOverride("font_size", step ? size : Size(size));
         l.AddThemeColorOverride("font_color", ink);
         if (bold)
             l.AddThemeFontOverride("font", BoldFont);

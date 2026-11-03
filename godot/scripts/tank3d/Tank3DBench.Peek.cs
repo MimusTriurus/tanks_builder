@@ -21,7 +21,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private const float PeekW = 188.0f, PeekH = 196.0f;
+    private const float PeekW = 220.0f, PeekH = 240.0f;
     /// <summary>The leader's slant leg and how far the card stands off its
     /// knee, px.</summary>
     private const float PeekLeg = 46.0f, PeekReach = 22.0f;
@@ -44,7 +44,6 @@ public sealed partial class Tank3DBench
     private static readonly Color PeekShade = new(0.0f, 0.0f, 0.0f, 0.55f);
 
     private Control? _peek;
-    private StyleBoxFlat? _peekBox;
 
     // the unit shown, filled each frame from what is under the pointer
     private TankModel? _peekModel;
@@ -63,13 +62,6 @@ public sealed partial class Tank3DBench
     {
         if (_noUi)
             return;
-        _peekBox = new StyleBoxFlat
-        {
-            BgColor = new Color(0.08f, 0.085f, 0.075f, 0.9f),
-            BorderColor = new Color(0.34f, 0.35f, 0.31f),
-        };
-        _peekBox.SetBorderWidthAll(1);
-        _peekBox.SetCornerRadiusAll(8);
         // the whole screen: the leader runs from the hull to the card
         _peek = new Control { Name = "UnitPeek", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
         _peek.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -140,7 +132,7 @@ public sealed partial class Tank3DBench
 
     private void DrawPeek()
     {
-        if (_peek is not { } c || _peekBox is null || _peekModel is not { } model || _peekRig is not { } rig)
+        if (_peek is not { } c || _peekModel is not { } model || _peekRig is not { } rig)
             return;
         Font font = ThemeDB.FallbackFont;
         Vector2 screen = c.Size;
@@ -261,42 +253,65 @@ public sealed partial class Tank3DBench
                            Side side, Badge badge, bool turn)
     {
         float left = box.Position.X, top = box.Position.Y;
-        c.DrawStyleBox(_peekBox!, box);
+        // the theme's box (Ui): square, its rim in whole screen pixels, the board a shade through
+        Ui.DrawBox(c, box, Ui.PanelOver);
 
         // the side's colour down the edge, in a match
         if (Match)
             c.DrawRect(new Rect2(left + 1.0f, top + 8.0f, 3.0f, box.Size.Y - 16.0f), SideInk(side));
 
-        var at = new Vector2(left + 14.0f, top + 28.0f);
-        c.DrawString(font, at, title, HorizontalAlignment.Left, -1, 20, CardPale);
-        float tw = font.GetStringSize(title, HorizontalAlignment.Left, -1, 20).X;
-        c.DrawString(font, at + new Vector2(tw + 8.0f, 0.0f), name, HorizontalAlignment.Left, -1, 14, CardDim);
+        // the class a heading, the model's name a body's size beside it
+        var at = new Vector2(left + PeekPad, top + PeekPad + font.GetAscent(Ui.Heading));
+        c.DrawString(font, at, title, HorizontalAlignment.Left, -1, Ui.Heading, Ui.Ink);
+        float tw = font.GetStringSize(title, HorizontalAlignment.Left, -1, Ui.Heading).X;
+        c.DrawString(font, at + new Vector2(tw + 8.0f, 0.0f), name, HorizontalAlignment.Left, -1, Ui.Body, Ui.Muted);
         if (badge != Badge.None)
-            Sign(c, badge, new Vector2(left + box.Size.X - 20.0f, top + 22.0f), 9.0f);
-        c.DrawLine(new Vector2(left + 12.0f, top + 40.0f), new Vector2(left + box.Size.X - 12.0f, top + 40.0f),
-                   new Color(0.34f, 0.35f, 0.31f), 1.0f);
+            Sign(c, badge, new Vector2(left + box.Size.X - 22.0f, at.Y - Ui.Heading * 0.35f), 10.0f);
+        float rule = top + PeekPad + font.GetHeight(Ui.Heading) + 6.0f;
+        c.DrawRect(new Rect2(left + 12.0f, rule, box.Size.X - 24.0f, Ui.RimLayout(c, 1)), Ui.Line);
 
-        // the figures: a label, then the slots
-        float x = left + 14.0f, slots = left + 78.0f;
-        float y = top + 60.0f;
+        // the figures: a label, then the slots, the labels' column as wide as the longest
+        float x = left + PeekPad, slots = left + PeekSlotsAt(font);
+        float y = rule + 22.0f;
         PeekRow(c, font, x, slots, y, L.T("peek.fire"), profile.Might, PeekMight, PeekMark.Dot, PeekFire);
-        y += 20.0f;
+        y += PeekRowStep;
         if (turn)
             TurnSteps(c, font, x, slots, y);
         else
-            PeekRow(c, font, x, slots, y, L.T("peek.move"), profile.Steps, PeekSteps, PeekMark.Dot, CardPale);
-        y += 20.0f;
-        PeekRow(c, font, x, slots, y, L.T("peek.mass"), profile.Mass, PeekMass, PeekMark.Square, CardPale);
+            PeekRow(c, font, x, slots, y, L.T("peek.move"), profile.Steps, PeekSteps, PeekMark.Dot, Ui.Ink);
+        y += PeekRowStep;
+        PeekRow(c, font, x, slots, y, L.T("peek.mass"), profile.Mass, PeekMass, PeekMark.Square, Ui.Ink);
         // the plates under their own heading, each on its line
-        y += 24.0f;
-        c.DrawString(font, new Vector2(x, y + 4.0f), L.T("peek.armor"), HorizontalAlignment.Left, -1, 13, CardDim);
-        y += 18.0f;
-        PeekPlate(c, font, profile, x + 10.0f, slots, y, L.T("peek.front"), Gunnery.Plate.Front);
-        y += 18.0f;
-        PeekPlate(c, font, profile, x + 10.0f, slots, y, L.T("peek.side"), Gunnery.Plate.Side);
-        y += 18.0f;
-        PeekPlate(c, font, profile, x + 10.0f, slots, y, L.T("peek.rear"), Gunnery.Plate.Rear);
+        y += PeekRowStep + 4.0f;
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), L.T("peek.armor"), HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
+        y += PeekPlateStep;
+        PeekPlate(c, font, profile, x + PeekIndent, slots, y, L.T("peek.front"), Gunnery.Plate.Front);
+        y += PeekPlateStep;
+        PeekPlate(c, font, profile, x + PeekIndent, slots, y, L.T("peek.side"), Gunnery.Plate.Side);
+        y += PeekPlateStep;
+        PeekPlate(c, font, profile, x + PeekIndent, slots, y, L.T("peek.rear"), Gunnery.Plate.Rear);
     }
+
+    /// <summary>The card's padding, its rows' steps and a plate's indent, px; a label's
+    /// baseline under its row's middle - a caption's x-height about the slots' middle.</summary>
+    private const float PeekPad = 14.0f, PeekRowStep = 26.0f, PeekPlateStep = 24.0f, PeekIndent = 10.0f;
+    private const float PeekLabelDrop = Ui.Caption * 0.36f;
+
+    /// <summary>Where the slots start from the card's left, px: past the longest label
+    /// (a plate's with its indent) in the caption's size, measured once.</summary>
+    private static float PeekSlotsAt(Font font)
+    {
+        if (_peekSlotsAt > 0.0f)
+            return _peekSlotsAt;
+        float w = 0.0f;
+        foreach (string k in new[] { "peek.fire", "peek.move", "peek.mass" })
+            w = Mathf.Max(w, font.GetStringSize(L.T(k), HorizontalAlignment.Left, -1, Ui.Caption).X);
+        foreach (string k in new[] { "peek.front", "peek.side", "peek.rear" })
+            w = Mathf.Max(w, PeekIndent + font.GetStringSize(L.T(k), HorizontalAlignment.Left, -1, Ui.Caption).X);
+        return _peekSlotsAt = Mathf.Ceil(PeekPad + w + 14.0f);
+    }
+
+    private static float _peekSlotsAt;
 
     /// <summary>
     /// The chosen one's steps: the turn's budget (the road's step and the
@@ -306,15 +321,15 @@ public sealed partial class Tank3DBench
     /// </summary>
     private void TurnSteps(Control c, Font font, float x, float slots, float y)
     {
-        c.DrawString(font, new Vector2(x, y + 4.0f), L.T("peek.move"), HorizontalAlignment.Left, -1, 13, CardDim);
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), L.T("peek.move"), HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
         bool live = CourseShown && _reach is not null;
         int budget = live ? _reach!.Budget : _profile.Steps;
         int left = Match && _mt.Drove ? 0 : budget;
         int spend = live ? Math.Min(_wayCost, left) : 0;
         // the lit ones are the last of the whole ones, as the old dots were
-        PeekSlots(c, slots, y, left - spend, Math.Max(PeekSteps, budget), PeekMark.Dot, CardPale, CardDim);
+        PeekSlots(c, slots, y, left - spend, Math.Max(PeekSteps, budget), PeekMark.Dot, Ui.Ink, Ui.Muted);
         if (spend > 0)
-            PeekSlots(c, slots + (left - spend) * 15.0f, y, spend, spend, PeekMark.Dot, CardSpend, CardDim);
+            PeekSlots(c, slots + (left - spend) * PeekSlotGap, y, spend, spend, PeekMark.Dot, CardSpend, Ui.Muted);
     }
 
     /// <summary>The leader: a dot on the hull, a slant to the knee, level into
@@ -334,8 +349,8 @@ public sealed partial class Tank3DBench
     private static void PeekRow(Control c, Font font, float x, float slots, float y, string label,
                                 int value, int max, PeekMark mark, Color ink)
     {
-        c.DrawString(font, new Vector2(x, y + 4.0f), label, HorizontalAlignment.Left, -1, 13, CardDim);
-        PeekSlots(c, slots, y, value, max, mark, ink, CardDim);
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), label, HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
+        PeekSlots(c, slots, y, value, max, mark, ink, Ui.Muted);
     }
 
     /// <summary>One plate's row: its name, then squares in the plate's colour
@@ -346,16 +361,19 @@ public sealed partial class Tank3DBench
     {
         int value = Gunnery.ArmourAt(profile, plate);
         Color ink = PlateInk[Math.Clamp(value, 0, 3)];
-        c.DrawString(font, new Vector2(x, y + 4.0f), label, HorizontalAlignment.Left, -1, 12, CardDim);
-        PeekSlots(c, slots, y, value, PeekArmour, PeekMark.Square, ink, value == 0 ? PlateInk[0] : CardDim);
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), label, HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
+        PeekSlots(c, slots, y, value, PeekArmour, PeekMark.Square, ink, value == 0 ? PlateInk[0] : Ui.Muted);
     }
+
+    /// <summary>A slot's step along its row, px: the marks a size up with the type.</summary>
+    private const float PeekSlotGap = 17.0f;
 
     private static void PeekSlots(Control c, float x, float y, int value, int max, PeekMark mark, Color fill, Color empty)
     {
-        const float r = 4.5f, gap = 15.0f;
+        const float r = 5.0f;
         for (int i = 0; i < max; i++)
         {
-            var p = new Vector2(x + i * gap, y);
+            var p = new Vector2(x + i * PeekSlotGap, y);
             bool full = i < value;
             if (mark == PeekMark.Dot)
             {

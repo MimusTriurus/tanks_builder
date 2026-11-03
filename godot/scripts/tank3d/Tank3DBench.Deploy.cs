@@ -766,9 +766,9 @@ public sealed partial class Tank3DBench
             MouseFilter = Control.MouseFilterEnum.Stop,
             Visible = false,
         };
-        if (_peekBox is not null)
-            panel.AddThemeStyleboxOverride("panel", _peekBox);
-        // the unit card's box has no room inside it: the panel's own
+        // the theme's box over the board (Ui), as the unit's card
+        panel.AddThemeStyleboxOverride("panel", Ui.Fill(Ui.PanelOver));
+        Ui.Rimmed(panel, () => (Ui.Line, 1.0f));
         var pad = new MarginContainer();
         pad.AddThemeConstantOverride("margin_left", 16);
         pad.AddThemeConstantOverride("margin_right", 10);
@@ -776,30 +776,17 @@ public sealed partial class Tank3DBench
         pad.AddThemeConstantOverride("margin_bottom", 8);
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 18);
-        var says = new Label { VerticalAlignment = VerticalAlignment.Center };
-        says.AddThemeFontSizeOverride("font_size", 15);
-        says.AddThemeColorOverride("font_color", CardPale);
+        var says = Ui.Text("", Ui.Body, Ui.Ink, step: true);
+        says.VerticalAlignment = VerticalAlignment.Center;
         row.AddChild(says);
-        var reset = new Button
-        {
-            Text = L.T("deploy.reset"),
-            FocusMode = Control.FocusModeEnum.None,
-            TooltipText = L.T("deploy.reset_tip"),
-        };
-        reset.AddThemeFontSizeOverride("font_size", 15);
-        reset.Pressed += DeployReset;
+        QuickPad reset = HudButton(L.T("deploy.reset"), DeployReset);
+        reset.TooltipText = L.T("deploy.reset_tip");
         row.AddChild(reset);
         // a quick battle: back to the squad, the setup kept (Tank3DBench.Quick)
         if (_quick is not null)
         {
-            var back = new Button
-            {
-                Text = L.T("deploy.back"),
-                FocusMode = Control.FocusModeEnum.None,
-                TooltipText = L.T("deploy.back_tip"),
-            };
-            back.AddThemeFontSizeOverride("font_size", 15);
-            back.Pressed += QuickBackToBuild;
+            QuickPad back = HudButton(L.T("deploy.back"), QuickBackToBuild);
+            back.TooltipText = L.T("deploy.back_tip");
             row.AddChild(back);
         }
         pad.AddChild(row);
@@ -807,6 +794,19 @@ public sealed partial class Tank3DBench
         layer.AddChild(panel);
         _deployPanel = panel;
         _deploySays = says;
+    }
+
+    /// <summary>A word's button over the board, as the hangar's (<c>QBtn</c>): the theme's
+    /// box, a body's size whatever the screens' scale, the olive rim under the pointer.</summary>
+    private static QuickPad HudButton(string text, System.Action clicked)
+    {
+        var b = new QuickPad
+        {
+            Text = text, FontSize = Ui.Body, Rim = Ui.Line, Fill = Ui.Inset, Ink = Ui.Ink, HoverRim = Ui.Accent,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        }.Fit(new Vector2(14, 8));
+        b.Clicked += clicked;
+        return b;
     }
 
     /// <summary>Every frame of placement: the panel up, its line rewritten

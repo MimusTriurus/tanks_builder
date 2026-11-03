@@ -54,7 +54,6 @@ public sealed partial class Tank3DBench
     }
 
     private Control? _roster;
-    private StyleBoxFlat? _rosterBox, _rosterChosen;
     private readonly RosterSlot[] _rosterSlots = new RosterSlot[8];
     private int _rosterCount;
     /// <summary>The icon under the pointer and how long it has been, or -1.</summary>
@@ -73,15 +72,6 @@ public sealed partial class Tank3DBench
     {
         if (!Match || _noUi)
             return;
-        _rosterBox = new StyleBoxFlat
-        {
-            BgColor = new Color(0.08f, 0.085f, 0.075f, 0.88f),
-            BorderColor = new Color(0.34f, 0.35f, 0.31f),
-        };
-        _rosterBox.SetBorderWidthAll(1);
-        _rosterBox.SetCornerRadiusAll(8);
-        _rosterChosen = (StyleBoxFlat)_rosterBox.Duplicate();
-        _rosterChosen.SetBorderWidthAll(3);
         // the column takes the mouse - a click on an icon is not an order on
         // the board under it; the card beside it is drawn past its rect
         _roster = new Control
@@ -204,11 +194,10 @@ public sealed partial class Tank3DBench
 
     private void DrawRoster()
     {
-        if (_roster is not { } c || _rosterBox is null || _field is null)
+        if (_roster is not { } c || _field is null)
             return;
         Font font = ThemeDB.FallbackFont;
         Color ink = SideInk(_mt.Turn);
-        _rosterChosen!.BorderColor = ink;
         for (int i = 0; i < _rosterCount; i++)
         {
             RosterSlot s = _rosterSlots[i];
@@ -217,7 +206,8 @@ public sealed partial class Tank3DBench
             // the one in play, and who else could be taken now
             bool live = s.Riding || (s.Parked is { } p && Takeable(p));
             float a = live || gone ? 1.0f : 0.5f;
-            c.DrawStyleBox(s.Riding ? _rosterChosen : _rosterBox, box);
+            // the theme's square tile (Ui); the one in play rimmed in its side's colour, 3 px
+            Ui.DrawBox(c, box, Ui.PanelOver, s.Riding ? ink : Ui.Line, s.Riding ? 3.0f : 1.0f);
             if (i == _rosterOver)
                 c.DrawRect(box.Grow(-3.0f), new Color(1.0f, 1.0f, 1.0f, 0.06f));
             MovementProfile cls = RosterClass(s);
@@ -225,7 +215,7 @@ public sealed partial class Tank3DBench
             if (_rosterArt.TryGetValue((s.Tag, s.Riding ? _side : _mt.Turn), out Texture2D? art))
             {
                 // fitted into the space over the label, its own proportions kept
-                var room = new Rect2(box.Position + new Vector2(7.0f, 7.0f), RosterIcon - 14.0f, RosterIcon - 30.0f);
+                var room = new Rect2(box.Position + new Vector2(7.0f, 7.0f), RosterIcon - 14.0f, RosterIcon - 34.0f);
                 Vector2 size = art.GetSize();
                 float fit = Mathf.Min(room.Size.X / size.X, room.Size.Y / size.Y);
                 Vector2 drawn = size * fit;
@@ -240,17 +230,17 @@ public sealed partial class Tank3DBench
             // state's token has the other corner
             if (i < RosterKeys.Length)
             {
-                const float r = 11.0f;
+                const float r = 14.0f;
                 Vector2 at = box.Position + new Vector2(3.0f, 3.0f);
-                Color key = gone ? RosterGrey : CardPale;
+                Color key = gone ? RosterGrey : Ui.Ink;
                 c.DrawCircle(at, r + 1.5f, new Color(key, 0.85f * a));
-                c.DrawCircle(at, r, new Color(0.06f, 0.065f, 0.06f, a));
-                c.DrawString(font, at + new Vector2(-r, 4.0f), RosterKeys[i],
-                             HorizontalAlignment.Center, 2.0f * r, 11, new Color(key, a));
+                c.DrawCircle(at, r, new Color(Ui.Bg, a));
+                c.DrawString(font, at + new Vector2(-r, Ui.Caption * 0.36f), RosterKeys[i],
+                             HorizontalAlignment.Center, 2.0f * r, Ui.Caption, new Color(key, a));
             }
             int ci = Array.IndexOf(MovementProfile.All, cls);
-            c.DrawString(font, box.Position + new Vector2(0.0f, RosterIcon - 9.0f), ci >= 0 ? ClassShort[ci] : cls.Tag,
-                         HorizontalAlignment.Center, RosterIcon, 12, new Color(gone ? RosterGrey : CardPale, a));
+            c.DrawString(font, box.Position + new Vector2(0.0f, RosterIcon - 8.0f), ci >= 0 ? ClassShort[ci] : cls.Tag,
+                         HorizontalAlignment.Center, RosterIcon, Ui.Caption, new Color(gone ? RosterGrey : Ui.Ink, a));
             if (gone)
             {
                 var m = box.Grow(-12.0f);

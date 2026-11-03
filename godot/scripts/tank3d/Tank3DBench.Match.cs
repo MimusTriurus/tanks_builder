@@ -1000,7 +1000,7 @@ public sealed partial class Tank3DBench
             OffsetLeft = -420.0f, OffsetRight = 420.0f, OffsetTop = 120.0f,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
-        _banner.AddThemeFontSizeOverride("font_size", 36);
+        _banner.AddThemeFontSizeOverride("font_size", Ui.Display);
         _banner.AddThemeConstantOverride("outline_size", 10);
         _banner.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
         layer.AddChild(_banner);

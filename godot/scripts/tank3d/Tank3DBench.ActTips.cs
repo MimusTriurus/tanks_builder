@@ -7,7 +7,7 @@ namespace TankSpriteTest;
 /// The act's card (docs/hud3d-plan.md, «Карточка действия»; the author's note,
 /// 2026-11-01): the pointer resting on a button of the action panel brings up,
 /// after the unit card's wait (<see cref="PeekDelay"/>), a window over the
-/// button drawn as the unit's card is (<c>_peekBox</c>, Tank3DBench.Peek), and
+/// button drawn as the unit's card is (the theme's box, Tank3DBench.Peek), and
 /// joined to the icon by its leader - a slant out of the icon, then up:
 /// <list type="bullet">
 /// <item>the act's name and its key;</item>
@@ -22,7 +22,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private const float TipW = 300.0f;
+    private const float TipW = 340.0f;
     /// <summary>The leader's slant leg out of the icon, and its rise from the
     /// knee into the card, px.</summary>
     private const float TipLeg = 30.0f, TipRise = 16.0f;
@@ -188,18 +188,20 @@ public sealed partial class Tank3DBench
 
     private void DrawActTip()
     {
-        if (_actTip is not { } c || _peekBox is null || _tipShown is not { } tip)
+        if (_actTip is not { } c || _tipShown is not { } tip)
             return;
         Font font = ThemeDB.FallbackFont;
         (string name, string textKey) = TipWords(tip);
         string text = ActText.TryGetValue(textKey, out string? t) ? t : "";
         const float pad = 14.0f;
         float textW = TipW - 2.0f * pad;
-        float textH = text.Length > 0 ? font.GetMultilineStringSize(text, HorizontalAlignment.Left, textW, 13).Y : 0.0f;
-        float whyH = _tipWhy.Length > 0 ? font.GetMultilineStringSize(_tipWhy, HorizontalAlignment.Left, textW, 13).Y + 8.0f : 0.0f;
-        // a corner button's card has no type line
-        float head = tip.Group is null ? 58.0f : 78.0f;
-        float h = head + textH + whyH + 10.0f;
+        float textH = text.Length > 0 ? font.GetMultilineStringSize(text, HorizontalAlignment.Left, textW, Ui.Body).Y : 0.0f;
+        float whyH = _tipWhy.Length > 0 ? font.GetMultilineStringSize(_tipWhy, HorizontalAlignment.Left, textW, Ui.Body).Y + 8.0f : 0.0f;
+        // the theme's type (Ui): the name a heading, the type and the key captions, the
+        // text a body - a corner button's card has no type line
+        float nameH = font.GetHeight(Ui.Heading), typeH = tip.Group is null ? 0.0f : 6.0f + font.GetHeight(Ui.Caption);
+        float rule = pad + nameH + typeH + 10.0f, head = rule + 10.0f;
+        float h = head + textH + whyH + pad;
 
         Rect2 b = tip.Button.GetGlobalRect();
         float left, top;
@@ -214,7 +216,7 @@ public sealed partial class Tank3DBench
             left = Mathf.Clamp(knee.X - TipW * 0.5f, 8.0f, Mathf.Max(8.0f, c.Size.X - TipW - 8.0f));
             top = Mathf.Max(8.0f, knee.Y - TipRise - h);
             PeekLeader(c, foot, knee, new Vector2(knee.X, top + h));
-            c.DrawStyleBox(_peekBox, new Rect2(left, top, TipW, h));
+            Ui.DrawBox(c, new Rect2(left, top, TipW, h), Ui.PanelOver);
             // the group's colour down the edge, as the side's on the unit's card
             c.DrawRect(new Rect2(left + 1.0f, top + 8.0f, 3.0f, h - 16.0f), group.Ink);
         }
@@ -228,33 +230,34 @@ public sealed partial class Tank3DBench
             float x0 = b.Position.X + b.Size.X * 0.5f;
             var foot = new Vector2(x0, b.Position.Y + 6.0f);
             PeekLeader(c, foot, new Vector2(x0, b.Position.Y - TipRise * 0.5f), new Vector2(x0, top + h));
-            c.DrawStyleBox(_peekBox, new Rect2(left, top, TipW, h));
+            Ui.DrawBox(c, new Rect2(left, top, TipW, h), Ui.PanelOver);
         }
 
-        // the name, and the key on the right
-        c.DrawString(font, new Vector2(left + pad, top + 28.0f), name, HorizontalAlignment.Left, -1, 20, CardPale);
+        // the name, and the key on the right, on one baseline
+        float line = top + pad + font.GetAscent(Ui.Heading);
+        c.DrawString(font, new Vector2(left + pad, line), name, HorizontalAlignment.Left, -1, Ui.Heading, Ui.Ink);
         string key = tip.Group is null ? tip.Key : ActKeyOf(tip.Button);
         if (key.Length > 0)
         {
             string says = L.T("acttips.key", key);
-            float w = font.GetStringSize(says, HorizontalAlignment.Left, -1, 13).X;
-            c.DrawString(font, new Vector2(left + TipW - pad - w, top + 26.0f), says, HorizontalAlignment.Left, -1, 13, CardDim);
+            float w = font.GetStringSize(says, HorizontalAlignment.Left, -1, Ui.Caption).X;
+            c.DrawString(font, new Vector2(left + TipW - pad - w, line), says, HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
         }
-        float y = top + head;
         if (tip.Group is { } g)
         {
             // the type: the group's shape and name in its colour
-            MarkAt(c, new Vector2(left + pad + 6.0f, top + 48.0f), g.Shape, g.Ink, true, 5.5f);
-            c.DrawString(font, new Vector2(left + pad + 18.0f, top + 53.0f), GroupName(g.Shape),
-                         HorizontalAlignment.Left, -1, 13, g.Ink);
+            float typeLine = top + pad + nameH + 6.0f + font.GetAscent(Ui.Caption);
+            MarkAt(c, new Vector2(left + pad + 7.0f, typeLine - Ui.Caption * 0.33f), g.Shape, g.Ink, true, 6.0f);
+            c.DrawString(font, new Vector2(left + pad + 20.0f, typeLine), GroupName(g.Shape),
+                         HorizontalAlignment.Left, -1, Ui.Caption, g.Ink);
         }
-        c.DrawLine(new Vector2(left + 12.0f, y - 18.0f), new Vector2(left + TipW - 12.0f, y - 18.0f),
-                   new Color(0.34f, 0.35f, 0.31f), 1.0f);
+        c.DrawRect(new Rect2(left + 12.0f, top + rule, TipW - 24.0f, Ui.RimLayout(c, 1)), Ui.Line);
         // what it does; why it is grey
+        float y = top + head + font.GetAscent(Ui.Body);
         if (text.Length > 0)
-            c.DrawMultilineString(font, new Vector2(left + pad, y), text, HorizontalAlignment.Left, textW, 13, -1, CardPale);
+            c.DrawMultilineString(font, new Vector2(left + pad, y), text, HorizontalAlignment.Left, textW, Ui.Body, -1, Ui.Ink);
         if (_tipWhy.Length > 0)
-            c.DrawMultilineString(font, new Vector2(left + pad, y + textH + 8.0f), _tipWhy, HorizontalAlignment.Left, textW, 13, -1,
+            c.DrawMultilineString(font, new Vector2(left + pad, y + textH + 8.0f), _tipWhy, HorizontalAlignment.Left, textW, Ui.Body, -1,
                                   AimPierce);
     }
 
