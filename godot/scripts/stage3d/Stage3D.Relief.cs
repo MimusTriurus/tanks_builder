@@ -234,6 +234,32 @@ public sealed partial class Stage3D
     /// <summary>A tile of the sand photograph, in circumradii.</summary>
     private const float SandTile = 1.4f;
 
+    /// <summary>The forest floor's photograph (<see cref="ShowForest"/>,
+    /// ambientCG Ground037, CC0): moss and litter, which greyed the slopes as
+    /// their earth and belongs under the trees.</summary>
+    internal static ImageTexture? ForestPhoto() => Photo("Ground037/Ground037_2K-JPG_Color.jpg", "forest");
+
+    /// <summary>The forest floor in a photograph on a wood cell's share, the
+    /// painted grass giving way to it (the user's call, 2026-11-03: the grass
+    /// was laid over every flat, a wood's own, and hid the wood's tone with
+    /// it). Off by default, the new style (docs/new_style.md); <c>--forest</c>
+    /// and the panel switch it on when the file is there.</summary>
+    public bool ShowForest
+    {
+        get => _showForest;
+        set
+        {
+            _showForest = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("forest_on", value && ForestPhoto() is not null ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showForest;
+
+    /// <summary>A tile of the forest floor's photograph, in circumradii.</summary>
+    private const float ForestTile = 1.4f;
+
     /// <summary>A photograph's mean brightness and its spread, off a grid of
     /// its pixels: a grain taken from it is its distance from the mean in
     /// spreads, so another picture swaps in without new numbers.</summary>
@@ -647,6 +673,13 @@ void fragment() {
             ink.Param("sand_tone", PhotoTone(sandPhoto));
         }
         ink.Param("sand_on", ShowSand && SandPhoto() is not null ? 1.0f : 0.0f);
+        if (ForestPhoto() is { } forestPhoto)
+        {
+            ink.Param("forest_tex", forestPhoto);
+            ink.Param("forest_tile", 1.0f / (r * ForestTile));
+            ink.Param("forest_tone", PhotoTone(forestPhoto));
+        }
+        ink.Param("forest_on", ShowForest && ForestPhoto() is not null ? 1.0f : 0.0f);
         ink.Param("turf_on", ShowTurf ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
@@ -1018,6 +1051,15 @@ uniform float sand_on = 0.0;
 uniform float sand_tile = 0.01;
 uniform vec2 sand_tone = vec2(0.5, 0.1);
 uniform float sand_swing = 0.14;
+// The forest floor off a photograph: its mean and spread, how much of the
+// ink's brightness one spread moves, and how much of the photograph's own
+// colour comes through the wood's tone (0: its grain over wood_ink only)
+uniform sampler2D forest_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float forest_on = 0.0;
+uniform float forest_tile = 0.01;
+uniform vec2 forest_tone = vec2(0.5, 0.1);
+uniform float forest_swing = 0.14;
+uniform float forest_photo = 0.8;
 
 vec3 photo3(sampler2D t, vec3 p, vec3 tw, float k) {
     return texture(t, p.xz * k).rgb * tw.y + texture(t, p.zy * k).rgb * tw.x
@@ -1122,7 +1164,15 @@ vec4 cell_ink(vec2 cr) {
                                   : rock_ink * (0.55 + 0.7 * grain);
         soil = mix(soil, crag, smoothstep(0.5, 0.62, COLOR.g));
     }
-    soil = mix(soil, wood_ink * (0.6 + 0.6 * grain), 0.6 * smoothstep(0.3, 0.7, COLOR.b));
+    vec3 wood = wood_ink * (0.6 + 0.6 * grain);
+    if (forest_on > 0.5) {
+        vec3 fp = photo3(forest_tex, ground, tw, forest_tile);
+        float fgrain = 0.5 + (dot(fp, vec3(0.299, 0.587, 0.114)) - forest_tone.x) / forest_tone.y * forest_swing;
+        wood = mix(wood_ink * (0.6 + 0.6 * fgrain), fp, forest_photo);
+    }
+    // the floor whole under the photograph: the grass gives way to it below
+    float wshare = smoothstep(0.3, 0.7, COLOR.b);
+    soil = mix(soil, wood, (forest_on > 0.5 ? 1.0 : 0.6) * wshare);
     // grass over the rest, in patches, the earth through it on steep banks
     // (the cells' painted lawn, Grass3D, is a hexagon a cell - off on the relief)
     float bare = max(smoothstep(0.25, 0.6, COLOR.r), smoothstep(0.25, 0.6, COLOR.g));
@@ -1131,7 +1181,8 @@ vec4 cell_ink(vec2 cr) {
     // none on a terrace's slope: grass on the flats, earth on the banks
     // (the tufts keep off them too, BoardDress.GrassSlope)
     float flat_ = (1.0 - bare) * (1.0 - COLOR.a) * (1.0 - smoothstep(0.2, 0.32, bank))
-                * (1.0 - smoothstep(0.2, 0.6, soil_look.x + soil_look.y + soil_look.w));
+                * (1.0 - smoothstep(0.2, 0.6, soil_look.x + soil_look.y + soil_look.w))
+                * (1.0 - forest_on * wshare);
     float lawn = flat_ * smoothstep(0.30, 0.42, patch_ + 0.25);
     vec3 turf = mix(grass_ink, grass_tip, smoothstep(0.35, 0.75, mire_fbm(ground.xz * 0.05)));
     if (turf_on < 0.5) {
