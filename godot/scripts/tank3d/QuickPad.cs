@@ -40,8 +40,16 @@ public partial class QuickPad : Control
     /// <summary>A soft oval under the picture, the prototype's stage light.</summary>
     public Color? Glow;
     public HorizontalAlignment Align = HorizontalAlignment.Center;
+    /// <summary>A word in a disc on the box's right edge: a node's price.</summary>
+    public string Badge = "";
+    public int BadgeSize = 13;
+    public Color BadgeRim, BadgeFill, BadgeInk;
 
     public event Action? Clicked;
+    /// <summary>The right button, or Delete / Backspace on the keyboard: the undoing
+    /// click, kept off the left one (a bought level is dropped by it, not by a click
+    /// that looks like the buying one).</summary>
+    public event Action? Dropped;
     /// <summary>The pointer came on (true) or went off (false).</summary>
     public event Action<QuickPad, bool>? Over;
 
@@ -100,13 +108,21 @@ public partial class QuickPad : Control
         {
             AcceptEvent();
             Clicked.Invoke();
+            return;
+        }
+        bool drop = e is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true }
+                    || e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Delete or Key.Backspace };
+        if (drop && !Disabled && Dropped is not null)
+        {
+            AcceptEvent();
+            Dropped.Invoke();
         }
     }
 
     public override void _Draw()
     {
         bool focus = HasFocus();
-        bool lit = (_hover || focus) && !Disabled && Clicked is not null;
+        bool lit = (_hover || focus) && !Disabled && (Clicked is not null || Dropped is not null);
         Color rim = lit && HoverRim is { } hr ? hr : Rim;
         Color fill = lit && HoverFill is { } hf ? hf : Fill;
         float a = Disabled ? 0.4f : 1.0f;
@@ -178,6 +194,20 @@ public partial class QuickPad : Control
             float pad = Align == HorizontalAlignment.Center ? 0.0f : 12.0f;
             for (int i = 0; i < lines.Length; i++)
                 DrawString(font, new Vector2(pad, top + i * line), lines[i], Align, s.X - 2 * pad, FontSize, new Color(Ink, Ink.A * a));
+        }
+        if (Badge.Length > 0)
+        {
+            // on the right point of the hex, mostly beside it: read with the node, not inside
+            // it, and clear of the name and kind over and under it (on the top corner it
+            // covered the kind of the node above)
+            Font font = FontOf(true);
+            float r = font.GetHeight(BadgeSize) * 0.62f;
+            var at = new Vector2(s.X + r * 0.35f, s.Y * 0.5f);
+            DrawCircle(at, r, new Color(BadgeFill, BadgeFill.A * a));
+            DrawArc(at, r, 0, Mathf.Tau, 32, new Color(BadgeRim, BadgeRim.A * a), RimLayout(this, 1.5f), true);
+            float w = font.GetStringSize(Badge, HorizontalAlignment.Left, -1, BadgeSize).X;
+            DrawString(font, new Vector2(at.X - w * 0.5f, at.Y - font.GetHeight(BadgeSize) * 0.5f + font.GetAscent(BadgeSize)),
+                       Badge, HorizontalAlignment.Left, -1, BadgeSize, new Color(BadgeInk, BadgeInk.A * a));
         }
     }
 

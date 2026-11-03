@@ -132,15 +132,19 @@ public sealed partial class Tank3DBench
         col.AddChild(what);
 
         // every icon the hangar draws, at every size it draws it
-        var icons = new List<(string Name, int Px)>();
+        var icons = new List<(string Name, int Px, bool Grey)>();
         foreach (QuickSquad.Class c in QuickSquad.Classes)
         {
-            icons.Add((QuickClassIcon(c), (int)QhTabIcon));
-            icons.Add((QuickClassIcon(c), 48));
+            icons.Add((QuickClassIcon(c), (int)QhTabIcon, false));
+            icons.Add((QuickClassIcon(c), 48, false));
             foreach (QuickSquad.Branch b in c.Branches)
                 foreach (QuickSquad.Upgrade u in b.Levels)
-                    if (u.Icon.Length > 0 && !icons.Contains((u.Icon, 32)))
-                        icons.Add((u.Icon, 32));
+                    if (u.Icon.Length > 0 && !icons.Contains((u.Icon, 32, false)))
+                    {
+                        // a node's icon in colour and in grey, the one out of reach
+                        icons.Add((u.Icon, 32, false));
+                        icons.Add((u.Icon, 32, true));
+                    }
         }
         int views = QuickStageWanted().Count, done = 0;
         bar.MaxValue = views * 2 + icons.Count;
@@ -153,7 +157,7 @@ public sealed partial class Tank3DBench
         what.Text = L.T("loading.icons");
         for (int i = 0; i < icons.Count; i++)
         {
-            QIcon(icons[i].Name, icons[i].Px);
+            QIcon(icons[i].Name, icons[i].Px, icons[i].Grey);
             bar.Value = ++done;
             if (i % 6 == 5)
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);

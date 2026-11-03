@@ -1018,11 +1018,17 @@ public sealed partial class Tank3DBench
         int mine = chosen ? s.Level : 0;
         var col = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Alignment = BoxContainer.AlignmentMode.Begin };
         col.AddThemeConstantOverride("separation", 0);
+        // the branch's name on a band across the column's top, a heading's size (author
+        // 2026-11-03: in the nodes' ink and a step over their names it read as one more
+        // of them): olive with dark ink on the chosen one, as a bought node; dark with a
+        // line under it on the other, lit under the pointer where a click moves the level
         var head = new QuickPad
         {
-            Text = b.Name, FontSize = QSize(14), Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
-            Ink = QInk, HoverFill = other ? QSel : null, CustomMinimumSize = new Vector2(0, QSize(14) * 2),
+            Text = b.Name, FontSize = QSize(18), Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
+            Ink = chosen ? QOnOlive : QInk, CustomMinimumSize = new Vector2(0, QSize(14) * 2),
         };
+        float bandHigh = head.CustomMinimumSize.Y;
+        bool lit = false;
         head.SetMeta("q_branch", b.Id);
         head.Clicked += () =>
         {
@@ -1031,10 +1037,14 @@ public sealed partial class Tank3DBench
                 q.Squad[at] = q.Squad[at] with { Branch = b.Id };
             QuickShow();
         };
-        string ups = string.Join("\n", b.Levels.Select((u, i) => $"{i + 1}. {u.Name}{(u.Flag is null ? " *" : "")}"));
+        string ups = string.Join("\n", b.Levels.Select((u, i) => u.Flag is null
+            ? L.T("quick.branch_tip_missing", i + 1, u.Name) : $"{i + 1}. {u.Name}"));
         QTip(head, () => QTipBox(L.T("quick.branch_tip", b.Tag), b.Name, ups, null,
             chosen ? L.T("quick.branch_chosen") : other ? L.T("quick.branch_move", s.Level) : L.T("quick.branch_first")));
         col.AddChild(head);
+        // the box's own top margin, given up to the band, under it instead
+        col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6), MouseFilter = Control.MouseFilterEnum.Ignore });
+        float footHigh = QFootHigh;
         for (int l = 1; l <= b.Levels.Length; l++)
         {
             QuickSquad.Upgrade u = b.Levels[l - 1];
@@ -1042,32 +1052,48 @@ public sealed partial class Tank3DBench
             // this machine to (b, l) costs l less the level it holds
             int need = l - s.Level;
             bool shortOf = !open && need > left;
-            bool next = !open && !shortOf && (chosen ? l == s.Level + 1 : l == 1);
-            if (l > 1)
-                col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
+            // amber is buying and nothing else: the level after the one held, on either
+            // branch (on the other it moves the machine there too); the other branch's
+            // node at the level held is a free move, ringed olive (author 2026-11-03)
+            bool next = !open && !shortOf && need > 0 && l == s.Level + 1;
+            bool swap = other && l == s.Level;
             int level = l;
-            // the upgrade's icon in the node; its number only where there is no icon
-            Texture2D? icon = QIcon(u.Icon, 32);
+            // the upgrade's icon in the node, its number only where there is none; full
+            // colour where a click does something now, grey (not faded: a dark icon faded
+            // on the dark panel was lost) where it does not yet
+            bool bright = open || next || swap;
+            Texture2D? icon = QIcon(u.Icon, 32, grey: !bright);
             var hex = new QuickPad
             {
-                Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next ? 2 : 1,
-                Rim = open ? QOlive : next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
+                Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next || swap ? 2 : 1,
+                Rim = open || swap ? QOlive : next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
                 Fill = open ? QOlive : QPanelC, Ink = open ? QOnOlive : QInk, Dashed = u.Flag is null && !open,
-                HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(50, 43),
+                HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(46, 40),
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
-                Picture = icon, PictureSize = new Vector2(32, 32), PictureAlpha = open || next ? 1.0f : 0.55f,
+                Picture = icon, PictureSize = new Vector2(30, 30),
                 TextureFilter = QIconFilter,
+                // the price on the node, what this click costs: none on what is held or free
+                Badge = open || need <= 0 ? "" : need.ToString(), BadgeSize = QSize(12),
+                BadgeRim = next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
+                BadgeFill = next ? QAmber : QInset, BadgeInk = next ? QOnOlive : QInk,
             };
             hex.SetMeta("q_level", l);
-            hex.Clicked += () =>
-            {
-                QuickSquad.Slot now = q.Squad[at];
-                if (now.Branch == b.Id && now.Level == level)
-                    q.Squad[at] = now with { Level = level - 1 };
-                else if (level - now.Level <= q.Budget - QuickSquad.Spent(q.Squad))
-                    q.Squad[at] = now with { Branch = b.Id, Level = level };
-                QuickShow();
-            };
+            // the left button buys or moves, never takes back: an open node holds still
+            if (!open)
+                hex.Clicked += () =>
+                {
+                    QuickSquad.Slot now = q.Squad[at];
+                    if (level - now.Level <= q.Budget - QuickSquad.Spent(q.Squad))
+                        q.Squad[at] = now with { Branch = b.Id, Level = level };
+                    QuickShow();
+                };
+            // the right button (or Delete) drops the top open level, and only it
+            else if (l == mine)
+                hex.Dropped += () =>
+                {
+                    q.Squad[at] = q.Squad[at] with { Level = level - 1 };
+                    QuickShow();
+                };
             string state = open ? (l == mine ? L.T("quick.lvl_open_drop") : L.T("quick.lvl_open"))
                 : shortOf ? L.T("quick.lvl_short", Pts(need - left))
                 : other ? L.T("quick.lvl_switch", b.Name, l)
@@ -1075,23 +1101,36 @@ public sealed partial class Tank3DBench
             QTip(hex, () => QTipBox(L.T("quick.level_tip", b.Name, level), u.Name, u.Text, (u.Kind, Pts(level)),
                                     state + (u.Flag is null ? L.T("quick.lvl_dash_note") : "")));
             col.AddChild(hex);
-            var nm = QText(u.Name + (u.Flag is null ? " *" : ""), 13, open ? QInk : QMuted, bold: open, wrap: true);
+            // under the node, close to it: its name, its kind, then the link down to the next
+            // node filling what is left - the name and kind read as the node's, not the next's
+            // (author 2026-11-03: equal gaps above and below left them floating between two)
+            // fixed high and clipped, whatever the name wraps to: every class's tree one height
+            var held = new Control { CustomMinimumSize = new Vector2(0, footHigh), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Ignore };
+            var foot = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+            foot.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            held.AddChild(foot);
+            foot.AddThemeConstantOverride("separation", 0);
+            foot.AddChild(new Control { CustomMinimumSize = new Vector2(0, 2), MouseFilter = Control.MouseFilterEnum.Ignore });
+            // two lines at most: a longer name must not make this tree taller than the
+            // next card's (the foot is fixed high, the link takes what the name leaves)
+            var nm = QText(u.Name, 13, QInk, bold: open, wrap: true);
             nm.HorizontalAlignment = HorizontalAlignment.Center;
-            // two lines, never more and never fewer: a longer name must not make
-            // this tree taller than the next card's, or the stage over it shorter
-            // (a box of its own, fixed high: a label's own height follows its lines and their spacing)
             nm.MaxLinesVisible = 2;
             nm.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
-            nm.VerticalAlignment = VerticalAlignment.Center;
-            var slot = new Control { CustomMinimumSize = new Vector2(0, QNameHigh), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Ignore };
-            nm.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-            slot.AddChild(nm);
-            col.AddChild(slot);
-            var kind = QText(QKind(u), 11, QMuted);
+            foot.AddChild(nm);
+            // a step below the name: the scale's floor, muted, never bold
+            var kind = QText(QKind(u), 12, QMuted);
             kind.HorizontalAlignment = HorizontalAlignment.Center;
-            col.AddChild(kind);
+            foot.AddChild(kind);
+            Control link = QLink(l < b.Levels.Length ? l < mine ? QOlive : QLine : null);
+            link.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+            foot.AddChild(link);
+            col.AddChild(held);
         }
-        var box = QBox(col, chosen ? QSel : QInset, 6, chosen ? QOlive : QLine);
+        var box = QBox(col, chosen ? QSel : QInset, 6, chosen ? QOlive : QLine,
+                       () => (chosen ? QOlive : lit ? QSel : QPanelC, chosen ? null : QLine, bandHigh));
+        if (other)
+            head.Over += (_, on) => { lit = on; box.QueueRedraw(); };
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         return box;
     }
@@ -1101,14 +1140,16 @@ public sealed partial class Tank3DBench
     /// null with no file. Twice the size it is drawn at: drawn down it stays sharp, and
     /// on a window larger than the layout too (author 2026-11-03: a 64 px raster drawn
     /// at 112 was blurred).</summary>
-    private static Texture2D? QIcon(string name, int px)
+    private static Texture2D? QIcon(string name, int px, bool grey = false)
     {
         if (name.Length == 0)
             return null;
-        string key = $"{name}@{px}";
+        string key = grey ? $"{name}@{px}~grey" : $"{name}@{px}";
         if (!QIcons.TryGetValue(key, out Texture2D? tex))
         {
             Image? image = ActImage(name, px * 2);
+            if (image is not null && grey)
+                QGrey(image);
             image?.GenerateMipmaps();
             QIcons[key] = tex = image is null ? null : ImageTexture.CreateFromImage(image);
         }
@@ -1121,13 +1162,59 @@ public sealed partial class Tank3DBench
 
     private static readonly Dictionary<string, Texture2D?> QIcons = new();
 
-    /// <summary>An upgrade's name under its node, px high: two lines of its size and their spacing.</summary>
-    private static float QNameHigh => Mathf.Ceil(QuickPad.FontOf(true).GetHeight(QSize(13)) * 2 + 6);
+    /// <summary>An icon's colours to grey by their light, lifted into the upper half: a
+    /// node not yet in reach says so without its colour, yet stays as legible as a lit one
+    /// on the dark panel (a dark red one faded to 0.55 was lost, author 2026-11-03).</summary>
+    private static void QGrey(Image image)
+    {
+        image.Convert(Image.Format.Rgba8);
+        for (int y = 0; y < image.GetHeight(); y++)
+            for (int x = 0; x < image.GetWidth(); x++)
+            {
+                Color c = image.GetPixel(x, y);
+                float g = 0.42f + 0.5f * c.Luminance;
+                image.SetPixel(x, y, new Color(g, g, g, c.A));
+            }
+    }
 
-    /// <summary>An upgrade's kind in a word, under its node.</summary>
+    /// <summary>An upgrade's name and kind under its node and the link down from it, px
+    /// high: the name's two lines, the kind's one, the gap over them and the link's least.</summary>
+    private static float QFootHigh
+    {
+        get
+        {
+            // measured off labels set as they are: a label's lines stand further apart than
+            // the font's height, and summed from it the foot came out short, a wrapped name
+            // making its tree taller than the next class's
+            float Probe(string text, int size, bool bold)
+            {
+                Label l = QText(text, size, QInk, bold);
+                float y = l.GetMinimumSize().Y;
+                l.Free();
+                return y;
+            }
+            return Mathf.Ceil(Mathf.Max(Probe("Ag\nAg", 13, false), Probe("Ag\nAg", 13, true)) + Probe("Ag", 12, false) + 2 + 6);
+        }
+    }
+
+    /// <summary>The line from one node down to the next, through the middle of the
+    /// column: olive where both ends are bought; none for null (the last level).</summary>
+    private static Control QLink(Color? ink)
+    {
+        var link = new Control { CustomMinimumSize = new Vector2(0, 6), MouseFilter = Control.MouseFilterEnum.Ignore };
+        if (ink is { } c)
+            link.Draw += () =>
+            {
+                float w = QuickPad.RimLayout(link, 2), x = Mathf.Round(link.Size.X * 0.5f - w * 0.5f);
+                link.DrawRect(new Rect2(x, 1, w, link.Size.Y - 1), c);
+            };
+        return link;
+    }
+
+    /// <summary>An upgrade's kind in a word, under its node. One with no rule on the
+    /// bench yet says its kind too: that it is missing is the dashed rim's and the tip's.</summary>
     private static string QKind(QuickSquad.Upgrade u) =>
-        u.Flag is null ? L.T("quick.kind_missing")
-        : u.Ability ? u.Attack ? L.T("quick.kind_attack") : L.T("quick.kind_action")
+        u.Ability ? u.Attack ? L.T("quick.kind_attack") : L.T("quick.kind_action")
         : L.T("quick.kind_passive");
 
     private static string QRoman(int n) => n switch { 0 => "0", 1 => "I", 2 => "II", 3 => "III", 4 => "IV", _ => "V" };
@@ -1614,16 +1701,34 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>A panel round <paramref name="inner"/>: the prototype's square box with its line.</summary>
-    private static PanelContainer QBox(Control inner, Color bg, float pad, Color? rim = null)
+    /// <param name="band">A band across the box's top, under its rim, <c>High</c> tall and
+    /// flush with its edges: the inner's first child stands on it (the top margin goes).
+    /// Read each draw, so a hover can change its colour.</param>
+    private static PanelContainer QBox(Control inner, Color bg, float pad, Color? rim = null,
+                                       Func<(Color Fill, Color? Line, float High)>? band = null)
     {
         // the rim drawn over the fill in whole screen pixels (QuickPad.DrawRim), not the
         // style's border: that is whole layout pixels, 1.25 screen pixels in a
         // 2000-wide window, and fell on one pixel or two by where the panel stood
         var box = new StyleBoxFlat { BgColor = bg, BorderColor = rim ?? QLine };
         box.SetContentMarginAll(pad);
+        if (band is not null)
+            box.ContentMarginTop = 0;
         var panel = new PanelContainer();
         panel.AddThemeStyleboxOverride("panel", box);
-        panel.Draw += () => QuickPad.DrawRim(panel, panel.Size, box.BorderColor, 1.0f);
+        panel.Draw += () =>
+        {
+            if (band?.Invoke() is { } b)
+            {
+                panel.DrawRect(new Rect2(0, 0, panel.Size.X, b.High), b.Fill);
+                if (b.Line is { } line)
+                {
+                    float t = QuickPad.RimLayout(panel, 1);
+                    panel.DrawRect(new Rect2(0, b.High - t, panel.Size.X, t), line);
+                }
+            }
+            QuickPad.DrawRim(panel, panel.Size, box.BorderColor, 1.0f);
+        };
         panel.AddChild(inner);
         return panel;
     }
@@ -1777,6 +1882,14 @@ public sealed partial class Tank3DBench
                     for (int f = 0; f < 2; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                     QuickPadAt(Slot(p[1]), p[2], (int)F(p[3], 1))?.GrabFocus();
+                    continue;
+                case "drop" when p.Length > 3:
+                    // the node's right button, as the pointer would give it: a bought level taken back
+                    QuickShow();
+                    for (int f = 0; f < 2; f++)
+                        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    QuickPadAt(Slot(p[1]), p[2], (int)F(p[3], 1))?._GuiInput(
+                        new InputEventMouseButton { ButtonIndex = MouseButton.Right, Pressed = true });
                     continue;
                 case "map" when p.Length > 1: q.Map = p[1]; break;
                 case "swap": q.Player = Across(q.Player); QuickArt(); break;
