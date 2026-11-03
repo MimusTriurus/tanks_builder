@@ -93,8 +93,55 @@ public sealed partial class Stage3D
 
     private bool _showTurf = true;
 
+    /// <summary>The pebble photograph on the bed of the water instead of the
+    /// flat bed ink (<see cref="AssetRoot.Ground"/>,
+    /// <c>river_small_rocks/river_small_rocks_diff_2k.jpg</c>, Poly Haven, CC0).
+    /// Off by default, a trial of the new style (docs/new_style.md, the
+    /// user's call, 2026-11-03); <c>--bed</c> and the panel switch it on when
+    /// the file is there.</summary>
+    public bool ShowBed
+    {
+        get => _showBed;
+        set
+        {
+            _showBed = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("bed_on", value && Pebbles() is not null ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showBed;
+
     /// <summary>A tile of the lawn photograph, in circumradii.</summary>
     private const float LawnTile = 1.4f;
+
+    /// <summary>A tile of the pebble photograph, in circumradii. Not to
+    /// scale: the scan is about a metre and a half of river bed, a hex some
+    /// seven, and stones that small read as noise under the water - these are
+    /// cobbles a board can see.</summary>
+    private const float BedTile = 2.2f;
+
+    private static ImageTexture? _bed;
+    private static bool _bedRead;
+
+    /// <summary>The pebble photograph, read once, with its mipmaps; null when
+    /// it is not on disk.</summary>
+    internal static ImageTexture? Pebbles()
+    {
+        if (_bedRead)
+            return _bed;
+        _bedRead = true;
+        string path = AssetRoot.Ground + "/river_small_rocks/river_small_rocks_diff_2k.jpg";
+        if (!System.IO.File.Exists(path))
+            return null;
+        Image img = Image.LoadFromFile(path);
+        if (img is null || img.IsEmpty())
+            return null;
+        img.GenerateMipmaps();
+        _bed = ImageTexture.CreateFromImage(img);
+        Log.Print($"stage3d: bed {path} {img.GetWidth()}x{img.GetHeight()}");
+        return _bed;
+    }
 
     private static ImageTexture? _lawn;
     private static bool _lawnRead;
@@ -462,6 +509,12 @@ void fragment() {
             ink.Param("lawn_tile", 1.0f / (r * LawnTile));
         }
         ink.Param("lawn_on", ShowLawn && Lawn() is not null ? 1.0f : 0.0f);
+        if (Pebbles() is { } bed)
+        {
+            ink.Param("bed_tex", bed);
+            ink.Param("bed_tile", 1.0f / (r * BedTile));
+        }
+        ink.Param("bed_on", ShowBed && Pebbles() is not null ? 1.0f : 0.0f);
         ink.Param("turf_on", ShowTurf ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
@@ -804,6 +857,14 @@ uniform vec3 sand_ink : source_color = vec3(0.86, 0.76, 0.55);
 uniform vec3 rock_ink : source_color = vec3(0.58, 0.56, 0.54);
 uniform vec3 wood_ink : source_color = vec3(0.30, 0.38, 0.20);
 uniform vec3 bed_ink : source_color = vec3(0.30, 0.27, 0.20);
+// The pebble photograph (AssetRoot.Ground) on the bed instead of bed_ink, one
+// tile per this many world units, and how bright under the water
+uniform sampler2D bed_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float bed_on = 0.0;
+uniform float bed_tile = 0.01;
+uniform float bed_gain = 0.8;
+// how far the stones stand out of their own mean tone: the water flattens them
+uniform float bed_contrast = 1.7;
 // The lawn photograph (AssetRoot.Ground), one tile per this many world units,
 // and how bright: on when it is on disk and switched on
 uniform sampler2D lawn_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
@@ -915,7 +976,18 @@ vec4 cell_ink(vec2 cr) {
         soil = mix(soil, photo * lawn_gain, flat_ * smoothstep(0.0, 0.12, patch_ + 0.25));
     } else
         soil = mix(soil, turf * (0.75 + 0.5 * grain), lawn);
-    soil = mix(soil, bed_ink * (0.6 + 0.6 * grain), COLOR.a);
+    vec3 bed = bed_ink * (0.6 + 0.6 * grain);
+    if (bed_on > 0.5) {
+        // the pebbles, two scales mixed by a noise like the lawn, so the tile
+        // does not repeat across a pond
+        vec2 b = ground.xz * bed_tile;
+        vec2 b2 = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8)) * ground.xz * bed_tile * 0.43 + vec2(0.57, 0.23);
+        bed = mix(texture(bed_tex, b).rgb, texture(bed_tex, b2).rgb,
+                  smoothstep(0.35, 0.65, mire_fbm(ground.xz * 0.011 + vec2(3.0, 9.0))));
+        float mean_ = dot(bed, vec3(0.299, 0.587, 0.114));
+        bed = max(mix(vec3(mean_), bed, 1.15) + (mean_ - 0.42) * (bed_contrast - 1.0), vec3(0.0)) * bed_gain;
+    }
+    soil = mix(soil, bed, COLOR.a);
     // the roads over all of it (Stage3D.Roads, format 3)
     soil = road_at(soil, grain);
     vec3 hexc = hex_at(ground.xz);

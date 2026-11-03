@@ -91,6 +91,9 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--lawn</c>: the lawn photograph on the flats, not the
     /// relief's painted grass (<see cref="Stage3D.ShowLawn"/>).</summary>
     private bool _lawnOn;
+    /// <summary><c>--bed</c>: the pebble photograph on the water's bed, not
+    /// the flat ink (<see cref="Stage3D.ShowBed"/>; docs/new_style.md).</summary>
+    private bool _bedOn;
     /// <summary><c>--no-turf</c>: no grass on the relief's ground texture; with
     /// it the ground is bare soil everywhere (<see cref="Stage3D.ShowTurf"/>).</summary>
     private bool _turfOn = true;
@@ -1142,6 +1145,7 @@ public sealed partial class Tank3DBench : Node3D
             SoilWind = _windBuilt,
             ShowBrow = _browOn,
             ShowLawn = _lawnOn,
+            ShowBed = _bedOn,
             ShowTurf = _turfOn,
         };
         AddChild(_stage);
@@ -1552,6 +1556,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--ice" && more) _rockIce = F(args[++i], RockClimate.DefaultIce);
             else if (a == "--brow") _browOn = true;
             else if (a == "--lawn") _lawnOn = true;
+            else if (a == "--bed") _bedOn = true;
             else if (a == "--no-turf") _turfOn = false;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
@@ -2781,6 +2786,9 @@ public sealed partial class Tank3DBench : Node3D
             if (Stage3D.Lawn() is not null)
                 _panel.Toggle("tank3d.relief.lawn", "  трава фото, а не пятнами  (--lawn)",
                               () => _stage.ShowLawn, v => _stage.ShowLawn = v);
+            if (Stage3D.Pebbles() is not null)
+                _panel.Toggle("tank3d.relief.bed", "дно галькой, фото  (--bed)",
+                              () => _stage.ShowBed, v => _stage.ShowBed = v);
             _panel.Expand("tank3d.relief", true);
         }
         // Whether the pond is swum or drowned in - see TankTick.Amphibious.
