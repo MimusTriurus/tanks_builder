@@ -52,7 +52,7 @@ public sealed partial class Tank3DBench
     private readonly (Control? View, QuickPad? Pick, Label? Name)[] _qhRing = new (Control?, QuickPad?, Label?)[QuickSquad.Size];
 
     /// <summary>The podium's head and tag strip, px.</summary>
-    private const float QhHeadHigh = 40, QhStripHigh = 52;
+    private const float QhHeadHigh = 40, QhStripHigh = 72;
 
     /// <summary>How near the front each slot stands, 1 in front: the ring's draw order.</summary>
     private readonly float[] _qhNear = new float[QuickSquad.Size];
@@ -220,18 +220,20 @@ public sealed partial class Tank3DBench
         stage.AddChild(back);
         stage.AddChild(next);
 
-        // where the class is among the five; a class there are two of is shut
+        // where the class is among the five, by its icon (its tag where there is none);
+        // a class there are two of is shut
         var strip = new HBoxContainer();
         strip.AddThemeConstantOverride("separation", 6);
         foreach (QuickSquad.Class c in QuickSquad.Classes)
         {
             bool mine = s.Class == c.Tag, full = !mine && QuickSquad.ClassWhy(q.Squad, at, c.Tag).Length > 0;
             QuickSquad.Class one = c;
+            Texture2D? icon = QIcon(QuickClassIcon(c));
             var tag = new QuickPad
             {
-                Text = c.Short, FontSize = 13, Bold = true, CustomMinimumSize = new Vector2(52, 30),
+                Text = icon is null ? c.Short : "", FontSize = 13, Bold = true, CustomMinimumSize = new Vector2(62, 56),
                 Rim = mine ? QOlive : QLine, Fill = mine ? QOlive : QPanelC, Ink = mine ? QOnOlive : QMuted,
-                HoverRim = QOlive, Disabled = full,
+                HoverRim = QOlive, Disabled = full, Picture = icon, PictureSize = new Vector2(56, 56),
             };
             tag.Clicked += () => QuickHangarSet(at, one.Tag);
             QTip(tag, () => QuickClassTip(one, full, s.Level > 0 && !mine ? L.T("quick.class_change", Pts(s.Level)) : null));
@@ -444,7 +446,16 @@ public sealed partial class Tank3DBench
         QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
         var name = new HBoxContainer();
         name.AddThemeConstantOverride("separation", 8);
-        name.AddChild(QText(c.Name, 18, QInk, bold: true));
+        // the class's icon, the strip's under the stage, before its name
+        if (QIcon(QuickClassIcon(c)) is { } icon)
+            name.AddChild(new TextureRect
+            {
+                Texture = icon, CustomMinimumSize = new Vector2(48, 48), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered, MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+        var title = QText(c.Name, 18, QInk, bold: true);
+        title.VerticalAlignment = VerticalAlignment.Center;
+        name.AddChild(title);
         var duty = QText(c.Duty, 13, QOlive, bold: true);
         duty.VerticalAlignment = VerticalAlignment.Center;
         name.AddChild(duty);
@@ -457,4 +468,7 @@ public sealed partial class Tank3DBench
         col.AddChild(QText(L.T("quick.trait", c.Trait), 13, QInk, wrap: true));
         // what it carries is the tree's open nodes: nothing said again (as on the old build)
     }
+
+    /// <summary>A class's icon in <c>Icons/</c>: <c>class_LT</c> and so on.</summary>
+    private static string QuickClassIcon(QuickSquad.Class c) => $"class_{c.Short}";
 }

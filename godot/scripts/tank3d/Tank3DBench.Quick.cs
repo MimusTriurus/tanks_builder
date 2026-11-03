@@ -886,7 +886,7 @@ public sealed partial class Tank3DBench
                 col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
             int level = l;
             // the upgrade's icon in the node; its number only where there is no icon
-            Texture2D? icon = QUpgradeIcon(u.Icon);
+            Texture2D? icon = QIcon(u.Icon);
             var hex = new QuickPad
             {
                 Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = 1,
@@ -934,8 +934,9 @@ public sealed partial class Tank3DBench
         return box;
     }
 
-    /// <summary>An upgrade's icon, read once (<see cref="ActImage"/>, 64 px); null with no file.</summary>
-    private static Texture2D? QUpgradeIcon(string name)
+    /// <summary>An icon of <c>Icons/</c> - an upgrade's, a class's - read once
+    /// (<see cref="ActImage"/>, 64 px); null with no file.</summary>
+    private static Texture2D? QIcon(string name)
     {
         if (name.Length == 0)
             return null;
