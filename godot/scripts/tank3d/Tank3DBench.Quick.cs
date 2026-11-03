@@ -1397,10 +1397,16 @@ public sealed partial class Tank3DBench
         style.SetContentMarginAll(11);
         _qTip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Modulate = new Color(1, 1, 1, 0) };
         _qTip.AddThemeStyleboxOverride("panel", style);
-        // a rim as the panels' (QLine, 3:1 on the dark): the tip is a surface over the
-        // others, and over the page's own dark it lost its edge
+        // a rim (the tip is a surface over the others, and over the page's own dark it
+        // lost its edge) and a beak on the side toward its pad, level with the pad's
+        // middle (author 2026-11-03: a tip beside the card stood apart from its node).
+        // The rim and the ring round the pad one colour, QTipRim: they read as a pair
         PanelContainer rimmed = _qTip;
-        rimmed.Draw += () => QuickPad.DrawRim(rimmed, rimmed.Size, QLine, 1.0f);
+        rimmed.Draw += () =>
+        {
+            QuickPad.DrawRim(rimmed, rimmed.Size, QTipRim, 1.0f);
+            QuickTipBeak(rimmed);
+        };
         _qTip.AddChild(body);
         _qLayer.AddChild(_qTip);
         PanelContainer tip = _qTip;
@@ -1411,8 +1417,48 @@ public sealed partial class Tank3DBench
         tip.MinimumSizeChanged += () => Callable.From(() => QuickTipPlace(tip, pad)).CallDeferred();
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         QuickTipPlace(tip, pad);
-        if (IsInstanceValid(tip))
+        if (IsInstanceValid(tip) && _qTip == tip)
+        {
             tip.Modulate = Colors.White;
+            // the pad the tip tells of, ringed as long as the tip is up - one with a shape
+            // of its own: a branch's head is its band, and a ring round the pad inside it
+            // stood off the band's edges (the beak says it there)
+            if (IsInstanceValid(pad) && (pad.Form != QuickPad.Shape.Box || pad.RimWidth > 0))
+            {
+                pad.Mark = QTipRim;
+                pad.QueueRedraw();
+            }
+        }
+    }
+
+    /// <summary>The tips' rim and the ring round the pad a tip tells of: lighter than the
+    /// panels' rims (QLine), the tip being over them.</summary>
+    private static readonly Color QTipRim = new("98A18F");
+
+    /// <summary>Which side of the tip its beak stands on, and where along it, px.</summary>
+    private Side4 _qTipBeak;
+    private float _qTipBeakAt;
+
+    private enum Side4 { None, Left, Right, Top, Bottom }
+
+    /// <summary>The beak: a short triangle out of the tip's side toward its pad, filled as
+    /// the tip and rimmed as it, its base cutting the rim so the two read as one outline.</summary>
+    private void QuickTipBeak(Control tip)
+    {
+        if (_qTipBeak == Side4.None)
+            return;
+        const float half = 7, reach = 8;
+        float t = QuickPad.RimLayout(tip, 1), a = _qTipBeakAt;
+        Vector2 s = tip.Size;
+        (Vector2 b0, Vector2 apex, Vector2 b1, Vector2 inward) = _qTipBeak switch
+        {
+            Side4.Left => (new Vector2(0, a - half), new Vector2(-reach, a), new Vector2(0, a + half), new Vector2(t, 0)),
+            Side4.Right => (new Vector2(s.X, a - half), new Vector2(s.X + reach, a), new Vector2(s.X, a + half), new Vector2(-t, 0)),
+            Side4.Top => (new Vector2(a - half, 0), new Vector2(a, -reach), new Vector2(a + half, 0), new Vector2(0, t)),
+            _ => (new Vector2(a - half, s.Y), new Vector2(a, s.Y + reach), new Vector2(a + half, s.Y), new Vector2(0, -t)),
+        };
+        tip.DrawColoredPolygon(new[] { b0 + inward, apex, b1 + inward }, QTipBg);
+        tip.DrawPolyline(new[] { b0, apex, b1 }, QTipRim, t, true);
     }
 
     /// <summary>The tip cut to its content and put beside the pad, else under it, inside the screen.
@@ -1430,16 +1476,30 @@ public sealed partial class Tank3DBench
         Rect2 r = card is Control box ? new Rect2(box.GetGlobalRect().Position.X, own.Position.Y, box.Size.X, own.Size.Y) : own;
         Vector2 ts = tip.Size, vs = GetViewport().GetVisibleRect().Size;
         float x = r.End.X + 10, y = r.Position.Y;
+        _qTipBeak = Side4.Left;
         if (x + ts.X > vs.X - 8)
+        {
             x = r.Position.X - ts.X - 10;
+            _qTipBeak = Side4.Right;
+        }
         if (x < 8)
         {
             x = Mathf.Clamp(r.GetCenter().X - ts.X * 0.5f, 8, vs.X - ts.X - 8);
             y = r.End.Y + 8;
+            _qTipBeak = Side4.Top;
             if (y + ts.Y > vs.Y - 8)
+            {
                 y = r.Position.Y - ts.Y - 8;
+                _qTipBeak = Side4.Bottom;
+            }
         }
         tip.Position = new Vector2(x, Mathf.Clamp(y, 8, Mathf.Max(8, vs.Y - ts.Y - 8)));
+        // the beak at the pad's own middle (not the card's), kept clear of the tip's corners
+        Vector2 mid = own.GetCenter();
+        bool across = _qTipBeak is Side4.Left or Side4.Right;
+        _qTipBeakAt = across ? Mathf.Clamp(mid.Y - tip.Position.Y, 12, ts.Y - 12)
+                             : Mathf.Clamp(mid.X - tip.Position.X, 12, ts.X - 12);
+        tip.QueueRedraw();
     }
 
     /// <summary>The meta that puts a tip beside this control rather than its pad.</summary>
@@ -1464,6 +1524,11 @@ public sealed partial class Tank3DBench
         _qTipSeq++;
         if (_qTip is not null)
             _qTipWarmTill = Math.Max(_qTipWarmTill, Time.GetTicksMsec() + QTipWarm);
+        if (_qTipFor is { } was && IsInstanceValid(was) && was.Mark is not null)
+        {
+            was.Mark = null;
+            was.QueueRedraw();
+        }
         _qTip?.QueueFree();
         _qTip = null;
         _qTipFor = null;

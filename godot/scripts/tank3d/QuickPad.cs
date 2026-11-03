@@ -45,6 +45,10 @@ public partial class QuickPad : Control
     public int BadgeSize = 13;
     public Color BadgeRim, BadgeFill, BadgeInk;
 
+    /// <summary>A ring just outside the shape, in this colour: the pad an open tip tells
+    /// of, paired with the tip by its rim's colour; null draws none.</summary>
+    public Color? Mark;
+
     public event Action? Clicked;
     /// <summary>The right button, or Delete / Backspace on the keyboard: the undoing
     /// click, kept off the left one (a bought level is dropped by it, not by a click
@@ -168,6 +172,25 @@ public partial class QuickPad : Control
             }
             else
                 DrawRect(new Rect2(Vector2.One, s - 2 * Vector2.One), FocusRing, false, 2.0f);
+        }
+        if (Mark is { } mark)
+        {
+            // outside the shape, clear of its own rim: the node's state stays as it is
+            float w = RimLayout(this, 2);
+            var o = new Vector2(3 + w * 0.5f, 3 + w * 0.5f);
+            if (Form == Shape.Hex)
+            {
+                // the hex grown by o along its width, by its slope's share along its height
+                Vector2[] h = Hex(-o, s + 2 * o);
+                DrawPolyline(new[] { h[0], h[1], h[2], h[3], h[4], h[5], h[0] }, mark, w, true);
+            }
+            else if (Form == Shape.Shield)
+            {
+                Vector2[] g = Shield(-o, s + 2 * o);
+                DrawPolyline(new[] { g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[0] }, mark, w, true);
+            }
+            else
+                DrawRect(new Rect2(-o, s + 2 * o), mark, false, w);
         }
         if (Glow is { } glow)
         {
