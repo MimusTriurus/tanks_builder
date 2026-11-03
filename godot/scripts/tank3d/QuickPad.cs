@@ -45,8 +45,11 @@ public partial class QuickPad : Control
 
     private static readonly Color FocusRing = new("A3B65E");
 
-    /// <summary>The bold face: the fallback font emboldened, the display text's.</summary>
-    public static readonly Font BoldFont = new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.9f };
+    /// <summary>The bold face, the display text's: the language's own typeface as
+    /// it is (Black Ops One is heavy already, and emboldened it smears), else the
+    /// fallback font emboldened.</summary>
+    public static readonly Font BoldFont = L.Font
+        ?? new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.9f };
 
     public static Font FontOf(bool bold) => bold ? BoldFont : ThemeDB.FallbackFont;
 

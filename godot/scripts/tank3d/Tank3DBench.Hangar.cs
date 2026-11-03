@@ -348,11 +348,19 @@ public sealed partial class Tank3DBench
         var pad = new QuickPad { Rim = QLine, Fill = QInset, HoverRim = QOlive, HoverFill = QSel, Disabled = short_ };
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 2);
-        col.Position = new Vector2(10, 6);
+        // the pad's width, less the margins: a play too long for it ends in "…", not past the rim
+        col.AnchorRight = 1;
+        col.OffsetLeft = 10;
+        col.OffsetRight = -10;
+        col.OffsetTop = 6;
         var head = new HBoxContainer();
         head.AddThemeConstantOverride("separation", 8);
         head.AddChild(QText(c.Name, 14, QInk, bold: true));
-        head.AddChild(QText(c.Play, 12, QMuted));
+        var play = QText(c.Play, 12, QMuted);
+        play.ClipText = true;
+        play.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        play.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        head.AddChild(play);
         col.AddChild(head);
         col.AddChild(QText(string.Join(" · ", c.Slots.Select(x =>
             $"{QuickSquad.ClassOf(x.Class).Short} {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}")), 12, QOlive));

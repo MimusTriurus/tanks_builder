@@ -110,6 +110,10 @@ internal static class AssetRoot
     /// <summary>The bench's own settings files - <c>panel.json</c>,
     /// <c>terrain.json</c>, <c>classes.json</c> and the rest: <c>godot/data</c>,
     /// read off disk so an edit lands on the next run.</summary>
+    /// <summary>The interface's typefaces, each beside its licence; which one a
+    /// language uses is its <c>data/lang</c> file's <c>_font</c> (<see cref="L"/>).</summary>
+    internal static readonly string Fonts = Repo + "/assets/Fonts";
+
     internal static readonly string Data =
         Path.Combine(ProjectSettings.GlobalizePath("res://"), "data");
 

@@ -269,6 +269,7 @@ public sealed partial class Tank3DBench : Node3D
     /// (<see cref="Loading"/>).</summary>
     private async Task Build()
     {
+        L.Apply();
         // --battle-run: a match on the rules core alone, nothing of the scene
         // built (BattleRun, docs/battle-core-plan.md Д10); the frame stays waiting
         if (BattleRun.Asked(OS.GetCmdlineUserArgs()))

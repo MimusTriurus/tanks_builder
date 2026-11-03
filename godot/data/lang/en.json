@@ -2,8 +2,11 @@
   "_": [
     "The game's words in English: key - text, {0} - what is filled in, an array - the",
     "forms of a count (one / other). Read by L.cs by absolute path past Godot's importer.",
-    "--lang en, or nothing: English is L.Default. A key missing here falls back to ru.json."
+    "--lang en, or nothing: English is L.Default. A key missing here falls back to ru.json.",
+    "_font: the interface typeface, a file in assets/Fonts (ratel's Black Ops One,",
+    "OFL beside it). Latin only - so ru.json names none and keeps Godot's font."
   ],
+  "_font": "BlackOpsOne-Regular.ttf",
   "quick.south_cap": "South",
   "quick.north_cap": "North",
   "quick.point": "Point",

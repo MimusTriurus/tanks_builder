@@ -30,6 +30,8 @@ public static class L
 
     private static Dictionary<string, JsonElement>? _lang, _base;
     private static string _code = "";
+    private static Font? _font;
+    private static bool _applied;
     private static readonly HashSet<string> _missed = new();
 
     /// <summary>The language in use, after <c>--lang</c> and a file that exists.</summary>
@@ -40,6 +42,33 @@ public static class L
             Load();
             return _code;
         }
+    }
+
+    /// <summary>The language's own typeface - its file's <c>_font</c>, a name in
+    /// <see cref="AssetRoot.Fonts"/> - or null where it has none (Russian: the
+    /// faces ratel has are Latin only) and Godot's own font speaks it.</summary>
+    public static Font? Font
+    {
+        get
+        {
+            Load();
+            return _font;
+        }
+    }
+
+    /// <summary>Makes <see cref="Font"/> the font every control and every
+    /// <c>DrawString(ThemeDB.FallbackFont, …)</c> uses: called by a scene before it
+    /// builds its interface, once a process.</summary>
+    public static void Apply()
+    {
+        if (_applied)
+            return;
+        _applied = true;
+        if (Font is not { } f)
+            return;
+        // Controls read the default theme's font, which took the fallback when it was built
+        ThemeDB.FallbackFont = f;
+        ThemeDB.GetDefaultTheme().DefaultFont = f;
     }
 
     /// <summary>The text of <paramref name="key"/>.</summary>
@@ -110,6 +139,15 @@ public static class L
             code = Base;
         }
         _code = code;
+        if (_lang.TryGetValue("_font", out var name) && name.ValueKind == JsonValueKind.String)
+        {
+            string path = Path.Combine(AssetRoot.Fonts, name.GetString()!);
+            var file = new FontFile();
+            if (File.Exists(path) && file.LoadDynamicFont(path) == Error.Ok)
+                _font = file;
+            else
+                GD.PrintErr($"lang: {code}.json names the font {path}, and it does not load");
+        }
     }
 
     private static Dictionary<string, JsonElement>? Read(string code)
