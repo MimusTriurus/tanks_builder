@@ -208,6 +208,53 @@ public sealed partial class Stage3D
     /// is about a third of a hex tall, and the stone's beds read across it.</summary>
     private const float CragTile = 1.2f;
 
+    /// <summary>The sand photograph (<see cref="ShowSand"/>, Poly Haven
+    /// aerial_beach_01, CC0): its light and dark over the sand's own ink, so
+    /// the palette stays the board's. Of three sands tried the one whose
+    /// wind ripples read on a dune (the user's pick, 2026-11-03).</summary>
+    internal static ImageTexture? SandPhoto() => Photo("aerial_beach_01/aerial_beach_01_diff_2k.jpg", "sand");
+
+    /// <summary>The sand in a photograph's grain - ripples, footprints - over
+    /// <c>sand_ink</c> instead of the soil art's. Off by default, the new
+    /// style (docs/new_style.md); <c>--sand</c> and the panel switch it on
+    /// when the file is there.</summary>
+    public bool ShowSand
+    {
+        get => _showSand;
+        set
+        {
+            _showSand = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("sand_on", value && SandPhoto() is not null ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showSand;
+
+    /// <summary>A tile of the sand photograph, in circumradii.</summary>
+    private const float SandTile = 1.4f;
+
+    /// <summary>A photograph's mean brightness and its spread, off a grid of
+    /// its pixels: a grain taken from it is its distance from the mean in
+    /// spreads, so another picture swaps in without new numbers.</summary>
+    private static Vector2 PhotoTone(ImageTexture tex)
+    {
+        Image img = tex.GetImage();
+        int w = img.GetWidth(), h = img.GetHeight(), n = 0;
+        double sum = 0.0, sq = 0.0;
+        for (int y = 0; y < 32; y++)
+            for (int x = 0; x < 32; x++)
+            {
+                Color c = img.GetPixel((x * w + w / 2) / 32, (y * h + h / 2) / 32);
+                double l = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B;
+                sum += l;
+                sq += l * l;
+                n++;
+            }
+        double mean = sum / n;
+        return new Vector2((float)mean, (float)System.Math.Sqrt(System.Math.Max(sq / n - mean * mean, 1e-6)));
+    }
+
     private static ImageTexture? _lawn;
     private static bool _lawnRead;
 
@@ -593,6 +640,13 @@ void fragment() {
             ink.Param("crag_tile", 1.0f / (r * CragTile));
         }
         ink.Param("crag_on", ShowCrag && CragsOnDisk ? 1.0f : 0.0f);
+        if (SandPhoto() is { } sandPhoto)
+        {
+            ink.Param("sand_tex", sandPhoto);
+            ink.Param("sand_tile", 1.0f / (r * SandTile));
+            ink.Param("sand_tone", PhotoTone(sandPhoto));
+        }
+        ink.Param("sand_on", ShowSand && SandPhoto() is not null ? 1.0f : 0.0f);
         ink.Param("turf_on", ShowTurf ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
@@ -957,6 +1011,13 @@ uniform float crag_tile = 0.01;
 uniform float crag_gain = 1.0;
 uniform float face_mean = 0.3;
 uniform float face_contrast = 10.0;
+// The sand's grain off a photograph: its mean and spread (Stage3D.PhotoTone),
+// and how much of the ink's brightness one spread moves
+uniform sampler2D sand_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float sand_on = 0.0;
+uniform float sand_tile = 0.01;
+uniform vec2 sand_tone = vec2(0.5, 0.1);
+uniform float sand_swing = 0.14;
 
 vec3 photo3(sampler2D t, vec3 p, vec3 tw, float k) {
     return texture(t, p.xz * k).rgb * tw.y + texture(t, p.zy * k).rgb * tw.x
@@ -1040,7 +1101,11 @@ vec4 cell_ink(vec2 cr) {
         soil = photo3(earth_tex, ground, tw, earth_tile);
     float grain = dot(soil, vec3(0.299, 0.587, 0.114));
     // the kinds, each its own colour carrying the art's grain
-    soil = mix(soil, sand_ink * (0.6 + 0.6 * grain), smoothstep(0.25, 0.6, COLOR.r));
+    float sgrain = grain;
+    if (sand_on > 0.5)
+        sgrain = 0.5 + (dot(photo3(sand_tex, ground, tw, sand_tile), vec3(0.299, 0.587, 0.114))
+                        - sand_tone.x) / sand_tone.y * sand_swing;
+    soil = mix(soil, sand_ink * (0.6 + 0.6 * sgrain), smoothstep(0.25, 0.6, COLOR.r));
     // the soil's looks over the kinds (Stage3D.Soil, format 3)
     soil = soil_look_at(soil, grain);
     // rock: the tight share (Relief.Cliff), cut where the wall stands; a rock
