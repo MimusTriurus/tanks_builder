@@ -140,6 +140,7 @@ public sealed partial class Tank3DBench
         {
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             QuickStageTurn();
+            QuickHangarSpin();
         }
         foreach (int at in _qStage.Keys.ToArray())
             QuickStageDrop(at);
@@ -214,7 +215,7 @@ public sealed partial class Tank3DBench
 
     /// <summary>Each card's live model, kept over the page's rebuilds: a click
     /// redraws the page, the model is loaded again only for a new class or paint.</summary>
-    private readonly Dictionary<int, (string Class, Side Side, SubViewportContainer Box, Node3D Rig)> _qStage = new();
+    private readonly Dictionary<int, (string Class, Side Side, Vector2I Px, SubViewportContainer Box, Node3D Rig)> _qStage = new();
 
     /// <summary>A full turn of the stages, seconds.</summary>
     private const double QTurnSeconds = 16.0;
@@ -223,23 +224,27 @@ public sealed partial class Tank3DBench
     private float _qTurnBy;
 
     /// <summary>Every card's model at one heading - the clock's, plus the drags' -
-    /// so the squad turns as one and a model brought in joins it in step. Each
-    /// frame of the screens; allocates nothing.</summary>
+    /// so the squad turns as one and a model brought in joins it in step. The
+    /// hangar turns only the machine in front; the two behind stand at the
+    /// roster's heading. Each frame of the screens; allocates nothing.</summary>
     private void QuickStageTurn()
     {
         float yaw = RosterArtYaw + _qTurnBy + (float)(Time.GetTicksMsec() / 1000.0 % QTurnSeconds / QTurnSeconds * 360.0);
-        foreach (var stage in _qStage.Values)
-            if (IsInstanceValid(stage.Rig))
-                stage.Rig.RotationDegrees = new Vector3(0.0f, yaw, 0.0f);
+        foreach (var stage in _qStage)
+            if (IsInstanceValid(stage.Value.Rig))
+                stage.Value.Rig.RotationDegrees = new Vector3(0.0f, _qHangar && stage.Key != _qhAt ? RosterArtYaw : yaw, 0.0f);
     }
 
     /// <summary>Slot <paramref name="at"/>'s model turning on its stage, the
     /// roster's own scene live (<see cref="RosterScene"/>): it spins slowly, a
     /// drag turns it by hand. Null when the model does not load - the card
-    /// falls back on the picture.</summary>
-    private SubViewportContainer? QuickStage(int at, string cls, Side side)
+    /// falls back on the picture. With <paramref name="fixedPx"/> the view is
+    /// that size and its box does not stretch: the hangar scales the box
+    /// (<c>Tank3DBench.Hangar</c>).</summary>
+    private SubViewportContainer? QuickStage(int at, string cls, Side side, Vector2I? fixedPx = null)
     {
-        if (_qStage.TryGetValue(at, out var had) && had.Class == cls && had.Side == side && IsInstanceValid(had.Box))
+        var size = fixedPx ?? new Vector2I(340, (int)QStageHigh);
+        if (_qStage.TryGetValue(at, out var had) && had.Class == cls && had.Side == side && had.Px == size && IsInstanceValid(had.Box))
         {
             had.Box.GetParent()?.RemoveChild(had.Box);
             return had.Box;
@@ -250,12 +255,12 @@ public sealed partial class Tank3DBench
             return null;
         var box = new SubViewportContainer
         {
-            Stretch = true, MouseFilter = Control.MouseFilterEnum.Pass, MouseDefaultCursorShape = Control.CursorShape.Drag,
+            Stretch = fixedPx is null, MouseFilter = Control.MouseFilterEnum.Pass, MouseDefaultCursorShape = Control.CursorShape.Drag,
         };
-        box.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        if (fixedPx is null)
+            box.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         // into the tree for the framing, which reads the placed meshes; the card takes it after
         _qLayer.AddChild(box);
-        var size = new Vector2I(340, (int)QStageHigh);
         if (RosterScene(model, side, size, box, live: true) is not var (_, rig))
         {
             box.QueueFree();
@@ -268,7 +273,9 @@ public sealed partial class Tank3DBench
                 _qTurnBy += m.Relative.X * 0.7f;
         };
         _qLayer.RemoveChild(box);
-        _qStage[at] = (cls, side, box, rig);
+        if (fixedPx is not null)
+            box.Size = size;
+        _qStage[at] = (cls, side, size, box, rig);
         QuickStageTurn();
         return box;
     }
@@ -304,7 +311,7 @@ public sealed partial class Tank3DBench
             _qRoot.RemoveChild(n);
             n.QueueFree();
         }
-        _qRoot.AddChild(_qPage == QuickPage.Lobby ? QuickLobby() : QuickBuild());
+        _qRoot.AddChild(_qPage == QuickPage.Lobby ? QuickLobby() : _qHangar ? QuickHangar() : QuickBuild());
         _qOver?.QueueFree();
         _qOver = _qModal == QuickModal.None ? null : QuickDialog();
         if (_qOver is not null)
@@ -938,18 +945,21 @@ public sealed partial class Tank3DBench
 
     private static string QRoman(int n) => n switch { 0 => "0", 1 => "I", 2 => "II", 3 => "III", 4 => "IV", _ => "V" };
 
-    private Control QuickClassTip(QuickSquad.Class c, bool full, string? note = null)
+    private Control QuickClassTip(QuickSquad.Class c, bool full, string? note = null) =>
+        QTipBox($"Класс · {c.Short} · {c.Duty}", c.Name, c.Role, null, full ? "В отряде уже две машины этого класса." : note,
+                QuickClassRows(c), $"Особенность. {c.Trait}");
+
+    /// <summary>A class's numbers as label and value: the tip's table, the hangar's sheet.</summary>
+    private static (string, string)[] QuickClassRows(QuickSquad.Class c)
     {
         MovementProfile p = c.Profile;
         string armour = string.Join(" / ", new[] { Gunnery.Plate.Front, Gunnery.Plate.Side, Gunnery.Plate.Rear, Gunnery.Plate.Roof }
                                            .Select(pl => QRoman(Gunnery.ArmourAt(p, pl))));
-        var rows = new[]
+        return new[]
         {
             ("Скорость", $"{p.Steps} шагов"), ("Огневая мощь", QRoman(p.Might)),
             ("Броня лоб / борт / корма / крыша", armour), ("Масса", QRoman(p.Mass)), ("Башня", p.Turreted ? "есть" : "нет"),
         };
-        return QTipBox($"Класс · {c.Short} · {c.Duty}", c.Name, c.Role, null, full ? "В отряде уже две машины этого класса." : note,
-                       rows, $"Особенность. {c.Trait}");
     }
 
     // --- the dialogs ---------------------------------------------------------------
@@ -1540,6 +1550,10 @@ public sealed partial class Tank3DBench
             {
                 case "lobby": _qPage = QuickPage.Lobby; break;
                 case "build": _qPage = QuickPage.Build; break;
+                // the hangar's (Tank3DBench.Hangar): the slot on the podium
+                case "slot" when p.Length > 1: _qhAt = Slot(p[1]); _qhSpin = _qhAt; break;
+                // the ring caught mid-turn: the slot set, the spin left where it was
+                case "turn-to" when p.Length > 1: _qhAt = Slot(p[1]); break;
                 case "params": _qModal = QuickModal.Params; break;
                 case "mapview": _qModal = QuickModal.Map; break;
                 case "close": _qModal = QuickModal.None; _qAsk = null; break;
@@ -1621,7 +1635,10 @@ public sealed partial class Tank3DBench
         var pads = _qRoot.FindChildren("*", "", true, false).OfType<QuickPad>()
                          .Where(x => level > 0 ? x.Form == QuickPad.Shape.Hex && x.Text == level.ToString()
                                                : QuickSquad.Classes.SelectMany(c => c.Branches).Any(y => y.Name == x.Text)).ToList();
-        int index = at * 2 + Array.IndexOf(QuickSquad.ClassOf(cls).Branches, b);
+        // the hangar draws the podium's slot's tree alone
+        if (_qHangar && at != _qhAt)
+            return null;
+        int index = (_qHangar ? 0 : at * 2) + Array.IndexOf(QuickSquad.ClassOf(cls).Branches, b);
         return index >= 0 && index < pads.Count ? pads[index] : null;
     }
 

@@ -1497,6 +1497,8 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--match") Match = true;
             // a quick battle against the AI: the lobby and the build first (Tank3DBench.Quick)
             else if (a == "--quick") Quick = Match = true;
+            // the same with the squad built in a hangar (Tank3DBench.Hangar); the old build stays
+            else if (a == "--hangar") Quick = Match = _qHangar = true;
             else if (a == "--quick-do" && more)
                 _quickDo.AddRange(args[++i].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             // the old view, the sprites' angle, rather than the isometric one (Orbit)
