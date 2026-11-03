@@ -31,6 +31,11 @@ public sealed partial class Tank3DBench
     /// <summary><c>--hangar</c>: the build is the hangar.</summary>
     private bool _qHangar;
 
+    /// <summary>The window's size the podium's views were drawn for, px.</summary>
+    private Vector2I _qhWindow;
+    /// <summary>When the window last changed size, ms; 0, settled.</summary>
+    private ulong _qhResized;
+
     /// <summary>The slot on the podium.</summary>
     private int _qhAt;
 
@@ -309,8 +314,10 @@ public sealed partial class Tank3DBench
             float scale = k * Mathf.Lerp(QhBack, 1.0f, near);
             var middle = new Vector2(size.X * 0.5f + size.X * 0.34f * Mathf.Sin(turn),
                                      QhHeadHigh + room * Mathf.Lerp(0.36f, 0.5f, near));
-            view.Scale = new Vector2(scale, scale);
-            view.Position = middle - view.Size * scale * 0.5f;
+            // a model's view is drawn in screen pixels (QuickStage): scaled back by as much
+            float drawn = view.HasMeta("q_px") ? scale / (float)view.GetMeta("q_px") : scale;
+            view.Scale = new Vector2(drawn, drawn);
+            view.Position = middle - view.Size * drawn * 0.5f;
             _qhNear[i] = near;
             view.Modulate = new Color(1, 1, 1).Lerp(new Color(0.62f, 0.66f, 0.6f, 0.85f), 1.0f - near);
             Vector2 hit = (Vector2)QhView * scale * new Vector2(0.5f, 0.6f);

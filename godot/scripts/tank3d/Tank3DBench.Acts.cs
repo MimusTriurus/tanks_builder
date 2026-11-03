@@ -135,17 +135,25 @@ public sealed partial class Tank3DBench
         GetTree().Root.SizeChanged += ActIconsFit;
     }
 
+    /// <summary>Screen pixels to a layout pixel: the 1600 × 900 layout stretched to
+    /// the window (<c>canvas_items</c>) - 1.6 on a 2560 × 1440 screen.</summary>
+    private float ScreenScale()
+    {
+        Window w = GetWindow();
+        Vector2I size = w.Size, layout = w.ContentScaleSize;
+        float stretch = layout.X > 0 && layout.Y > 0
+            ? Mathf.Min(size.X / (float)layout.X, size.Y / (float)layout.Y) : 1.0f;
+        return stretch * w.ContentScaleFactor;
+    }
+
     /// <summary>The icons rasterised at the pixels they take on screen: the
     /// panel is laid out at 1600 × 900 and stretched with the window
     /// (<c>canvas_items</c>), so a raster of the layout's 36 would be blown up
     /// soft in a bigger window. Redone only when the size in pixels changes.</summary>
     private void ActIconsFit()
     {
-        Window w = GetWindow();
-        Vector2I size = w.Size, layout = w.ContentScaleSize;
-        float stretch = layout.X > 0 && layout.Y > 0
-            ? Mathf.Min(size.X / (float)layout.X, size.Y / (float)layout.Y) : 1.0f;
-        float k = stretch * w.ContentScaleFactor;
+        Vector2I size = GetWindow().Size;
+        float k = ScreenScale();
         int px = Mathf.Max(16, Mathf.RoundToInt(ActIconPx * k));
         if (px == _actIconRaster)
             return;

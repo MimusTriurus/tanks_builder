@@ -145,6 +145,20 @@ public sealed partial class Tank3DBench
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             QuickStageTurn();
             QuickHangarSpin();
+            // the podium's views are drawn in screen pixels: a window resized draws them
+            // anew, once it has held its size a moment - a drag would reload them every frame
+            Vector2I window = GetWindow().Size;
+            if (_qHangar && window != _qhWindow)
+            {
+                _qhResized = _qhWindow == Vector2I.Zero ? 0 : Time.GetTicksMsec();
+                _qhWindow = window;
+            }
+            if (_qhResized > 0 && Time.GetTicksMsec() - _qhResized > 300)
+            {
+                _qhResized = 0;
+                if (_qPage != QuickPage.Lobby)
+                    QuickShow();
+            }
         }
         foreach (int at in _qStage.Keys.ToArray())
             QuickStageDrop(at);
@@ -247,7 +261,12 @@ public sealed partial class Tank3DBench
     /// (<c>Tank3DBench.Hangar</c>).</summary>
     private SubViewportContainer? QuickStage(int at, string cls, Side side, Vector2I? fixedPx = null)
     {
-        var size = fixedPx ?? new Vector2I(340, (int)QStageHigh);
+        // a fixed view - the hangar's podium - drawn in screen pixels, not the layout's:
+        // stretched with the window a layout-sized one went soft (1.6× on a 2560 × 1440
+        // screen); the box is scaled back by as much (meta q_px, QuickHangarRing)
+        float px = fixedPx is null ? 1.0f : Mathf.Max(1.0f, ScreenScale());
+        var size = fixedPx is { } f ? new Vector2I(Mathf.RoundToInt(f.X * px), Mathf.RoundToInt(f.Y * px))
+            : new Vector2I(340, (int)QStageHigh);
         if (_qStage.TryGetValue(at, out var had) && had.Class == cls && had.Side == side && had.Px == size && IsInstanceValid(had.Box))
         {
             had.Box.GetParent()?.RemoveChild(had.Box);
@@ -274,11 +293,14 @@ public sealed partial class Tank3DBench
         box.GuiInput += e =>
         {
             if (e is InputEventMouseMotion m && m.ButtonMask.HasFlag(MouseButtonMask.Left))
-                _qTurnBy += m.Relative.X * 0.7f;
+                _qTurnBy += m.Relative.X / px * 0.7f;
         };
         _qLayer.RemoveChild(box);
         if (fixedPx is not null)
+        {
             box.Size = size;
+            box.SetMeta("q_px", px);
+        }
         _qStage[at] = (cls, side, size, box, rig);
         QuickStageTurn();
         return box;
