@@ -945,6 +945,7 @@ public sealed partial class Tank3DBench
             tree.AddThemeConstantOverride("separation", 8);
             foreach (QuickSquad.Branch b in c.Branches)
                 tree.AddChild(QuickBranch(at, s, b, left));
+            QuickTreeCenter(tree);
             // what the machine carries is the tree itself: nothing said again under it
             col.AddChild(tree);
         }
@@ -1043,8 +1044,11 @@ public sealed partial class Tank3DBench
             chosen ? L.T("quick.branch_chosen") : other ? L.T("quick.branch_move", s.Level) : L.T("quick.branch_first")));
         col.AddChild(head);
         // the box's own top margin, given up to the band, under it instead
-        col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6), MouseFilter = Control.MouseFilterEnum.Ignore });
+        var top = new Control { CustomMinimumSize = new Vector2(0, 6), MouseFilter = Control.MouseFilterEnum.Ignore };
+        col.AddChild(top);
         float footHigh = QFootHigh;
+        var helds = new Godot.Collections.Array();
+        Label lastName = null!;
         for (int l = 1; l <= b.Levels.Length; l++)
         {
             QuickSquad.Upgrade u = b.Levels[l - 1];
@@ -1101,11 +1105,13 @@ public sealed partial class Tank3DBench
             QTip(hex, () => QTipBox(L.T("quick.level_tip", b.Name, level), u.Name, u.Text, (u.Kind, Pts(level)),
                                     state + (u.Flag is null ? L.T("quick.lvl_dash_note") : "")));
             col.AddChild(hex);
-            // under the node, close to it: its name, its kind, then the link down to the next
-            // node filling what is left - the name and kind read as the node's, not the next's
-            // (author 2026-11-03: equal gaps above and below left them floating between two)
-            // fixed high and clipped, whatever the name wraps to: every class's tree one height
-            var held = new Control { CustomMinimumSize = new Vector2(0, footHigh), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Ignore };
+            // under the node, close to it: its name, then the link down to the next node
+            // filling what is left - the name reads as the node's, not the next's (author
+            // 2026-11-03: equal gaps above and below left it floating between two). Its kind
+            // is the tip's, not said here too (author 2026-11-03). Fixed high and clipped,
+            // whatever the name wraps to: every class's tree one height; the last has no link
+            bool last = l == b.Levels.Length;
+            var held = new Control { CustomMinimumSize = new Vector2(0, last ? footHigh - QLinkLeast : footHigh), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Ignore };
             var foot = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
             foot.SetAnchorsPreset(Control.LayoutPreset.FullRect);
             held.AddChild(foot);
@@ -1118,21 +1124,69 @@ public sealed partial class Tank3DBench
             nm.MaxLinesVisible = 2;
             nm.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
             foot.AddChild(nm);
-            // a step below the name: the scale's floor, muted, never bold
-            var kind = QText(QKind(u), 12, QMuted);
-            kind.HorizontalAlignment = HorizontalAlignment.Center;
-            foot.AddChild(kind);
-            Control link = QLink(l < b.Levels.Length ? l < mine ? QOlive : QLine : null);
-            link.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-            foot.AddChild(link);
+            if (!last)
+            {
+                Control link = QLink(l < mine ? QOlive : QLine);
+                link.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+                foot.AddChild(link);
+            }
             col.AddChild(held);
+            helds.Add(held);
+            lastName = nm;
         }
+        var bottom = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
+        col.AddChild(bottom);
         var box = QBox(col, chosen ? QSel : QInset, 6, chosen ? QOlive : QLine,
                        () => (chosen ? QOlive : lit ? QSel : QPanelC, chosen ? null : QLine, bandHigh));
         if (other)
             head.Over += (_, on) => { lit = on; box.QueueRedraw(); };
         box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        box.SetMeta(QCenterMeta, new Godot.Collections.Array { top, helds, lastName, bottom });
         return box;
+    }
+
+    private static readonly StringName QCenterMeta = "q_center";
+
+    /// <summary>The feet of the branches of <paramref name="tree"/> sized off their own
+    /// labels, and the branches centred top to bottom in their boxes, all by one amount
+    /// (author 2026-11-03: a last name on one line left a line's gap under it and none over
+    /// the first node). The amount is the line the longest last name does not use, half
+    /// moved over the first node; one for both, so their rows stay level, and the tree one
+    /// height whatever the names. Done whenever the tree is sorted: by then the boxes have
+    /// their widths and the labels their theme - a label measured off the tree took another
+    /// font, 23 px a line for 26, and a two-line name came out cut at the foot.</summary>
+    private static void QuickTreeCenter(Container tree)
+    {
+        tree.SortChildren += () =>
+        {
+            int lines = 1;
+            float line = 0, two = 0;
+            foreach (Node box in tree.GetChildren())
+                if (box.HasMeta(QCenterMeta) && box is Control c)
+                {
+                    var name = (Label)box.GetMeta(QCenterMeta).AsGodotArray()[2];
+                    Font font = name.GetThemeFont("font");
+                    int size = name.GetThemeFontSize("font_size");
+                    float h = font.GetHeight(size), gap = name.GetThemeConstant("line_spacing");
+                    line = Mathf.Max(line, h + gap);
+                    two = Mathf.Max(two, 2 * h + gap);
+                    // the lines counted here, off the box's width: the label's own count
+                    // is its last layout's, from before it knew its width
+                    float wide = font.GetMultilineStringSize(name.Text, HorizontalAlignment.Center, c.Size.X - 12, size).Y;
+                    lines = Math.Max(lines, Mathf.RoundToInt(wide / h));
+                }
+            float spare = (2 - Math.Min(lines, 2)) * line;
+            foreach (Node box in tree.GetChildren())
+                if (box.HasMeta(QCenterMeta))
+                {
+                    Godot.Collections.Array c = box.GetMeta(QCenterMeta).AsGodotArray();
+                    Godot.Collections.Array helds = c[1].AsGodotArray();
+                    for (int i = 0; i < helds.Count; i++)
+                        ((Control)helds[i]).CustomMinimumSize = new Vector2(0, Mathf.Ceil(two + 2 + (i < helds.Count - 1 ? QLinkLeast : -spare)));
+                    ((Control)c[0]).CustomMinimumSize = new Vector2(0, 6 + Mathf.Floor(spare * 0.5f));
+                    ((Control)c[3]).CustomMinimumSize = new Vector2(0, Mathf.Ceil(spare * 0.5f));
+                }
+        };
     }
 
     /// <summary>An icon of <c>Icons/</c> - an upgrade's, a class's - rasterised from its
@@ -1177,45 +1231,26 @@ public sealed partial class Tank3DBench
             }
     }
 
-    /// <summary>An upgrade's name and kind under its node and the link down from it, px
-    /// high: the name's two lines, the kind's one, the gap over them and the link's least.</summary>
-    private static float QFootHigh
-    {
-        get
-        {
-            // measured off labels set as they are: a label's lines stand further apart than
-            // the font's height, and summed from it the foot came out short, a wrapped name
-            // making its tree taller than the next class's
-            float Probe(string text, int size, bool bold)
-            {
-                Label l = QText(text, size, QInk, bold);
-                float y = l.GetMinimumSize().Y;
-                l.Free();
-                return y;
-            }
-            return Mathf.Ceil(Mathf.Max(Probe("Ag\nAg", 13, false), Probe("Ag\nAg", 13, true)) + Probe("Ag", 12, false) + 2 + 6);
-        }
-    }
+    /// <summary>An upgrade's name under its node and the link down from it, px high, till
+    /// the tree is first sorted (<see cref="QuickTreeCenter"/> sizes it then, off the label):
+    /// the name's two lines, the gap over them and the link's least.</summary>
+    private static float QFootHigh => Mathf.Ceil(QuickPad.BoldFont.GetHeight(QSize(13)) * 2 + 3 + 2 + QLinkLeast);
+
+    /// <summary>The link between two nodes at its shortest, px: under a name on two lines.</summary>
+    private const float QLinkLeast = 12;
 
     /// <summary>The line from one node down to the next, through the middle of the
-    /// column: olive where both ends are bought; none for null (the last level).</summary>
-    private static Control QLink(Color? ink)
+    /// column: olive where both ends are bought.</summary>
+    private static Control QLink(Color ink)
     {
-        var link = new Control { CustomMinimumSize = new Vector2(0, 6), MouseFilter = Control.MouseFilterEnum.Ignore };
-        if (ink is { } c)
-            link.Draw += () =>
-            {
-                float w = QuickPad.RimLayout(link, 2), x = Mathf.Round(link.Size.X * 0.5f - w * 0.5f);
-                link.DrawRect(new Rect2(x, 1, w, link.Size.Y - 1), c);
-            };
+        var link = new Control { CustomMinimumSize = new Vector2(0, QLinkLeast), MouseFilter = Control.MouseFilterEnum.Ignore };
+        link.Draw += () =>
+        {
+            float w = QuickPad.RimLayout(link, 2), x = Mathf.Round(link.Size.X * 0.5f - w * 0.5f);
+            link.DrawRect(new Rect2(x, 1, w, link.Size.Y - 1), ink);
+        };
         return link;
     }
-
-    /// <summary>An upgrade's kind in a word, under its node. One with no rule on the
-    /// bench yet says its kind too: that it is missing is the dashed rim's and the tip's.</summary>
-    private static string QKind(QuickSquad.Upgrade u) =>
-        u.Ability ? u.Attack ? L.T("quick.kind_attack") : L.T("quick.kind_action")
-        : L.T("quick.kind_passive");
 
     private static string QRoman(int n) => n switch { 0 => "0", 1 => "I", 2 => "II", 3 => "III", 4 => "IV", _ => "V" };
 
@@ -1340,13 +1375,33 @@ public sealed partial class Tank3DBench
     {
         QuickTipHide(null);
         if (_qLayer is null)
+        {
+            body.Free();
             return;
+        }
+        // the first tip waits for the pointer to rest (author 2026-11-03: a tip on every
+        // pass of the pointer flashed over the screen); once one is up, the next one along
+        // comes at once, as the system's tooltips do
+        int seq = ++_qTipSeq;
+        _qTipFor = pad;
+        if (Time.GetTicksMsec() > _qTipWarmTill)
+        {
+            await ToSignal(GetTree().CreateTimer(QTipWait), SceneTreeTimer.SignalName.Timeout);
+            if (seq != _qTipSeq || _qTipFor != pad || !IsInstanceValid(pad) || _qLayer is null)
+            {
+                body.Free();
+                return;
+            }
+        }
         var style = new StyleBoxFlat { BgColor = QTipBg, ShadowColor = new Color(0, 0, 0, 0.28f), ShadowSize = 12 };
         style.SetContentMarginAll(11);
         _qTip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Modulate = new Color(1, 1, 1, 0) };
         _qTip.AddThemeStyleboxOverride("panel", style);
+        // a rim as the panels' (QLine, 3:1 on the dark): the tip is a surface over the
+        // others, and over the page's own dark it lost its edge
+        PanelContainer rimmed = _qTip;
+        rimmed.Draw += () => QuickPad.DrawRim(rimmed, rimmed.Size, QLine, 1.0f);
         _qTip.AddChild(body);
-        _qTipFor = pad;
         _qLayer.AddChild(_qTip);
         PanelContainer tip = _qTip;
         // a wrapped label first measures itself at no width - a word a line,
@@ -1390,10 +1445,25 @@ public sealed partial class Tank3DBench
     /// <summary>The meta that puts a tip beside this control rather than its pad.</summary>
     private static readonly StringName QTipBeside = "quick_tip_beside";
 
+    /// <summary>How long the pointer rests before the first tip, s (the common 0.4-0.5).</summary>
+    private const float QTipWait = 0.45f;
+
+    /// <summary>After a tip goes, how long the next comes at once, ms.</summary>
+    private const ulong QTipWarm = 400;
+
+    /// <summary>The tips stay warm till then (ticks, ms): the next one shows at once.</summary>
+    private ulong _qTipWarmTill;
+
+    /// <summary>Counts the shows and hides: a waiting show that is no longer the last gives up.</summary>
+    private int _qTipSeq;
+
     private void QuickTipHide(QuickPad? pad)
     {
         if (pad is not null && pad != _qTipFor)
             return;
+        _qTipSeq++;
+        if (_qTip is not null)
+            _qTipWarmTill = Math.Max(_qTipWarmTill, Time.GetTicksMsec() + QTipWarm);
         _qTip?.QueueFree();
         _qTip = null;
         _qTipFor = null;
@@ -1881,6 +1951,7 @@ public sealed partial class Tank3DBench
                     QuickShow();
                     for (int f = 0; f < 2; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    _qTipWarmTill = ulong.MaxValue;
                     QuickPadAt(Slot(p[1]), p[2], (int)F(p[3], 1))?.GrabFocus();
                     continue;
                 case "drop" when p.Length > 3:
@@ -1922,6 +1993,8 @@ public sealed partial class Tank3DBench
                     QuickShow();
                     for (int f = 0; f < 2; f++)
                         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    // a script's tip at once: the shot after it does not wait out the rest
+                    _qTipWarmTill = ulong.MaxValue;
                     QuickPointAt(Slot(p[1]), p[2], (int)F(p[3], 1));
                     continue;
                 case "shot" when p.Length > 1:

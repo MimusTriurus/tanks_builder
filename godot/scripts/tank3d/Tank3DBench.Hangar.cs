@@ -647,6 +647,7 @@ public sealed partial class Tank3DBench
             tree.AddThemeConstantOverride("separation", 8);
             foreach (QuickSquad.Branch b in QuickSquad.ClassOf(s.Class!).Branches)
                 tree.AddChild(QuickBranch(_qhAt, s, b, left));
+            QuickTreeCenter(tree);
             col.AddChild(tree);
         }
         // the machine under its tree: what it is, its numbers, what it carries
