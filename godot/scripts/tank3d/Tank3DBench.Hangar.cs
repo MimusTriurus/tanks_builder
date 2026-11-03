@@ -136,33 +136,43 @@ public sealed partial class Tank3DBench
     {
         QuickSetup q = _qs;
         int start = QuickSquad.Size * QuickSquad.CompanyLevel;
-        var col = new VBoxContainer { CustomMinimumSize = new Vector2(350, 0) };
+        // two panels, as the right one and the podium are (author 2026-11-03): the ready
+        // squads, and under them the battle
+        var side = new VBoxContainer { CustomMinimumSize = new Vector2(350, 0) };
+        side.AddThemeConstantOverride("separation", 12);
+        var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 8);
         col.AddChild(QText(L.T("hangar.presets"), 17, QInk, bold: true));
         foreach (QuickSquad.Company c in QuickSquad.Companies)
             col.AddChild(QuickHangarCompany(c, start));
-        col.AddChild(new Control { SizeFlagsVertical = Control.SizeFlags.ExpandFill });
-        col.AddChild(QuickHangarBattle());
-        return QBox(col, QPanelC, 14);
+        PanelContainer presets = QBox(col, QPanelC, 14);
+        presets.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        side.AddChild(presets);
+        side.AddChild(QuickHangarBattle());
+        return side;
     }
 
-    /// <summary>The battle under the squad: the minimap with the zones, the map
-    /// and mode, the sides, the AI's doctrine and budget; a door to the parameters.</summary>
+    /// <summary>The battle under the squad, a panel of its own: the mode as its
+    /// heading, the minimap with the zones; the whole panel a door to the parameters
+    /// (the map, the sides, the AI's doctrine and budget), its rim lit under the pointer.</summary>
     private Control QuickHangarBattle()
     {
         QuickSetup q = _qs;
         var col = new VBoxContainer();
-        col.AddThemeConstantOverride("separation", 6);
-        var map = QuickMinimap(q.Map, q.Player, 190, labels: true);
+        col.AddThemeConstantOverride("separation", 8);
+        // short lines, unwrapped: a wrapped label measures itself a word a line first
+        col.AddChild(QText(QuickMode(q.Map), 17, QInk, bold: true));
+        var map = QuickMinimap(q.Map, q.Player, 200, labels: true, ground: false);
         map.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
         col.AddChild(map);
-        // short lines, unwrapped: a wrapped label measures itself a word a line first
-        col.AddChild(QText(QuickMode(q.Map), 15, QInk, bold: true));
         col.AddChild(QText(L.T("hangar.params_door"), 12, QOlive));
         QuickHangarDeaf(col);
         // a box the layout sizes; a click on it opens the parameters
-        PanelContainer door = QBox(col, QInset, 10);
+        PanelContainer door = QBox(col, QPanelC, 14);
         door.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+        var rim = (StyleBoxFlat)door.GetThemeStylebox("panel");
+        door.MouseEntered += () => rim.BorderColor = QOlive;
+        door.MouseExited += () => rim.BorderColor = QLine;
         door.GuiInput += e =>
         {
             if (e is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true })
@@ -183,7 +193,7 @@ public sealed partial class Tank3DBench
         QuickSquad.Slot s = q.Squad[at];
         var stage = new QuickPad
         {
-            Rim = QLine, Fill = QInset, Glow = QSel.Lightened(0.15f), MouseFilter = Control.MouseFilterEnum.Pass,
+            Rim = QLine, Fill = QInset, Glow = QSel.Lightened(0.15f), MouseFilter = Control.MouseFilterEnum.Pass, Focusable = false,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill,
             CustomMinimumSize = new Vector2(420, 360), ClipContents = true,
         };

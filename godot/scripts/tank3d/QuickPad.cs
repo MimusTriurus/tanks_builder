@@ -76,8 +76,12 @@ public partial class QuickPad : Control
         FocusExited += () => { QueueRedraw(); Over?.Invoke(this, false); };
     }
 
+    /// <summary>Whether the keyboard stops on it; false for a pad that only frames
+    /// others (the hangar's podium), which would otherwise wear the focus ring when clicked.</summary>
+    public bool Focusable = true;
+
     public override void _Ready() =>
-        FocusMode = MouseFilter == MouseFilterEnum.Ignore ? FocusModeEnum.None : FocusModeEnum.All;
+        FocusMode = MouseFilter == MouseFilterEnum.Ignore || !Focusable ? FocusModeEnum.None : FocusModeEnum.All;
 
     /// <summary>A box that fits its text with <paramref name="pad"/> round it.</summary>
     public QuickPad Fit(Vector2 pad)

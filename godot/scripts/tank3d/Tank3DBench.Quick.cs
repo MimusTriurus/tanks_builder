@@ -1229,7 +1229,7 @@ public sealed partial class Tank3DBench
     /// enemy's in red and hatched; the point in amber. With
     /// <paramref name="labels"/> the zones' names stand in strips above and
     /// below the map, not on the zones.</summary>
-    private Control QuickMinimap(string name, Side player, float width, bool labels)
+    private Control QuickMinimap(string name, Side player, float width, bool labels, bool ground = true)
     {
         BoardMap? map = QuickMap(name);
         float aspect = map is null ? 1.0f
@@ -1240,7 +1240,7 @@ public sealed partial class Tank3DBench
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         if (map is not null)
-            c.Draw += () => QuickMapDraw(c, map, player, labels);
+            c.Draw += () => QuickMapDraw(c, map, player, labels, ground);
         return c;
     }
 
@@ -1252,7 +1252,7 @@ public sealed partial class Tank3DBench
     /// <summary>What the ground outside the zones fades to.</summary>
     private static readonly Color QFaint = new("2E352B");
 
-    private static void QuickMapDraw(Control c, BoardMap map, Side player, bool labels)
+    private static void QuickMapDraw(Control c, BoardMap map, Side player, bool labels, bool ground)
     {
         float strip = labels ? QMapStrip : 0.0f;
         // no frame round the map: the hexes and the zones' rings keep a margin of their own inside the box
@@ -1285,7 +1285,9 @@ public sealed partial class Tank3DBench
         }
         var zoned = new HashSet<Vector2I>(own);
         zoned.UnionWith(foe);
-        c.DrawRect(new Rect2(Vector2.Zero, c.Size), QInset);
+        // its own dark ground, or none where it stands straight on a panel (the hangar's)
+        if (ground)
+            c.DrawRect(new Rect2(Vector2.Zero, c.Size), QInset);
         for (int r = 0; r < map.Rows; r++)
             for (int q = 0; q < map.Columns; q++)
             {
@@ -1331,7 +1333,9 @@ public sealed partial class Tank3DBench
             x /= zone.Count;
             Vector2 size = font.GetStringSize(text, HorizontalAlignment.Left, -1, QSize(12)) + new Vector2(16, 4);
             float y = top ? (strip - size.Y) * 0.5f : c.Size.Y - strip + (strip - size.Y) * 0.5f;
-            var rect = new Rect2(new Vector2(Mathf.Clamp(x - size.X * 0.5f, 0, c.Size.X - size.X), y), size);
+            // kept inside the map's box; a name wider than the box stands centred over it
+            float left = size.X >= c.Size.X ? (c.Size.X - size.X) * 0.5f : Mathf.Clamp(x - size.X * 0.5f, 0, c.Size.X - size.X);
+            var rect = new Rect2(new Vector2(left, y), size);
             c.DrawRect(rect, QPanelC);
             c.DrawRect(rect, ink, false, 1.0f);
             c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(QSize(12)) + 2), text, HorizontalAlignment.Left, -1, QSize(12), ink);
