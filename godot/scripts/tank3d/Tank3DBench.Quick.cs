@@ -79,11 +79,11 @@ public sealed partial class Tank3DBench
     // --- the prototype's palette, dark ---------------------------------------------
 
     private static readonly Color QBg = new("131712");
-    private static readonly Color QPanelC = new("1C211B");
+    private static readonly Color QPanelC = new("20261E");
     private static readonly Color QInset = new("171C16");
     private static readonly Color QInk = new("DEE4D5");
     private static readonly Color QMuted = new("98A18F");
-    private static readonly Color QLine = new("353D31");
+    private static readonly Color QLine = new("667160");
     private static readonly Color QOlive = new("A3B65E");
     private static readonly Color QOnOlive = new("131712");
     private static readonly Color QSel = new("2A3322");
@@ -916,7 +916,7 @@ public sealed partial class Tank3DBench
             Texture2D? icon = QIcon(u.Icon, 32);
             var hex = new QuickPad
             {
-                Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = 1,
+                Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next ? 2 : 1,
                 Rim = open ? QOlive : next ? QAmber : shortOf ? new Color(QRed, 0.8f) : QLine.Lightened(0.15f),
                 Fill = open ? QOlive : QPanelC, Ink = open ? QOnOlive : QInk, Dashed = u.Flag is null && !open,
                 HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(50, 43),

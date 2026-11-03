@@ -378,7 +378,7 @@ public sealed partial class Tank3DBench
         // its name and its three; its play is the tip's (in the type scale it no longer fits beside the name)
         col.AddChild(QText(c.Name, 14, QInk, bold: true));
         var three = QText(string.Join(" · ", c.Slots.Select(x =>
-            $"{QuickSquad.ClassOf(x.Class).Short} {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}")), 12, QOlive);
+            $"{QuickSquad.ClassOf(x.Class).Short} {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}")), 12, QMuted);
         three.ClipText = true;
         three.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
         col.AddChild(three);
@@ -548,7 +548,7 @@ public sealed partial class Tank3DBench
         var title = QText(c.Name, 18, QInk, bold: true);
         title.VerticalAlignment = VerticalAlignment.Center;
         name.AddChild(title);
-        var duty = QText(c.Duty, 13, QOlive, bold: true);
+        var duty = QText(c.Duty, 13, QMuted, bold: true);
         duty.VerticalAlignment = VerticalAlignment.Center;
         name.AddChild(duty);
         col.AddChild(name);
@@ -586,7 +586,7 @@ public sealed partial class Tank3DBench
         bool lit = br is not null && o.Level > 0;
         int big = front ? 17 : 13, small = front ? 14 : 11;
         box.AddChild(Line(c.Name, big, front ? QInk : QMuted, lit));
-        box.AddChild(Line(lit ? br!.Name : L.T("hangar.no_upgrades"), small, front ? QOlive : QMuted, lit));
+        box.AddChild(Line(lit ? br!.Name : L.T("hangar.no_upgrades"), small, QMuted, lit));
         if (!lit)
             return box;
         // the chevrons stand as tall as the two lines, from the class's top to the branch's foot
@@ -596,7 +596,7 @@ public sealed partial class Tank3DBench
         row.AddThemeConstantOverride("separation", front ? 12 : 8);
         row.AddChild(new QuickRank
         {
-            Level = o.Level, High = high, Lit = QAmber, Dim = new Color(QMuted, 0.35f),
+            Level = o.Level, High = high, Lit = QOlive, Dim = new Color(QMuted, 0.6f),
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
         });
         row.AddChild(box);
