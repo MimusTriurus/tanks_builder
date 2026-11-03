@@ -49,10 +49,16 @@ public sealed partial class Tank3DBench
 
     /// <summary>The podium and its three: each slot's view, its pick, its name.</summary>
     private Control? _qhStage;
-    private readonly (Control? View, QuickPad? Pick, Label? Name)[] _qhRing = new (Control?, QuickPad?, Label?)[QuickSquad.Size];
+    private readonly (Control? View, QuickPad? Pick, Control? Name)[] _qhRing = new (Control?, QuickPad?, Control?)[QuickSquad.Size];
 
-    /// <summary>The podium's head and tag strip, px.</summary>
-    private const float QhHeadHigh = 40, QhStripHigh = 72;
+    /// <summary>The podium's head and class strip, px.</summary>
+    private const float QhHeadHigh = 40, QhStripHigh = 118;
+
+    /// <summary>A class tab: the icon's side; the pad - the icon's shield (its frame is
+    /// 0.654 by 0.623 of the icon) and a 6 px halo; the gap - a gun reaches past its shield.</summary>
+    private const float QhTabIcon = 112;
+    private static readonly Vector2 QhTabPad = new(QhTabIcon * 0.654f + 12, QhTabIcon * 0.623f + 12);
+    private const int QhTabGap = 22;
 
     /// <summary>How near the front each slot stands, 1 in front: the ring's draw order.</summary>
     private readonly float[] _qhNear = new float[QuickSquad.Size];
@@ -198,12 +204,7 @@ public sealed partial class Tank3DBench
             var pick = new QuickPad { Fill = new Color(0, 0, 0, 0), RimWidth = 0, HoverRim = QOlive };
             pick.Clicked += () => { _qhAt = slot; QuickShow(); };
             stage.AddChild(pick);
-            QuickSquad.Slot o = q.Squad[k];
-            string said = o.Empty ? L.T("hangar.empty")
-                : $"{QuickSquad.ClassOf(o.Class!).Short} · "
-                  + (QuickSquad.ClassOf(o.Class!).BranchOf(o.Branch) is { } br && o.Level > 0 ? $"{br.Name} {QRoman(o.Level)}" : L.T("hangar.no_upgrades"))
-                  + $" · {Pts(o.Level)}";
-            var name = QText(said, k == at ? 15 : 12, k == at ? QInk : QMuted, bold: true);
+            Control name = QuickHangarCaption(q.Squad[k], k == at);
             stage.AddChild(name);
             _qhRing[k].Pick = pick;
             _qhRing[k].Name = name;
@@ -221,19 +222,22 @@ public sealed partial class Tank3DBench
         stage.AddChild(next);
 
         // where the class is among the five, by its icon (its tag where there is none);
-        // a class there are two of is shut
+        // a class there are two of is shut. The pad is the icon's shield with a halo
+        // round it, olive on the chosen one (author 2026-11-03: twice the size, not square)
         var strip = new HBoxContainer();
-        strip.AddThemeConstantOverride("separation", 6);
+        strip.AddThemeConstantOverride("separation", QhTabGap);
         foreach (QuickSquad.Class c in QuickSquad.Classes)
         {
             bool mine = s.Class == c.Tag, full = !mine && QuickSquad.ClassWhy(q.Squad, at, c.Tag).Length > 0;
             QuickSquad.Class one = c;
-            Texture2D? icon = QIcon(QuickClassIcon(c));
+            Texture2D? icon = QIcon(QuickClassIcon(c), (int)QhTabIcon);
             var tag = new QuickPad
             {
-                Text = icon is null ? c.Short : "", FontSize = 13, Bold = true, CustomMinimumSize = new Vector2(62, 56),
-                Rim = mine ? QOlive : QLine, Fill = mine ? QOlive : QPanelC, Ink = mine ? QOnOlive : QMuted,
-                HoverRim = QOlive, Disabled = full, Picture = icon, PictureSize = new Vector2(56, 56),
+                Text = icon is null ? c.Short : "", FontSize = 13, Bold = true,
+                Form = icon is null ? QuickPad.Shape.Box : QuickPad.Shape.Shield, RimWidth = 2,
+                CustomMinimumSize = icon is null ? new Vector2(52, 30) : QhTabPad,
+                Rim = mine ? QOlive : QLine, Fill = mine ? QOlive : new Color(0, 0, 0, 0), Ink = mine ? QOnOlive : QMuted,
+                HoverRim = QOlive, Disabled = full, Picture = icon, PictureSize = new Vector2(QhTabIcon, QhTabIcon), TextureFilter = QIconFilter,
             };
             tag.Clicked += () => QuickHangarSet(at, one.Tag);
             QTip(tag, () => QuickClassTip(one, full, s.Level > 0 && !mine ? L.T("quick.class_change", Pts(s.Level)) : null));
@@ -307,7 +311,9 @@ public sealed partial class Tank3DBench
             pick.Size = hit;
             bool front = near > 0.9f;
             pick.MouseFilter = front ? Control.MouseFilterEnum.Ignore : Control.MouseFilterEnum.Stop;
-            name.Position = new Vector2(middle.X - name.Size.X * 0.5f, middle.Y - QhView.Y * scale * 0.42f);
+            // two lines now: its foot where the one line's was, the block grown up
+            name.Size = name.GetCombinedMinimumSize();
+            name.Position = new Vector2(middle.X - name.Size.X * 0.5f, middle.Y - QhView.Y * scale * 0.42f + 22 - name.Size.Y);
         }
         // the far ones drawn first: the views are the podium's first children,
         // moved among themselves - a z index would lift them over the tips and dialogs too
@@ -447,10 +453,10 @@ public sealed partial class Tank3DBench
         var name = new HBoxContainer();
         name.AddThemeConstantOverride("separation", 8);
         // the class's icon, the strip's under the stage, before its name
-        if (QIcon(QuickClassIcon(c)) is { } icon)
+        if (QIcon(QuickClassIcon(c), 48) is { } icon)
             name.AddChild(new TextureRect
             {
-                Texture = icon, CustomMinimumSize = new Vector2(48, 48), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                Texture = icon, CustomMinimumSize = new Vector2(48, 48), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, TextureFilter = QIconFilter,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered, MouseFilter = Control.MouseFilterEnum.Ignore,
             });
         var title = QText(c.Name, 18, QInk, bold: true);
@@ -467,6 +473,44 @@ public sealed partial class Tank3DBench
         col.AddChild(QText(L.T("hangar.unit_armour", n[2].Item2), 13, QInk, wrap: true));
         col.AddChild(QText(L.T("quick.trait", c.Trait), 13, QInk, wrap: true));
         // what it carries is the tree's open nodes: nothing said again (as on the old build)
+    }
+
+    /// <summary>The caption over a machine on the ring (author 2026-11-03): its class
+    /// in full, under it its branch and its level as rank chevrons; the price is the
+    /// head's and the tree's, not said here. Larger and lit on the front one.</summary>
+    private Control QuickHangarCaption(QuickSquad.Slot o, bool front)
+    {
+        var box = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Alignment = BoxContainer.AlignmentMode.Center };
+        box.AddThemeConstantOverride("separation", 2);
+        Label Line(string text, int size, Color ink)
+        {
+            var l = QText(text, size, ink, bold: true);
+            l.HorizontalAlignment = HorizontalAlignment.Center;
+            l.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+            return l;
+        }
+        if (o.Empty)
+        {
+            box.AddChild(Line(L.T("hangar.empty"), front ? 15 : 12, front ? QInk : QMuted));
+            return box;
+        }
+        QuickSquad.Class c = QuickSquad.ClassOf(o.Class!);
+        box.AddChild(Line(c.Name, front ? 17 : 13, front ? QInk : QMuted));
+        var branch = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, MouseFilter = Control.MouseFilterEnum.Ignore };
+        branch.AddThemeConstantOverride("separation", 6);
+        QuickSquad.Branch? br = c.BranchOf(o.Branch);
+        bool lit = br is not null && o.Level > 0;
+        var said = Line(lit ? br!.Name : L.T("hangar.no_upgrades"), front ? 14 : 11, front ? QOlive : QMuted);
+        said.VerticalAlignment = VerticalAlignment.Center;
+        branch.AddChild(said);
+        if (lit)
+            branch.AddChild(new QuickRank
+            {
+                Level = o.Level, Wide = front ? 30 : 20, Lit = QAmber, Dim = new Color(QMuted, 0.7f),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            });
+        box.AddChild(branch);
+        return box;
     }
 
     /// <summary>A class's icon in <c>Icons/</c>: <c>class_LT</c> and so on.</summary>

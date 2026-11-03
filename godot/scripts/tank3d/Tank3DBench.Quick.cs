@@ -886,7 +886,7 @@ public sealed partial class Tank3DBench
                 col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
             int level = l;
             // the upgrade's icon in the node; its number only where there is no icon
-            Texture2D? icon = QIcon(u.Icon);
+            Texture2D? icon = QIcon(u.Icon, 32);
             var hex = new QuickPad
             {
                 Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = 1,
@@ -895,6 +895,7 @@ public sealed partial class Tank3DBench
                 HoverFill = open ? null : QSel, Disabled = shortOf, CustomMinimumSize = new Vector2(50, 43),
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
                 Picture = icon, PictureSize = new Vector2(32, 32), PictureAlpha = open || next ? 1.0f : 0.55f,
+                TextureFilter = QIconFilter,
             };
             hex.SetMeta("q_level", l);
             hex.Clicked += () =>
@@ -934,16 +935,28 @@ public sealed partial class Tank3DBench
         return box;
     }
 
-    /// <summary>An icon of <c>Icons/</c> - an upgrade's, a class's - read once
-    /// (<see cref="ActImage"/>, 64 px); null with no file.</summary>
-    private static Texture2D? QIcon(string name)
+    /// <summary>An icon of <c>Icons/</c> - an upgrade's, a class's - rasterised from its
+    /// vector for <paramref name="px"/> on screen, read once a size (<see cref="ActImage"/>);
+    /// null with no file. Twice the size it is drawn at: drawn down it stays sharp, and
+    /// on a window larger than the layout too (author 2026-11-03: a 64 px raster drawn
+    /// at 112 was blurred).</summary>
+    private static Texture2D? QIcon(string name, int px)
     {
         if (name.Length == 0)
             return null;
-        if (!QIcons.TryGetValue(name, out Texture2D? tex))
-            QIcons[name] = tex = ActImage(name, 64) is { } image ? ImageTexture.CreateFromImage(image) : null;
+        string key = $"{name}@{px}";
+        if (!QIcons.TryGetValue(key, out Texture2D? tex))
+        {
+            Image? image = ActImage(name, px * 2);
+            image?.GenerateMipmaps();
+            QIcons[key] = tex = image is null ? null : ImageTexture.CreateFromImage(image);
+        }
         return tex;
     }
+
+    /// <summary>How an icon is drawn down: smooth, from its mipmaps - the project's
+    /// default filter is nearest (the board's pixels), which steps an icon's edges.</summary>
+    private const CanvasItem.TextureFilterEnum QIconFilter = CanvasItem.TextureFilterEnum.LinearWithMipmaps;
 
     private static readonly Dictionary<string, Texture2D?> QIcons = new();
 

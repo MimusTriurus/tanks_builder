@@ -14,7 +14,9 @@ namespace TankSpriteTest;
 /// </summary>
 public partial class QuickPad : Control
 {
-    public enum Shape { Hex, Box }
+    /// <summary>Hex: a level's node, a pip; Box: a button; Shield: the class
+    /// icons' octagon (Icons/class_*.svg), round a class's icon.</summary>
+    public enum Shape { Hex, Box, Shield }
 
     public Shape Form = Shape.Box;
     public string Text = "";
@@ -118,6 +120,13 @@ public partial class QuickPad : Control
             var inset = new Vector2(RimWidth * 2.0f, RimWidth * 2.0f);
             DrawColoredPolygon(Hex(inset, s - 2 * inset), new Color(fill, fill.A * a));
         }
+        else if (Form == Shape.Shield)
+        {
+            Vector2[] o = Shield(Vector2.Zero, s);
+            DrawColoredPolygon(o, new Color(fill, fill.A * a));
+            if (RimWidth > 0)
+                DrawPolyline(new[] { o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[0] }, new Color(rim, rim.A * a), RimWidth, true);
+        }
         else
         {
             DrawRect(new Rect2(Vector2.Zero, s), new Color(fill, fill.A * a));
@@ -131,6 +140,11 @@ public partial class QuickPad : Control
             {
                 Vector2[] h = Hex(Vector2.Zero, s);
                 DrawPolyline(new[] { h[0], h[1], h[2], h[3], h[4], h[5], h[0] }, FocusRing, 2.0f);
+            }
+            else if (Form == Shape.Shield)
+            {
+                Vector2[] o = Shield(Vector2.Zero, s);
+                DrawPolyline(new[] { o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[0] }, FocusRing, 2.0f);
             }
             else
                 DrawRect(new Rect2(Vector2.One, s - 2 * Vector2.One), FocusRing, false, 2.0f);
@@ -162,6 +176,16 @@ public partial class QuickPad : Control
                 DrawString(font, new Vector2(pad, top + i * line), lines[i], Align, s.X - 2 * pad, FontSize, new Color(Ink, Ink.A * a));
         }
     }
+
+    /// <summary>The class icons' frame octagon (Icons/out/src/build_classes.sh,
+    /// <c>oct</c>): a wide top, sides from 15% to 76% down, a narrow bottom.</summary>
+    private static Vector2[] Shield(Vector2 at, Vector2 s) => new[]
+    {
+        at + new Vector2(s.X * 0.235f, 0), at + new Vector2(s.X * 0.765f, 0),
+        at + new Vector2(s.X, s.Y * 0.15f), at + new Vector2(s.X, s.Y * 0.765f),
+        at + new Vector2(s.X * 0.68f, s.Y), at + new Vector2(s.X * 0.32f, s.Y),
+        at + new Vector2(0, s.Y * 0.765f), at + new Vector2(0, s.Y * 0.15f),
+    };
 
     /// <summary>The prototype's hex: flat top and bottom, points left and right.</summary>
     private static Vector2[] Hex(Vector2 at, Vector2 s) => new[]
