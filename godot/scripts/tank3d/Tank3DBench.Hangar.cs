@@ -86,13 +86,24 @@ public sealed partial class Tank3DBench
                 QuickStageDrop(i);
         var page = new VBoxContainer();
         page.AddThemeConstantOverride("separation", 12);
-        page.AddChild(QuickHangarTop());
+        Control top = QuickHangarTop();
+        page.AddChild(top);
         var mid = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
         mid.AddThemeConstantOverride("separation", 12);
-        mid.AddChild(QuickHangarSheet());
+        Control sheet = QuickHangarSheet(), tree = QuickHangarTree();
+        mid.AddChild(sheet);
         mid.AddChild(QuickHangarStage());
-        mid.AddChild(QuickHangarTree());
+        mid.AddChild(tree);
         page.AddChild(mid);
+        // «В бой» over the podium's middle, not the screen's: the side columns differ (the
+        // tree's is the wider) and centred on the screen it stood off the podium's middle
+        // (author 2026-11-03). The top's sides as wide as the columns under them, from
+        // their least widths at once (no frame of it elsewhere), then as they are laid out
+        var (l, r) = ((Control)top.GetChild(0), (Control)top.GetChild(2));
+        l.CustomMinimumSize = new Vector2(sheet.GetCombinedMinimumSize().X, 0);
+        r.CustomMinimumSize = new Vector2(tree.GetCombinedMinimumSize().X, 0);
+        sheet.Resized += () => l.CustomMinimumSize = new Vector2(sheet.Size.X, 0);
+        tree.Resized += () => r.CustomMinimumSize = new Vector2(tree.Size.X, 0);
         // a model the page no longer shows goes with it
         for (int i = 0; i < q.Squad.Length; i++)
             if (q.Squad[i].Empty)
@@ -178,16 +189,18 @@ public sealed partial class Tank3DBench
         var top = new HBoxContainer();
         top.AddThemeConstantOverride("separation", 12);
 
-        // the battle's facts are the sheet's, under the squad: this side only keeps «В бой» in the middle
-        top.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+        // the battle's facts are the sheet's, under the squad: this side only keeps «В бой»
+        // over the podium - the sides are sized to the columns under them (QuickHangar)
+        top.AddChild(new Control { MouseFilter = Control.MouseFilterEnum.Ignore });
 
         // «В бой»: the placement next, as «К расстановке» was
-        var go = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        var go = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         go.AddThemeConstantOverride("separation", 4);
         QuickPad button = QBtn(L.T("hangar.go"), QuickTryGo, primary: true);
         button.FontSize = QSize(22);
         button.CustomMinimumSize = Vector2.Zero;
         button.Fit(new Vector2(46, 12));
+        button.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
         button.Disabled = missing > 0;
         go.AddChild(button);
         var sub = QText(missing > 0 ? L.T("hangar.in_squad", QuickSquad.Size - missing, QuickSquad.Size)
@@ -197,8 +210,8 @@ public sealed partial class Tank3DBench
         go.AddChild(sub);
         top.AddChild(go);
 
-        // the budget is the tree's, where it is spent (QuickHangarTree): this side balances the first
-        top.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+        // the budget is the tree's, where it is spent (QuickHangarTree)
+        top.AddChild(new Control { MouseFilter = Control.MouseFilterEnum.Ignore });
         return top;
     }
 
@@ -306,6 +319,10 @@ public sealed partial class Tank3DBench
             pick.Clicked += () => { _qhAt = slot; QuickShow(); };
             stage.AddChild(pick);
             Control name = QuickHangarCaption(q.Squad[k], k == at);
+            // the two at the back a shade down, chevrons too (author 2026-11-03): the
+            // front one reads first; 0.65 keeps the muted text near 3:1 on the stage
+            if (k != at)
+                name.Modulate = new Color(1, 1, 1, 0.65f);
             stage.AddChild(name);
             _qhRing[k].Pick = pick;
             _qhRing[k].Name = name;
