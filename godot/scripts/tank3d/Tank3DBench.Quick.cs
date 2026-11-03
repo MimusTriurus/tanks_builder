@@ -59,6 +59,10 @@ public sealed partial class Tank3DBench
         /// <summary>The AI's doctrine, an index into <see cref="QuickSquad.Doctrines"/>; null, random.</summary>
         public int? Doctrine;
         public QuickSquad.Slot[] Squad = QuickSquad.Empty();
+        /// <summary>The ready squad the squad was last taken from; null, none since it was cleared.</summary>
+        public QuickSquad.Company? Preset;
+        /// <summary>The name the player gave the squad; null, the preset's name or the default.</summary>
+        public string? Name;
         /// <summary>The AI's, made at «К расстановке».</summary>
         public QuickSquad.Slot[] Ai = QuickSquad.Empty();
         public QuickSquad.Doctrine? AiDoctrine;
@@ -1585,7 +1589,7 @@ public sealed partial class Tank3DBench
                 case "close": _qModal = QuickModal.None; _qAsk = null; break;
                 case "try-go": QuickTryGo(); continue;
                 case "clear": QuickAsk(true, L.T("quick.clear_ask"), L.T("quick.clear_text"), L.T("quick.clear"),
-                                       () => q.Squad = QuickSquad.Empty()); continue;
+                                       () => { q.Squad = QuickSquad.Empty(); q.Preset = null; q.Name = null; }); continue;
                 case "focus" when p.Length > 3:
                     // the keyboard's way to a node: its tip comes up with its focus
                     QuickShow();
@@ -1599,8 +1603,14 @@ public sealed partial class Tank3DBench
                 case "ai-budget" when p.Length > 1: q.AiBudget = (int)F(p[1], q.AiBudget); break;
                 case "doctrine" when p.Length > 1: q.Doctrine = p[1] == "random" ? null : (int)F(p[1], 1) - 1; break;
                 case "company" when p.Length > 1:
-                    q.Squad = QuickSquad.OfCompany(QuickSquad.Companies[Math.Clamp((int)F(p[1], 1) - 1, 0, 3)]);
+                    q.Preset = QuickSquad.Companies[Math.Clamp((int)F(p[1], 1) - 1, 0, 3)];
+                    q.Squad = QuickSquad.OfCompany(q.Preset);
+                    q.Name = null;
                     break;
+                case "preset" when p.Length > 1:
+                    // as a click on the ready squad: asked first only when the squad was changed
+                    QuickHangarPick(QuickSquad.Companies[Math.Clamp((int)F(p[1], 1) - 1, 0, 3)]); continue;
+                case "name" when p.Length > 1: q.Name = p[1]; break;
                 case "class" when p.Length > 2:
                     if (QuickSquad.ClassWhy(q.Squad, Slot(p[1]), p[2].ToUpperInvariant()) is { Length: > 0 } no)
                         Log.Print($"tank3d: quick: {step} - {no}");

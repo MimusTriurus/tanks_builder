@@ -211,11 +211,14 @@ public sealed partial class Tank3DBench
         }
 
         QuickPad clear = QBtn(L.T("quick.clear_squad"), () => QuickAsk(true, L.T("quick.clear_ask"),
-            L.T("quick.clear_text"), L.T("quick.clear"), () => { _qs.Squad = QuickSquad.Empty(); _qhAt = 0; _qhSpin = 0; }), small: true);
+            L.T("quick.clear_text"), L.T("quick.clear"), () => { _qs.Squad = QuickSquad.Empty(); _qs.Preset = null; _qs.Name = null; _qhAt = 0; _qhSpin = 0; }), small: true);
         clear.Ink = QRed;
         clear.HoverRim = new Color(QRed, 0.6f);
         clear.Disabled = q.Squad.All(x => x.Empty);
         stage.AddChild(clear);
+
+        Control title = QuickHangarName();
+        stage.AddChild(title);
 
         QuickPad back = QuickHangarStep(-1), next = QuickHangarStep(+1);
         stage.AddChild(back);
@@ -249,6 +252,8 @@ public sealed partial class Tank3DBench
         {
             Vector2 size = stage.Size;
             clear.Position = new Vector2(size.X - clear.Size.X - 12, 8);
+            title.Size = title.GetCombinedMinimumSize();
+            title.Position = new Vector2((size.X - title.Size.X) * 0.5f, 10);
             back.Size = next.Size = new Vector2(40, 66);
             back.Position = new Vector2(12, size.Y * 0.5f - 33);
             next.Position = new Vector2(size.X - 52, size.Y * 0.5f - 33);
@@ -378,9 +383,16 @@ public sealed partial class Tank3DBench
         pad.CustomMinimumSize = new Vector2(0, 54);
         if (short_)
             col.Modulate = new Color(1, 1, 1, 0.45f);
-        pad.Clicked += () => QuickAsk(q.Squad.Any(x => !x.Empty), L.T("quick.replace_ask"),
-            L.T("quick.replace_text", c.Name, QuickSquad.CompanyLevel),
-            L.T("quick.replace"), () => { q.Squad = QuickSquad.OfCompany(c); _qhAt = 0; _qhSpin = 0; });
+        // the one the squad was taken from: lit while it is as taken, its rim only once changed
+        if (q.Preset == c && !short_)
+        {
+            bool kept = QuickHangarAsTaken();
+            pad.Rim = QOlive;
+            pad.RimWidth = kept ? 2 : 1;
+            if (kept)
+                pad.Fill = QSel;
+        }
+        pad.Clicked += () => QuickHangarPick(c);
         QTip(pad, () => QTipBox(L.T("quick.preset_tip", Pts(start)), c.Name,
             string.Join("\n", c.Slots.Select(x => L.T("quick.preset_slot", QuickSquad.ClassOf(x.Class).Short, QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name, QuickSquad.CompanyLevel))),
             null, short_ ? L.T("hangar.preset_short", q.Budget, Pts(start))
@@ -388,6 +400,75 @@ public sealed partial class Tank3DBench
                   q.Budget > start ? L.T("quick.preset_left", Pts(q.Budget - start)) : L.T("quick.preset_all"))));
         return pad;
     }
+
+    /// <summary>A ready squad in place of the squad (author 2026-11-03): asked first only
+    /// when that would lose something - machines and levels no ready squad has as they
+    /// stand, or a name the player gave; one taken and left as it was goes without a word.</summary>
+    private void QuickHangarPick(QuickSquad.Company c)
+    {
+        QuickSetup q = _qs;
+        bool own = q.Squad.Any(x => !x.Empty) && !QuickSquad.Companies.Any(o => q.Squad.SequenceEqual(QuickSquad.OfCompany(o)));
+        QuickAsk(own || q.Name is not null, L.T("quick.replace_ask"),
+            L.T("quick.replace_text", c.Name, QuickSquad.CompanyLevel),
+            L.T("quick.replace"), () => { q.Squad = QuickSquad.OfCompany(c); q.Preset = c; q.Name = null; _qhAt = 0; _qhSpin = 0; });
+    }
+
+    /// <summary>The squad is still its ready squad's, machine for machine and level for level.</summary>
+    private bool QuickHangarAsTaken() =>
+        _qs.Preset is { } c && _qs.Squad.SequenceEqual(QuickSquad.OfCompany(c));
+
+    /// <summary>The squad's name over the podium, typed in place (author 2026-11-03):
+    /// the player's own, else the ready squad's it was taken from, else the default;
+    /// a line under it says when the squad is no longer as taken.</summary>
+    private Control QuickHangarName()
+    {
+        QuickSetup q = _qs;
+        var col = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        col.AddThemeConstantOverride("separation", 0);
+        var edit = new LineEdit
+        {
+            Text = q.Name ?? q.Preset?.Name ?? L.T("hangar.squad_default"),
+            Alignment = HorizontalAlignment.Center, MaxLength = 32, SelectAllOnFocus = true,
+            CustomMinimumSize = new Vector2(360, 0), CaretBlink = true,
+        };
+        edit.AddThemeFontOverride("font", QuickPad.BoldFont);
+        edit.AddThemeFontSizeOverride("font_size", 22);
+        edit.AddThemeColorOverride("font_color", QInk);
+        edit.AddThemeColorOverride("caret_color", QOlive);
+        edit.AddThemeColorOverride("selection_color", new Color(QOlive, 0.45f));
+        // flat on the podium, a rim under the pointer and while typed in
+        edit.AddThemeStyleboxOverride("normal", new StyleBoxEmpty());
+        edit.AddThemeStyleboxOverride("hover", QuickHangarNameBox(QLine));
+        edit.AddThemeStyleboxOverride("focus", QuickHangarNameBox(QOlive));
+        edit.MouseDefaultCursorShape = Control.CursorShape.Ibeam;
+        edit.TextChanged += t =>
+        {
+            string name = t.Trim();
+            q.Name = name.Length == 0 || name == (q.Preset?.Name ?? L.T("hangar.squad_default")) ? null : name;
+        };
+        // Enter or a click away ends the typing; an emptied name comes back
+        edit.TextSubmitted += _ => edit.ReleaseFocus();
+        edit.FocusExited += () =>
+        {
+            if (edit.Text.Trim().Length == 0)
+                edit.Text = q.Preset?.Name ?? L.T("hangar.squad_default");
+        };
+        col.AddChild(edit);
+        string note = q.Preset is null ? "" : QuickHangarAsTaken()
+            ? q.Name is null ? L.T("hangar.squad_preset") : L.T("hangar.squad_from", q.Preset.Name)
+            : L.T("hangar.squad_changed", q.Preset.Name);
+        var sub = QText(note, 12, QMuted);
+        sub.HorizontalAlignment = HorizontalAlignment.Center;
+        sub.MouseFilter = Control.MouseFilterEnum.Ignore;
+        col.AddChild(sub);
+        return col;
+    }
+
+    private static StyleBoxFlat QuickHangarNameBox(Color rim) => new()
+    {
+        BgColor = new Color(0, 0, 0, 0.18f), BorderColor = rim,
+        BorderWidthBottom = 2, ContentMarginLeft = 10, ContentMarginRight = 10, ContentMarginTop = 2, ContentMarginBottom = 2,
+    };
 
     /// <summary>Slot <paramref name="at"/> made <paramref name="tag"/>, its level off; the same class keeps it.</summary>
     private void QuickHangarSet(int at, string tag)
