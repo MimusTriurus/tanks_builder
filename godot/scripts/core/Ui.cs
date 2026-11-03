@@ -61,7 +61,9 @@ public static class Ui
     /// <summary>The fill of what is selected, under an <see cref="Accent"/> rim.</summary>
     public static readonly Color AccentFill = new("2A3322");
 
-    /// <summary>The amber: what the next click buys, and a warning.</summary>
+    /// <summary>The amber: what is to be had beyond the base - what the next click buys
+    /// in the hangar, the match's bonus acts (their group, their picking zone) - and a
+    /// warning (the move's budget cut).</summary>
     public static readonly Color Extra = new("E3A73C");
 
     /// <summary>The red: no, not affordable, the enemy's, deleting.</summary>

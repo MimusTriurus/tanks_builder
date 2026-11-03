@@ -118,7 +118,7 @@ public sealed partial class Tank3DBench
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
         _actFiery = ActButton(attack, "incendiary", L.T("acts.incendiary"), "", toggle: true, FieryToggle);
         HBoxContainer bonus;
-        (_groupBonus, bonus) = Group(GroupShape.Triangle, PickInk);
+        (_groupBonus, bonus) = Group(GroupShape.Triangle, Ui.Extra);
         // a tank or the wall ahead (Д5): a mode, the click says which
         _actRam = BonusButton(bonus, "ram", L.T("acts.ram"), toggle: true, RamToggle);
         // the grenade (Д8, Tank3DBench.Smoke): a mode
@@ -192,10 +192,10 @@ public sealed partial class Tank3DBench
         // spent: the face down to the panel's dark and its rim grey, the key's number grey
         b.AddThemeStyleboxOverride("disabled", Ui.Fill(Ui.Panel, 8.0f, 2.0f));
         Ui.Rimmed(b, () => b.Disabled ? (Ui.Spent, rim)
-                         : b.ButtonPressed ? (CardSpend, 2)
-                         : b.IsHovered() ? (Ui.Ink, rim) : (Ui.Line, rim));
-        b.AddThemeColorOverride("font_pressed_color", CardSpend);
-        b.AddThemeColorOverride("font_hover_pressed_color", CardSpend);
+                         : b.ButtonPressed ? (Ui.Accent, 2)
+                         : b.IsHovered() ? (Ui.Accent, rim) : (Ui.Line, rim));
+        b.AddThemeColorOverride("font_pressed_color", Ui.Accent);
+        b.AddThemeColorOverride("font_hover_pressed_color", Ui.Accent);
         b.AddThemeColorOverride("font_disabled_color", Ui.Spent);
     }
 
@@ -717,9 +717,6 @@ public sealed partial class Tank3DBench
     /// button's bottom right corner, px.</summary>
     private const float BadgeR = 9.5f, BadgeIn = 5.0f;
 
-    /// <summary>A budget cut below the speed - the turn begun in mud or a wood.</summary>
-    private static readonly Color BadgeCut = new(0.93f, 0.62f, 0.18f);
-
     private Control? _moveBadge;
     /// <summary>What the badge shows: the steps, cut, road, spent - redrawn
     /// when it changes, not every frame.</summary>
@@ -765,7 +762,7 @@ public sealed partial class Tank3DBench
         if (_moveBadge is not { } c || _badgeSteps < 0)
             return;
         var mid = new Vector2(c.Size.X - BadgeIn, c.Size.Y - BadgeIn);
-        Color fill = _badgeOff ? MarkSpent : _badgeCut ? BadgeCut : Ui.Move;
+        Color fill = _badgeOff ? MarkSpent : _badgeCut ? Ui.Extra : Ui.Move;
         // the ink's rim first, as the group's mark is drawn (MarkAt)
         c.DrawCircle(mid, BadgeR + 1.5f, MarkLine);
         c.DrawCircle(mid, BadgeR, fill);

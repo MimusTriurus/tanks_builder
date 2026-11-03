@@ -67,9 +67,6 @@ public sealed partial class Tank3DBench
     /// <summary>A bonus act on a hex being picked: «Дым» or a kit's.</summary>
     private bool PickMode => _smokeMode || _gearMode != Gear.None;
 
-    /// <summary>The picking zone's ink: the bonus act's amber, as its icons'.</summary>
-    private static readonly Color PickInk = new(1.0f, 0.69f, 0.18f);
-
     /// <summary>The hexes the act being picked would be done on, as last
     /// found, and what they were found for: the mode, the cell, the reach's
     /// search (the board's tanks) - asking the rules of each hex builds the
@@ -105,18 +102,18 @@ public sealed partial class Tank3DBench
         // on the relief as the move's zone is: off the hexes' edges
         if (_relief is not null)
         {
-            ReliefZoneShow(PickInk);
+            ReliefZoneShow(Ui.Extra);
             return;
         }
         if (_pickCells.Count == 0)
             return;
         Vector2[] corner = Corners();
         mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-        var tint = new Color(PickInk, ZoneTone);
+        var tint = new Color(Ui.Extra, ZoneTone);
         foreach (Vector2I cell in _zoneFill)
             ZoneCell(mesh, tint, cell, corner);
         ZoneBand(corner, 1);
-        var line = new Color(PickInk, 0.95f);
+        var line = new Color(Ui.Extra, 0.95f);
         for (int i = 0; i < _band.Count; i++)
         {
             mesh.SurfaceSetColor(line);

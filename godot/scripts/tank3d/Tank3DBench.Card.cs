@@ -23,8 +23,6 @@ public sealed partial class Tank3DBench
         new(0.89f, 0.29f, 0.29f), new(0.94f, 0.62f, 0.15f), new(0.59f, 0.77f, 0.35f), new(0.11f, 0.62f, 0.46f),
     };
 
-    private static readonly Color CardSpend = new(0.36f, 0.79f, 0.65f);
-
     private static readonly string[] ClassShort = Array.ConvertAll(MovementProfile.All, p => p.Tag[..2]);
 
     private Control? _card;

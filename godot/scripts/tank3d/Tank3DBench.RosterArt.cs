@@ -5,10 +5,13 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// The roster's pictures (docs/hud3d-plan.md, «Ростер», 2026-10-30): each
-/// unit's own model, rendered once at the match's start in a viewport of its
-/// own - the same glTF, cel shading and ink as on the board, in its side's
-/// paint, turned three-quarters to the camera at the board's pitch.
+/// The models' pictures (docs/hud3d-plan.md, «Ростер», 2026-10-30): each
+/// unit's own model, rendered once in a viewport of its own - the same glTF,
+/// cel shading and ink as on the board, in its side's paint, turned
+/// three-quarters to the camera at the board's pitch. The squad's screens draw
+/// them (<c>Tank3DBench.Quick</c>: the old build's cards, the hangar's stand-ins);
+/// the match's roster drew them too until 2026-11-03 and shows the class's octagon
+/// now, as the hangar's tabs do (<c>Tank3DBench.Roster</c>).
 /// <list type="bullet">
 /// <item><b>Kept on disk</b> (<c>user://roster_art</c>, <see cref="RosterCachePath"/>):
 /// rendered again only when the model's files, the camera's pitch or the
@@ -35,32 +38,6 @@ public sealed partial class Tank3DBench
     private const float RosterEven = 1.25f;
 
     private readonly Dictionary<(string Tag, Side Side), Texture2D> _rosterArt = new();
-
-    /// <summary>Every model of the line-up in each side's paint, one after
-    /// another; started with the roster.</summary>
-    private async void RosterArt()
-    {
-        var wanted = new List<(string, Side)>();
-        foreach (Lineup.Unit u in _lineup)
-        {
-            var key = (u.Model.ToUpperInvariant(), SideOf(u));
-            if (!wanted.Contains(key))
-                wanted.Add(key);
-        }
-        int cached = 0, rendered = 0;
-        foreach (var (tag, side) in wanted)
-        {
-            if (!IsInsideTree())
-                return;
-            if (await RosterArtOf(tag, side) is not { } got)
-                continue;
-            if (got.Cached)
-                cached++;
-            else
-                rendered++;
-        }
-        Log.Print($"tank3d: roster: {_rosterArt.Count} of {wanted.Count} units - {cached} from the cache, {rendered} rendered");
-    }
 
     /// <summary>One model's picture in a side's paint: off the disk, else
     /// rendered and kept, and into <see cref="_rosterArt"/>; null if the model

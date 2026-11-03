@@ -167,7 +167,7 @@ public sealed partial class Tank3DBench
         }
         return UiTip.Box(tip.Group is { } gr ? GroupName(gr.Shape) : "", name, text, state: why, large: true,
                          key: key.Length > 0 ? L.T("acttips.key", key) : null,
-                         kickerInk: tip.Group?.Ink, kickerMark: mark, stateInk: AimPierce);
+                         kickerInk: tip.Group?.Ink, kickerMark: mark, stateInk: Ui.Danger);
     }
 
     /// <summary>The key a button's cap says, or empty.</summary>

@@ -37,7 +37,6 @@ public sealed partial class Tank3DBench
     /// the heavy).</summary>
     private const int PeekMight = 5, PeekSteps = 5, PeekMass = 3, PeekArmour = 3;
 
-    private static readonly Color PeekFire = new(0.95f, 0.55f, 0.20f);
     private static readonly Color PeekLine = new(0.91f, 0.90f, 0.86f, 0.9f);
     private static readonly Color PeekShade = new(0.0f, 0.0f, 0.0f, 0.55f);
 
@@ -275,7 +274,7 @@ public sealed partial class Tank3DBench
         // the figures: a label, then the slots, the labels' column as wide as the longest
         float x = left + PeekPad, slots = left + PeekSlotsAt(font);
         float y = rule + 22.0f;
-        PeekRow(c, font, x, slots, y, L.T("peek.fire"), profile.Might, PeekMight, PeekMark.Dot, PeekFire);
+        PeekRow(c, font, x, slots, y, L.T("peek.fire"), profile.Might, PeekMight, PeekMark.Dot, Ui.Attack);
         y += PeekRowStep;
         if (turn)
             TurnSteps(c, font, x, slots, y);
@@ -333,7 +332,7 @@ public sealed partial class Tank3DBench
         // the lit ones are the last of the whole ones, as the old dots were
         PeekSlots(c, slots, y, left - spend, Math.Max(PeekSteps, budget), PeekMark.Dot, Ui.Ink, Ui.Muted);
         if (spend > 0)
-            PeekSlots(c, slots + (left - spend) * PeekSlotGap, y, spend, spend, PeekMark.Dot, CardSpend, Ui.Muted);
+            PeekSlots(c, slots + (left - spend) * PeekSlotGap, y, spend, spend, PeekMark.Dot, Ui.Move, Ui.Muted);
     }
 
     /// <summary>The leader: a dot on the hull, a slant to the knee, level into

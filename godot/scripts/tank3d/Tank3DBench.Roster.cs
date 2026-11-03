@@ -9,12 +9,12 @@ namespace TankSpriteTest;
 /// 2026-10-30, the author's layout): an icon a unit of the side whose turn it
 /// is, in <see cref="Roster"/>'s order.
 /// <list type="bullet">
-/// <item><b>The icon</b> - the unit's own model rendered
-/// (<c>Tank3DBench.RosterArt</c>), the class drawn from above until it is
-/// in; the class under it, the state's token in the corner - the same one
-/// over the hull (<see cref="Sign"/>). The one in play is framed in the
-/// side's colour; the ones that cannot be taken now are dimmed; a destroyed
-/// one is grey and crossed.</item>
+/// <item><b>The icon</b> - the class's octagon, as the hangar's tabs show it
+/// (<see cref="RosterIconOf"/>; the model's own picture until 2026-11-03), the
+/// class drawn from above with no icon on disk; the class under it, the state's
+/// token in the corner - the same one over the hull (<see cref="Sign"/>). The one
+/// in play is framed olive, the selected of every screen; the ones that cannot be
+/// taken now are dimmed; a destroyed one is grey and crossed in red.</item>
 /// <item><b>The card</b> - the unit's panel beside its icon in the match's tip
 /// (<see cref="UiTip"/>: its wait, its beak, the icon ringed), gone as the pointer leaves
 /// (the author's note, 2026-10-30). The one in play's has the turn in it.</item>
@@ -31,8 +31,6 @@ public sealed partial class Tank3DBench
     private const float RosterLeft = 12.0f, RosterIcon = 76.0f, RosterGap = 8.0f;
 
     private static readonly Color RosterHull = new(0.20f, 0.21f, 0.19f);
-    private static readonly Color RosterGrey = new(0.48f, 0.48f, 0.46f);
-    private static readonly Color RosterCross = new(0.89f, 0.29f, 0.29f);
     /// <summary>The F-key over each icon, as Baldur's Gate 3 labels its party.</summary>
     private static readonly string[] RosterKeys = { "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8" };
 
@@ -78,7 +76,6 @@ public sealed partial class Tank3DBench
         };
         _roster.Draw += DrawRoster;
         _roster.GuiInput += RosterInput;
-        RosterArt();
         layer.AddChild(_roster);
     }
 
@@ -194,7 +191,6 @@ public sealed partial class Tank3DBench
         if (_roster is not { } c || _field is null)
             return;
         Font font = ThemeDB.FallbackFont;
-        Color ink = SideInk(_mt.Turn);
         for (int i = 0; i < _rosterCount; i++)
         {
             RosterSlot s = _rosterSlots[i];
@@ -203,25 +199,28 @@ public sealed partial class Tank3DBench
             // the one in play, and who else could be taken now
             bool live = s.Riding || (s.Parked is { } p && Takeable(p));
             float a = live || gone ? 1.0f : 0.5f;
-            // the theme's square tile (Ui); the one in play rimmed in its side's colour, 3 px
-            Ui.DrawBox(c, box, Ui.PanelOver, s.Riding ? ink : Ui.Line, s.Riding ? 3.0f : 1.0f);
+            // the theme's square tile (Ui); the one in play rimmed olive, 3 px - selected is
+            // the olive on every screen; the side's colour stays on the models (step 4, 2026-11-03)
+            Ui.DrawBox(c, box, Ui.PanelOver, s.Riding ? Ui.Accent : Ui.Line, s.Riding ? 3.0f : 1.0f);
             if (i == _rosterOver)
                 c.DrawRect(box.Grow(-3.0f), new Color(1.0f, 1.0f, 1.0f, 0.06f));
             MovementProfile cls = RosterClass(s);
-            // the model's own picture (Tank3DBench.RosterArt); the silhouette until it is in
-            if (_rosterArt.TryGetValue((s.Tag, s.Riding ? _side : _mt.Turn), out Texture2D? art))
+            int ci = Array.IndexOf(MovementProfile.All, cls);
+            // the class's octagon, the hangar's tabs' (Icons/class_*.svg): one picture of a
+            // class on every screen (step 4); the drawn silhouette with no icon on disk
+            if (RosterIconOf(ci) is { } art)
             {
-                // fitted into the space over the label, its own proportions kept
-                var room = new Rect2(box.Position + new Vector2(7.0f, 7.0f), RosterIcon - 14.0f, RosterIcon - 34.0f);
+                // the octagon fills the space over the label: the icon's own margins
+                // (its shield is 0.654 by 0.623 of it, QhTabPad) run past that space
+                var mid = new Vector2(box.Position.X + RosterIcon * 0.5f, box.Position.Y + 6.0f + (RosterIcon - 32.0f) * 0.5f);
                 Vector2 size = art.GetSize();
-                float fit = Mathf.Min(room.Size.X / size.X, room.Size.Y / size.Y);
-                Vector2 drawn = size * fit;
-                c.DrawTextureRect(art, new Rect2(room.Position + (room.Size - drawn) * 0.5f, drawn), false,
+                Vector2 drawn = size * (RosterIconPx * 1.25f / Mathf.Max(size.X, size.Y));
+                c.DrawTextureRect(art, new Rect2(mid - drawn * 0.5f, drawn), false,
                                   gone ? new Color(0.35f, 0.35f, 0.35f, 1.0f) : new Color(1.0f, 1.0f, 1.0f, a));
             }
             else
                 RosterTank(c, box.Position + new Vector2(RosterIcon * 0.5f, 22.0f), cls,
-                           gone ? RosterGrey : ink, a);
+                           gone ? Ui.Spent : SideInk(_mt.Turn), a);
             // the key that takes it (Tank3DBench.Acts): a disc sat on the top
             // left corner, half off the icon, as a game's hotkey badge - the
             // state's token has the other corner
@@ -229,20 +228,19 @@ public sealed partial class Tank3DBench
             {
                 const float r = 14.0f;
                 Vector2 at = box.Position + new Vector2(3.0f, 3.0f);
-                Color key = gone ? RosterGrey : Ui.Ink;
+                Color key = gone ? Ui.Spent : Ui.Ink;
                 c.DrawCircle(at, r + 1.5f, new Color(key, 0.85f * a));
                 c.DrawCircle(at, r, new Color(Ui.Bg, a));
                 c.DrawString(font, at + new Vector2(-r, Ui.Caption * 0.36f), RosterKeys[i],
                              HorizontalAlignment.Center, 2.0f * r, Ui.Caption, new Color(key, a));
             }
-            int ci = Array.IndexOf(MovementProfile.All, cls);
             c.DrawString(font, box.Position + new Vector2(0.0f, RosterIcon - 8.0f), ci >= 0 ? ClassShort[ci] : cls.Tag,
-                         HorizontalAlignment.Center, RosterIcon, Ui.Caption, new Color(gone ? RosterGrey : Ui.Ink, a));
+                         HorizontalAlignment.Center, RosterIcon, Ui.Caption, new Color(gone ? Ui.Spent : Ui.Ink, a));
             if (gone)
             {
                 var m = box.Grow(-12.0f);
-                c.DrawLine(m.Position, m.End, RosterCross, 3.0f, true);
-                c.DrawLine(new Vector2(m.End.X, m.Position.Y), new Vector2(m.Position.X, m.End.Y), RosterCross, 3.0f, true);
+                c.DrawLine(m.Position, m.End, Ui.Danger, 3.0f, true);
+                c.DrawLine(new Vector2(m.End.X, m.Position.Y), new Vector2(m.Position.X, m.End.Y), Ui.Danger, 3.0f, true);
                 continue;
             }
             Badge badge = s.Riding ? BadgeOf(_unitId, _fate, CellHere) : BadgeOf(s.Id, s.Fate, s.Cell);
@@ -250,6 +248,26 @@ public sealed partial class Tank3DBench
                 Sign(c, badge, box.Position + new Vector2(RosterIcon - 12.0f, 12.0f), 8.0f, a: a);
         }
     }
+
+    /// <summary>The class's octagon by its place in <see cref="MovementProfile.All"/>, as the
+    /// hangar's tabs show it (<c>class_LT</c>…, <see cref="QIcon"/>), looked up once a class:
+    /// the roster draws every frame, and the icon's lookup builds its key.</summary>
+    private Texture2D? RosterIconOf(int ci)
+    {
+        if (ci < 0 || ci >= _rosterIcons.Length)
+            return null;
+        if (!_rosterIconsLooked[ci])
+        {
+            _rosterIconsLooked[ci] = true;
+            _rosterIcons[ci] = QIcon($"class_{ClassShort[ci]}", RosterIconPx);
+        }
+        return _rosterIcons[ci];
+    }
+
+    /// <summary>The octagon's raster on a tile, px in the layout.</summary>
+    private const int RosterIconPx = 48;
+    private readonly Texture2D?[] _rosterIcons = new Texture2D?[MovementProfile.All.Length];
+    private readonly bool[] _rosterIconsLooked = new bool[MovementProfile.All.Length];
 
     /// <summary>The roster's tip keys, one an icon: the card shown tells which icon is its.</summary>
     private readonly object[] _rosterTipKeys = { new(), new(), new(), new(), new(), new(), new(), new() };
