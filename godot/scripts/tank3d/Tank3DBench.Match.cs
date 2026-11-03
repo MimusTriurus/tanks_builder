@@ -128,7 +128,7 @@ public sealed partial class Tank3DBench
     private Label? _banner;
     private float _bannerLeft;
 
-    private static string SideName(Side s) => s == Side.Green ? "зелёные" : "коричневые";
+    private static string SideName(Side s) => s == Side.Green ? L.T("match.side_green") : L.T("match.side_brown");
     private static Side Across(Side s) => s == Side.Green ? Side.Brown : Side.Green;
     private static Color SideInk(Side s) => s == Side.Green ? new Color(0.55f, 0.95f, 0.45f) : new Color(0.85f, 0.62f, 0.38f);
 
@@ -166,7 +166,7 @@ public sealed partial class Tank3DBench
     private bool _tossed;
 
     /// <summary>The first banner's word on the toss.</summary>
-    private string TossSaid => _tossed ? $"Жребий: первыми ходят {SideName(_mt.First)} · " : "";
+    private string TossSaid => _tossed ? L.T("match.toss", SideName(_mt.First)) : "";
 
     // --- the sides -------------------------------------------------------------
 
@@ -271,7 +271,7 @@ public sealed partial class Tank3DBench
         // its «В бой» says the round, and the first side's banner the toss
         DeployStart();
         if (!Deploying)
-            Banner($"{TossSaid}Раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+            Banner(L.T("match.round1_banner", TossSaid, SideName(_mt.Turn)), SideInk(_mt.Turn));
     }
 
     /// <summary>The side's paint on a model: brown or the model's own.</summary>
@@ -315,17 +315,17 @@ public sealed partial class Tank3DBench
         if (!Match)
             return "";
         if (MatchOver)
-            return "партия окончена";
+            return L.T("match.over");
         if (Deploying)
-            return "идёт расстановка — сначала «В бой»";
+            return L.T("match.deploying");
         if (_side != _mt.Turn)
-            return $"ходят {SideName(_mt.Turn)}";
+            return L.T("match.side_to_move", SideName(_mt.Turn));
         if (_passIn is not null)
-            return "ход передаётся";
+            return L.T("match.passing");
         if (_mt.Drove)
-            return $"{_modelTag} уже ходил в этом ходу";
+            return L.T("match.already_moved", _modelTag);
         if ((_mt.Fired || _mt.Bonus) && !_profile.FreeOrder)
-            return "после действия не ездят — действует до хода только LT";
+            return L.T("match.no_move_after_act");
         return "";
     }
 
@@ -337,7 +337,7 @@ public sealed partial class Tank3DBench
 
     /// <summary>The bonus act of this turn is spent - the ram or the fire put
     /// out, or the turn going over.</summary>
-    private const string BonusWaits = "атака сделана — осталось доп. действие или «Конец хода»";
+    private static string BonusWaits => L.T("match.bonus_waits");
 
     private bool MatchBonusSpent => Match && (_mt.Bonus || _passIn is not null || MatchOver || Deploying);
 
@@ -364,15 +364,15 @@ public sealed partial class Tank3DBench
         if (!Match)
             return "";
         if (MatchOver)
-            return "партия окончена";
+            return L.T("match.over");
         if (Deploying)
-            return "идёт расстановка — сначала «В бой»";
+            return L.T("match.deploying");
         if (_side != _mt.Turn)
-            return $"ходят {SideName(_mt.Turn)}";
+            return L.T("match.side_to_move", SideName(_mt.Turn));
         if (_passIn is not null)
-            return "ход передаётся";
+            return L.T("match.passing");
         if (_mt.Fired)
-            return $"{_modelTag} уже стрелял в этом ходу";
+            return L.T("match.already_fired", _modelTag);
         return "";
     }
 
@@ -412,12 +412,12 @@ public sealed partial class Tank3DBench
     /// <summary>Why a click would not take the standing unit, or empty.</summary>
     private string TakeWhy(Parked p) =>
         Takeable(p) ? ""
-            : MatchOver ? "партия окончена"
-            : p.Side != _mt.Turn ? $"{p.Tag} — {SideName(p.Side)}, ходят {SideName(_mt.Turn)}"
-            : p.Fate != Fate.Alive ? $"{p.Tag} {(p.Fate == Fate.Knocked ? "подбит" : "уничтожен")}"
-            : _passIn is not null ? "ход передаётся"
-            : _side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus) ? $"в этом ходу уже действует {_modelTag}"
-            : "дождись конца приказа";
+            : MatchOver ? L.T("match.over")
+            : p.Side != _mt.Turn ? L.T("match.take_other_side", p.Tag, SideName(p.Side), SideName(_mt.Turn))
+            : p.Fate != Fate.Alive ? L.T(p.Fate == Fate.Knocked ? "match.unit_knocked" : "match.unit_destroyed", p.Tag)
+            : _passIn is not null ? L.T("match.passing")
+            : _side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus) ? L.T("match.other_acting", _modelTag)
+            : L.T("match.wait_order");
 
     /// <summary>The same without the words - the roster asks it every frame
     /// for its dimmed icons, and the words allocate.</summary>
@@ -440,7 +440,7 @@ public sealed partial class Tank3DBench
         }
         if (MatchBusy)
         {
-            _matchNote = "дождись конца приказа";
+            _matchNote = L.T("match.wait_order");
             return;
         }
         Log.Print($"tank3d: match: {SideName(_mt.Turn)} end the turn"
@@ -461,7 +461,7 @@ public sealed partial class Tank3DBench
             && !(_side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus)))
         {
             Log.Print($"tank3d: match: a pass {Time.GetTicksMsec() - _passedByItself} ms after the turn went by itself - held");
-            _matchNote = "ход уже передан";
+            _matchNote = L.T("match.already_passed");
             return;
         }
         Execute(new Command(CommandKind.Pass));
@@ -517,21 +517,21 @@ public sealed partial class Tank3DBench
                 TakeOver(next);
                 // the view round to the side to move (Tank3DBench.Deploy)
                 ViewToSide(_mt.Turn);
-                Banner($"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+                Banner(L.T("match.round_banner", _mt.Round, SideName(_mt.Turn)), SideInk(_mt.Turn));
                 Log.Print($"tank3d: match: round {_mt.Round}, {SideName(_mt.Turn)} to move, {_modelTag} on {MapAt(CellHere)}");
                 return;
             }
             if (_side == _mt.Turn && _fate == Fate.Alive)
             {
                 ViewToSide(_mt.Turn);
-                Banner($"Раунд {_mt.Round} · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+                Banner(L.T("match.round_banner", _mt.Round, SideName(_mt.Turn)), SideInk(_mt.Turn));
                 return;
             }
             Log.Print($"tank3d: match: {SideName(_mt.Turn)} have nothing able to act - a pass");
-            _matchNote = $"у {SideName(_mt.Turn)} ходить некому — пас";
+            _matchNote = L.T("match.nobody_pass", SideName(_mt.Turn));
         }
         _mt.Drawn = true;
-        Banner("Ничья: ходить некому", Colors.White, stay: true);
+        Banner(L.T("match.draw_nobody"), Colors.White, stay: true);
     }
 
     /// <summary>Set once a restart has happened in this process: the launch's
@@ -580,7 +580,7 @@ public sealed partial class Tank3DBench
                 continue;
             _mt.Won = Across(s);
             _passIn = null;
-            Banner($"Победа: {SideName(_mt.Won.Value)} · раунд {_mt.Round}", SideInk(_mt.Won.Value), stay: true);
+            Banner(L.T("match.victory_round", SideName(_mt.Won.Value), _mt.Round), SideInk(_mt.Won.Value), stay: true);
             Log.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_mt.Won.Value)} win in round {_mt.Round}");
             return true;
         }
@@ -650,7 +650,7 @@ public sealed partial class Tank3DBench
         if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || !_profile.FreeOrder) && !BonusLeft())
         {
             _passIn = PassDelay;
-            _matchNote = "ход сделан";
+            _matchNote = L.T("match.turn_done");
         }
         else if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || !_profile.FreeOrder))
             _matchNote = BonusWaits;
@@ -660,7 +660,7 @@ public sealed partial class Tank3DBench
         if (_passIn is null && !busy && _side == _mt.Turn && _fate != Fate.Alive && _coastTo is null)
         {
             _passIn = PassDelay;
-            _matchNote = $"{_modelTag} подбит";
+            _matchNote = L.T("match.unit_knocked", _modelTag);
         }
         if (_passIn is float left && !busy)
         {
@@ -792,7 +792,7 @@ public sealed partial class Tank3DBench
             // knocked out, it burns no more as a unit: the pyre is its fire now
             Quench(id, steam: false);
             Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
-            _matchNote = $"{SideName(side)} {tag} подбит";
+            _matchNote = L.T("match.side_unit_knocked", SideName(side), tag);
             Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} knocked out");
             return Fate.Knocked;
         }
@@ -823,7 +823,7 @@ public sealed partial class Tank3DBench
         Char(model, at, 1.6f * hull);
         Boom(at, 1.0f, grounded: true);
         _shake.Blast(_profile.ShotShake * 0.6);
-        _matchNote = $"{SideName(side)} {tag} уничтожен";
+        _matchNote = L.T("match.side_unit_destroyed", SideName(side), tag);
         Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} destroyed");
         Blast(cell);
         // ...and the wood under it and round it catches, the walls on its hex
@@ -1079,7 +1079,7 @@ public sealed partial class Tank3DBench
                     .Append(u.Fate switch { Fate.Alive => "", Fate.Knocked => "◐", _ => "✕" })
                     .Append(u.Fate == Fate.Alive && Burning(u.Id) ? "▲" : "");
         }
-        return text.Append("      ▲ горит  ◐ подбит  ✕ уничтожен").ToString();
+        return text.Append(L.T("match.roll_legend")).ToString();
     }
 
     /// <summary>What <see cref="MatchHud"/> and <see cref="Roll"/> read, into
@@ -1142,23 +1142,24 @@ public sealed partial class Tank3DBench
         Deploying ? status + "\n" + DeployHud() + PointHud() :
         status + "\n"
         + (MatchOver
-            ? (_mt.Drawn ? "Ничья" : $"Победа: {SideName(_mt.Won!.Value)}") + $" · раунд {_mt.Round}" + PointHud()
-            : $"Раунд {_mt.Round}"
+            ? (_mt.Drawn ? L.T("match.draw") : L.T("match.victory", SideName(_mt.Won!.Value))) + L.T("match.round_tail", _mt.Round) + PointHud()
+            : L.T("match.round", _mt.Round)
               // the stalemate's count, once there is one (Tank3DBench.Rules)
-              + (_mt.QuietRounds > 0 ? $" (без выстрела по танку {_mt.QuietRounds} из {MatchRules.QuietRoundsDraw})" : "")
+              + (_mt.QuietRounds > 0 ? L.T("match.quiet", _mt.QuietRounds, MatchRules.QuietRoundsDraw) : "")
               // the control point and the points (Tank3DBench.Point)
               + PointHud()
-              + $" · ходят {SideName(_mt.Turn)} · {_modelTag}: ход {(_mt.Drove ? "сделан" : "есть")}, "
-              + $"атака {(_mt.Fired ? "сделана" : "есть")}, доп. действие {(_mt.Bonus ? "сделано" : "есть")}"
+              + L.T("match.turn_state", SideName(_mt.Turn), _modelTag,
+                    L.T(_mt.Drove ? "match.state_move_done" : "match.state_left"),
+                    L.T(_mt.Fired ? "match.state_attack_done" : "match.state_left"),
+                    L.T(_mt.Bonus ? "match.state_bonus_done" : "match.state_left"))
               // its upgrades (Д8): the passive ones show nowhere else
-              + (KitOf(_unitId) != Kit.None ? $" · апгрейды: {Kits.Names(KitOf(_unitId))}" : "")
-              + (Burning(_unitId) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
+              + (KitOf(_unitId) != Kit.None ? L.T("match.upgrades", Kits.Names(KitOf(_unitId))) : "")
+              + (Burning(_unitId) ? L.T("match.burning", _modelTag) : "")
               // its ambush (Tank3DBench.Ambush): any order lifts it
-              + (_ambush.TryGetValue(_unitId, out var watch) ? $" · {_modelTag} в засаде{(watch.Shots > 1 ? $" (выстрелов: {watch.Shots})" : "")}: любой приказ её снимет" : "")
-              + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
+              + (_ambush.TryGetValue(_unitId, out var watch) ? L.T("match.ambush", _modelTag, watch.Shots > 1 ? L.T("match.ambush_shots", watch.Shots) : "") : "")
+              + (_passIn is float t ? L.T("match.pass_in", Mathf.Max(t, 0.0f)) : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "")
-        + (!_hints ? "   F9 — подсказки"
+        + (!_hints ? L.T("match.hints_off")
             : "\n" + Roll() + "\n"
-              + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   1 «Атака» — ЛКМ по танку, свой тоже   2 «Засада» — ЛКМ по гексу оси (MT: и по соседней)   3… доп. действия, Tab — таран, J — тушить   F1–F8 — танк ростера\n"
-              + "ПКМ по танку — огонь, по своему тоже (не достать отсюда — ехать и стрелять)   J — тушить   Enter — конец хода (сперва подтверждает приказ)   Backspace — отменить ход   Ctrl+Backspace — заново   Esc — отмена   колесо — зум   стрелки, WASD — камера   средняя кнопка — ракурс   Home — за танком   F10 — замер кадра   F9 — скрыть");
+              + L.T("match.hints"));
 }

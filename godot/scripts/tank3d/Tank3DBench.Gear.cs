@@ -57,9 +57,9 @@ public sealed partial class Tank3DBench
 
     private static string GearName(Gear g) => g switch
     {
-        Gear.Mine => "минного заградителя",
-        Gear.Repair => "ремкомплекта",
-        _ => "лебёдки",
+        Gear.Mine => L.T("gear.kit_mine"),
+        Gear.Repair => L.T("gear.kit_repair"),
+        _ => L.T("gear.kit_winch"),
     };
 
     private bool RigHas(Kit k) => (KitOf(_unitId) & k) != 0;
@@ -161,36 +161,36 @@ public sealed partial class Tank3DBench
     private string GearWhy(Gear g, Vector2I cell)
     {
         if (_field is null || _lineup.Count == 0)
-            return "нет партии";
+            return L.T("gear.why_no_match");
         if (_fate != Fate.Alive)
-            return $"{_modelTag} не на ходу";
+            return L.T("gear.why_out", _modelTag);
         if (_side != _mt.Turn)
-            return $"ходят {SideName(_mt.Turn)}";
+            return L.T("gear.why_turn", SideName(_mt.Turn));
         if (!RigHas(KitFor(g)))
-            return $"у {_modelTag} нет {GearName(g)}";
+            return L.T("gear.why_no_kit", _modelTag, GearName(g));
         if (MatchBonusSpent)
-            return "доп. действие этого хода уже сделано";
+            return L.T("gear.why_bonus_spent");
         return GearAct(g, ShadowOfBench(), cell) is { } no ? Words(no) : "";
     }
 
     /// <summary>The core's refusal in the player's words.</summary>
     private static string Words(string why) => why switch
     {
-        "only on a hex beside" => "только на соседний гекс",
-        "a tank stands there" => "на гексе танк",
-        "not on water" => "не на воду",
-        "a mine there already" => "там уже мина",
-        "only a hull beside" => "только соседний танк",
-        "nobody there" => "там никого нет",
-        "not one of ours" => "это не свой танк",
-        "a drowned hull is not raised" => "утопленного не поднять",
-        "not knocked out" => "танк не подбит",
-        "heavier than its own hull" => "цель тяжелее своего танка",
-        "only on its own level" => "только на своём уровне",
-        "the hex between is taken" => "гекс между занят",
-        "a wall across the way" => "на пути стена",
+        "only on a hex beside" => L.T("gear.why_beside"),
+        "a tank stands there" => L.T("gear.why_tank_there"),
+        "not on water" => L.T("gear.why_water"),
+        "a mine there already" => L.T("gear.why_mine_there"),
+        "only a hull beside" => L.T("gear.why_hull_beside"),
+        "nobody there" => L.T("gear.why_nobody"),
+        "not one of ours" => L.T("gear.why_not_ours"),
+        "a drowned hull is not raised" => L.T("gear.why_drowned"),
+        "not knocked out" => L.T("gear.why_not_knocked"),
+        "heavier than its own hull" => L.T("gear.why_heavier"),
+        "only on its own level" => L.T("gear.why_level"),
+        "the hex between is taken" => L.T("gear.why_between"),
+        "a wall across the way" => L.T("gear.why_wall"),
         _ when why.StartsWith("the winch pulls", System.StringComparison.Ordinal)
-            => $"лебёдка тянет танк в {Battle.WinchReach} гексах по оси",
+            => L.T("gear.why_winch_reach", Battle.WinchReach),
         _ => why,
     };
 
@@ -249,7 +249,7 @@ public sealed partial class Tank3DBench
         }
         else
             Log.Print($"tank3d: no mine model - the mine on {MapAt(cell)} is laid bare");
-        _matchNote = "мина поставлена";
+        _matchNote = L.T("gear.mine_laid");
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} lays a mine on {MapAt(cell)}");
     }
 
@@ -279,7 +279,7 @@ public sealed partial class Tank3DBench
             mat.Param("scorch", 0.0f);
         }
         Uncharred(m);
-        _matchNote = $"{p.Tag} снова в бою";
+        _matchNote = L.T("gear.back_in_fight", p.Tag);
         Log.Print($"tank3d: match: {SideName(p.Side)} {p.Tag}#{id} on {MapAt(cell)} repaired - it fights from its side's next turn");
     }
 
@@ -294,7 +294,7 @@ public sealed partial class Tank3DBench
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId}'s winch pulls {p.Tag}#{id} {MapAt(p.Cell)} -> {MapAt(mid)}");
         _pull = new Pull { Hull = p, From = p.Rig.Position, To = Foot(CellWorld(mid)), State = st, Next = next };
         p.Cell = mid;
-        _matchNote = $"лебёдка тянет {p.Tag}";
+        _matchNote = L.T("gear.winch_pulls", p.Tag);
     }
 
     /// <summary>Every frame of a match: the hull on the cable a step nearer,
@@ -366,7 +366,7 @@ public sealed partial class Tank3DBench
     {
         if (_gearMode != g && MatchBonusSpent)
         {
-            _orderNote = "доп. действие этого хода уже сделано";
+            _orderNote = L.T("gear.why_bonus_spent");
             return;
         }
         _gearMode = _gearMode == g ? Gear.None : g;
@@ -378,10 +378,10 @@ public sealed partial class Tank3DBench
         }
         _orderNote = _gearMode switch
         {
-            Gear.Mine => "мина: щёлкни по соседнему гексу",
-            Gear.Repair => "ремонт: щёлкни по своему подбитому рядом",
-            Gear.Winch => $"лебёдка: щёлкни по танку в {Battle.WinchReach} гексах по оси",
-            _ => "выключено",
+            Gear.Mine => L.T("gear.mode_mine"),
+            Gear.Repair => L.T("gear.mode_repair"),
+            Gear.Winch => L.T("gear.mode_winch", Battle.WinchReach),
+            _ => L.T("gear.mode_off"),
         };
     }
 

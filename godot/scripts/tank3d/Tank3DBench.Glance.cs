@@ -72,11 +72,11 @@ public sealed partial class Tank3DBench
 
         public string Says => Ends switch
         {
-            LegEnd.Edge => "уйдёт за край",
-            LegEnd.Wall => $"в стену {MapAt(Cell)}",
-            LegEnd.Wood => $"в {(Smoke ? "дым" : "лес")} {MapAt(Cell)}",
-            LegEnd.Ground => $"в склон {MapAt(Cell)}",
-            _ => $"{Hull!.Tag} {FaceWord(Face)}: {(Pierces ? $"пробьёт ({Level})" : "не пробьёт")}",
+            LegEnd.Edge => L.T("glance.off_edge"),
+            LegEnd.Wall => L.T("glance.into_wall", MapAt(Cell)),
+            LegEnd.Wood => L.T(Smoke ? "glance.into_smoke" : "glance.into_wood", MapAt(Cell)),
+            LegEnd.Ground => L.T("glance.into_slope", MapAt(Cell)),
+            _ => Pierces ? L.T("glance.pierces", Hull!.Tag, FaceWord(Face), Level) : L.T("glance.holds", Hull!.Tag, FaceWord(Face)),
         };
 
         public string Log => Ends == LegEnd.Tank
@@ -86,10 +86,10 @@ public sealed partial class Tank3DBench
 
     private static string FaceWord(string face) => face switch
     {
-        "front" => "лоб",
-        "rear" => "корма",
-        "roof" => "крыша",
-        _ => "борт",
+        "front" => L.T("glance.face_front"),
+        "rear" => L.T("glance.face_rear"),
+        "roof" => L.T("glance.face_roof"),
+        _ => L.T("glance.face_side"),
     };
 
     /// <summary>How far a leg is walked, cells, before it is let go.</summary>

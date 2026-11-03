@@ -777,7 +777,7 @@ public sealed partial class Tank3DBench
             if (!lineUp || !WallLineUp(out here, out heading))
             {
                 if (lineUp)
-                    _wallNote = "некуда встать: у стен нет свободного соседа";
+                    _wallNote = L.T("walls.no_spot");
                 return false;
             }
         }
@@ -790,7 +790,7 @@ public sealed partial class Tank3DBench
         Heading = HeadingOf(HexWay(here, heading));
         _driveScripted = 1.0f;
         _turnScripted = 0.0f;
-        _wallNote = $"таран стены: {MapAt(here)} -> {MapAt(_wallRamTo)}";
+        _wallNote = L.T("walls.ram", MapAt(here), MapAt(_wallRamTo));
         Log.Print($"tank3d: {_modelTag} rams through the wall between {MapAt(here)} and {MapAt(_wallRamTo)}, heading {heading}");
         return true;
     }
@@ -839,13 +839,13 @@ public sealed partial class Tank3DBench
             return;
         if (_fate != Fate.Alive)
         {
-            WallRamEnd("танк выбыл");
+            WallRamEnd(L.T("walls.tank_out"));
             return;
         }
         _wallRamStuck = Mathf.Abs(_speed) < 1.0f ? _wallRamStuck + dt : 0.0f;
         if (_wallRamStuck > 1.0f)
         {
-            WallRamEnd("встал");
+            WallRamEnd(L.T("walls.stuck"));
             return;
         }
         Vector3 to = CellWorld(_wallRamTo);
@@ -853,14 +853,14 @@ public sealed partial class Tank3DBench
         // Braking from full speed takes speed² / 2a; off with the throttle that
         // far short, and the hull rolls to the middle.
         if (here == _wallRamTo && left <= _speed * _speed / (2.0f * Accel))
-            WallRamEnd($"проехал на {MapAt(_wallRamTo)}");
+            WallRamEnd(L.T("walls.passed", MapAt(_wallRamTo)));
     }
 
     private void WallRamEnd(string why)
     {
         _wallRam = false;
         _driveScripted = 0.0f;
-        _wallNote = $"таран стены: {why}";
+        _wallNote = L.T("walls.ram_end", why);
         Log.Print($"tank3d: wall ram over: {why}");
     }
 

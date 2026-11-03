@@ -56,46 +56,46 @@ public sealed partial class Tank3DBench
     private string CommandWhy(Command c)
     {
         if (!Match)
-            return "не партия";
+            return L.T("commands.why_no_match");
         if (MatchOver)
-            return "партия окончена";
+            return L.T("commands.why_over");
         // the placement before the first turn (Tank3DBench.Deploy): only its own, a take and «В бой»
         if (Deploying && c.Kind is not (CommandKind.Place or CommandKind.Ready or CommandKind.Pass or CommandKind.Take))
-            return "идёт расстановка — сначала «В бой»";
+            return L.T("commands.why_deploying");
         if (c.Kind is not (CommandKind.Pass or CommandKind.Undo or CommandKind.Take or CommandKind.Place or CommandKind.Ready) && MatchBusy)
-            return "дождись конца приказа";
+            return L.T("commands.why_busy");
         switch (c.Kind)
         {
             case CommandKind.Take:
                 return UnitStanding(c.Unit) is { } p ? TakeWhy(p)
-                    : c.Unit == _unitId ? "" : $"юнита #{c.Unit} нет на доске";
+                    : c.Unit == _unitId ? "" : L.T("commands.why_no_unit", c.Unit);
             case CommandKind.Go:
             case CommandKind.Turn:
-                return _fate != Fate.Alive ? $"{_modelTag} не на ходу" : MatchMoveWhy();
+                return _fate != Fate.Alive ? L.T("commands.why_out", _modelTag) : MatchMoveWhy();
             case CommandKind.Fire:
             case CommandKind.Burn:
                 if (_fate != Fate.Alive)
-                    return $"{_modelTag} не на ходу";
+                    return L.T("commands.why_out", _modelTag);
                 if (c.Kind == CommandKind.Burn && !RigBurns)
-                    return $"у {_modelTag} нет зажигательных";
+                    return L.T("commands.why_no_incendiary", _modelTag);
                 return ShotWhy(CellHere, c.Cell, out _, out _, out _);
             case CommandKind.Ram:
                 if (_fate != Fate.Alive)
-                    return $"{_modelTag} не на ходу";
+                    return L.T("commands.why_out", _modelTag);
                 if (MatchBonusSpent)
-                    return "доп. действие этого хода уже сделано";
+                    return L.T("commands.why_bonus_spent");
                 return UnitStanding(c.Cell) is null && !(_other is { Unit: true } o && OtherCell(o) == c.Cell)
-                    ? $"на {MapAt(c.Cell)} некого таранить" : "";
+                    ? L.T("commands.why_no_ram_target", MapAt(c.Cell)) : "";
             case CommandKind.RamWall:
                 if (_fate != Fate.Alive)
-                    return $"{_modelTag} не на ходу";
+                    return L.T("commands.why_out", _modelTag);
                 if (_side != _mt.Turn)
-                    return $"ходят {SideName(_mt.Turn)}";
+                    return L.T("commands.why_turn", SideName(_mt.Turn));
                 if (MatchBonusSpent)
-                    return "доп. действие этого хода уже сделано";
+                    return L.T("commands.why_bonus_spent");
                 if (_field is null || !_field.Walled(CellHere, c.Side))
-                    return "на этой грани нет стены";
-                return HullSide() != c.Side ? "встань носом к стене" : "";
+                    return L.T("commands.why_no_wall");
+                return HullSide() != c.Side ? L.T("commands.why_face_wall") : "";
             case CommandKind.Ambush:
                 return AmbushWhy(c.Side, c.Side2);
             case CommandKind.Smoke:
@@ -105,15 +105,15 @@ public sealed partial class Tank3DBench
             case CommandKind.Winch:
                 return GearWhy(GearOf(c.Kind), c.Cell);
             case CommandKind.Douse:
-                return !Burning(_unitId) ? $"{_modelTag} не горит"
-                    : _side != _mt.Turn ? $"ходят {SideName(_mt.Turn)}"
-                    : _mt.Bonus ? "доп. действие этого хода уже сделано" : "";
+                return !Burning(_unitId) ? L.T("commands.why_not_burning", _modelTag)
+                    : _side != _mt.Turn ? L.T("commands.why_turn", SideName(_mt.Turn))
+                    : _mt.Bonus ? L.T("commands.why_bonus_spent") : "";
             case CommandKind.Undo:
                 return UndoWhy();
             case CommandKind.Place:
                 return PlaceWhy(c.Unit, c.Cell, c.Side);
             case CommandKind.Ready:
-                return Deploying ? "" : "расстановка окончена";
+                return Deploying ? "" : L.T("commands.why_deploy_over");
             default:
                 return "";
         }
@@ -165,7 +165,7 @@ public sealed partial class Tank3DBench
             case CommandKind.RamWall:
                 if (!WallRamGo(false))
                 {
-                    _orderNote = "стену так не протаранить";
+                    _orderNote = L.T("commands.wall_no_ram");
                     return Failed(c);
                 }
                 // the match's bonus act (GDD field.md, «кирпичные стены»; Д5):
@@ -243,7 +243,7 @@ public sealed partial class Tank3DBench
         int budget = Steps.BudgetAt(_field, CellHere, mover);
         if (cost > budget)
         {
-            _orderNote = "на этот разворот шагов нет";
+            _orderNote = L.T("commands.no_turn_steps");
             return false;
         }
         CancelOrder();
@@ -263,7 +263,7 @@ public sealed partial class Tank3DBench
             MakeTarget(p);
         if (_other is not { Unit: true } o || OtherCell(o) != cell)
         {
-            _orderNote = "цель не взять";
+            _orderNote = L.T("commands.no_target");
             return false;
         }
         // the ram on, as Tab has it: the approach may be a hex of the move
@@ -273,12 +273,12 @@ public sealed partial class Tank3DBench
         _ramMode = wasOn;
         if (found is not { } plan)
         {
-            _orderNote = $"к {MapAt(cell)} для тарана пути нет";
+            _orderNote = L.T("commands.no_ram_path", MapAt(cell));
             return false;
         }
         if (!plan.Allowed)
         {
-            _orderNote = $"таран нельзя: {plan.Why}";
+            _orderNote = L.T("commands.ram_refused", plan.Why);
             return false;
         }
         RamLock(plan);

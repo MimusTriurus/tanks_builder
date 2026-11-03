@@ -107,28 +107,28 @@ public sealed partial class Tank3DBench
         HBoxContainer move;
         (_groupMove, move) = Group(GroupShape.Diamond, MoveInk);
         // the move (2026-11-01): the other modes off, the click the move's
-        _actMove = ActButton(move, "move", "Ход", "1", toggle: true, MoveOn);
+        _actMove = ActButton(move, "move", L.T("acts.move"), "1", toggle: true, MoveOn);
         MoveBadgeBuild(_actMove);
         HBoxContainer attack;
         (_groupAttack, attack) = Group(GroupShape.Circle, AttackInk);
         _attackAct = AttackToggle;
-        _actAttack = ActButton(attack, "attack", "Атака", "2", toggle: true, _attackAct);
+        _actAttack = ActButton(attack, "attack", L.T("acts.attack"), "2", toggle: true, _attackAct);
         // the attack held back (Д7, Tank3DBench.Ambush): a mode
         _ambushAct = AmbushToggle;
         _actAmbush = ActButton(attack, "ambush", AmbushText, "3", toggle: true, _ambushAct);
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
-        _actFiery = ActButton(attack, "incendiary", "Зажиг.", "", toggle: true, FieryToggle);
+        _actFiery = ActButton(attack, "incendiary", L.T("acts.incendiary"), "", toggle: true, FieryToggle);
         HBoxContainer bonus;
         (_groupBonus, bonus) = Group(GroupShape.Triangle, PickInk);
         // a tank or the wall ahead (Д5): a mode, the click says which
-        _actRam = BonusButton(bonus, "ram", "Таран", toggle: true, RamToggle);
+        _actRam = BonusButton(bonus, "ram", L.T("acts.ram"), toggle: true, RamToggle);
         // the grenade (Д8, Tank3DBench.Smoke): a mode
-        _actSmoke = BonusButton(bonus, "smoke", "Дым", toggle: true, SmokeToggle);
+        _actSmoke = BonusButton(bonus, "smoke", L.T("acts.smoke"), toggle: true, SmokeToggle);
         // the kit's acts on a hex (Д8, Tank3DBench.Gear): modes
-        _actMine = BonusButton(bonus, "mine", "Мина", toggle: true, () => GearToggle(Gear.Mine));
-        _actRepair = BonusButton(bonus, "repair", "Ремонт", toggle: true, () => GearToggle(Gear.Repair));
-        _actWinch = BonusButton(bonus, "winch", "Лебёдка", toggle: true, () => GearToggle(Gear.Winch));
-        _actDouse = BonusButton(bonus, "douse", "Тушить", toggle: false, () => Execute(new Command(CommandKind.Douse)));
+        _actMine = BonusButton(bonus, "mine", L.T("acts.mine"), toggle: true, () => GearToggle(Gear.Mine));
+        _actRepair = BonusButton(bonus, "repair", L.T("acts.repair"), toggle: true, () => GearToggle(Gear.Repair));
+        _actWinch = BonusButton(bonus, "winch", L.T("acts.winch"), toggle: true, () => GearToggle(Gear.Winch));
+        _actDouse = BonusButton(bonus, "douse", L.T("acts.douse"), toggle: false, () => Execute(new Command(CommandKind.Douse)));
         layer.AddChild(_acts);
         BuildActTip(layer);
         ActIconsFit();
@@ -447,7 +447,7 @@ public sealed partial class Tank3DBench
     {
         if (!_attackMode && MatchShotSpent)
         {
-            _orderNote = "атака этого хода уже сделана";
+            _orderNote = L.T("acts.shot_spent");
             return;
         }
         _attackMode = !_attackMode;
@@ -463,7 +463,7 @@ public sealed partial class Tank3DBench
             if (!_postLock)
                 Unlock();
         }
-        _orderNote = _attackMode ? "атака: щёлкни по танку, свой тоже" : "атака выключена";
+        _orderNote = _attackMode ? L.T("acts.attack_on") : L.T("acts.attack_off");
     }
 
     // --- the attack's zone ----------------------------------------------------------
@@ -567,7 +567,7 @@ public sealed partial class Tank3DBench
         _ambushPick = null;
         _ramKey = "";
         _gearMode = Gear.None;
-        _orderNote = "ход: щёлкни по гексу в зоне";
+        _orderNote = L.T("acts.move_on");
     }
 
     /// <summary>No mode that takes the left button is on: the click is the move's.</summary>
@@ -632,7 +632,7 @@ public sealed partial class Tank3DBench
         if (_overTarget || _overParked is not null || PickAt(screen) is (_, true, _))
             AimAt(screen);
         else
-            _orderNote = _ramMode ? "таран: щёлкни по танку" : "атака: щёлкни по танку";
+            _orderNote = _ramMode ? L.T("acts.ram_click") : L.T("acts.attack_click");
         return true;
     }
 

@@ -330,18 +330,13 @@ public sealed partial class Tank3DBench
         return zone.Count == 0 ? side == Side.Green : zone.Average(v => v.Y) >= map.Rows * 0.5f;
     }
 
-    private string QuickSideSaid(Side side) => QuickSouth(QuickMap(_qs.Map), side) ? "Юг" : "Север";
+    private string QuickSideSaid(Side side) => QuickSouth(QuickMap(_qs.Map), side) ? L.T("quick.south_cap") : L.T("quick.north_cap");
 
-    private string QuickMode(string name) => QuickMap(name)?.Arena.Point is not null ? "Точка" : "Уничтожение";
+    private string QuickMode(string name) => QuickMap(name)?.Arena.Point is not null ? L.T("quick.point") : L.T("quick.annihilation");
 
     private string QuickSize(string name) => QuickMap(name) is { } m ? $"{m.Columns} × {m.Rows}" : "";
 
-    private static string Pts(int n)
-    {
-        int m10 = n % 10, m100 = n % 100;
-        string w = m10 == 1 && m100 != 11 ? "очко" : m10 is >= 2 and <= 4 && (m100 < 12 || m100 > 14) ? "очка" : "очков";
-        return $"{n} {w}";
-    }
+    private static string Pts(int n) => L.N("quick.pts", n);
 
     // --- the lobby -----------------------------------------------------------------
 
@@ -349,13 +344,13 @@ public sealed partial class Tank3DBench
     {
         var sheet = new VBoxContainer();
         sheet.AddThemeConstantOverride("separation", 16);
-        sheet.AddChild(QEyebrow("Быстрый бой"));
-        sheet.AddChild(QText("Бой против ИИ", 30, QInk, bold: true));
+        sheet.AddChild(QEyebrow(L.T("quick.quick_battle")));
+        sheet.AddChild(QText(L.T("quick.vs_ai"), 30, QInk, bold: true));
         sheet.AddChild(QuickParams(thumb: 160));
         var foot = new HBoxContainer();
         foot.AddThemeConstantOverride("separation", 12);
-        foot.AddChild(QBtn("К СБОРКЕ ОТРЯДА", () => { _qPage = QuickPage.Build; QuickShow(); }, primary: true));
-        foot.AddChild(QHint("Против ИИ параметры можно поменять и на экране сборки."));
+        foot.AddChild(QBtn(L.T("quick.to_build"), () => { _qPage = QuickPage.Build; QuickShow(); }, primary: true));
+        foot.AddChild(QHint(L.T("quick.lobby_hint")));
         sheet.AddChild(foot);
         var page = new VBoxContainer();
         page.AddChild(QBox(sheet, QPanelC, 28));
@@ -378,7 +373,7 @@ public sealed partial class Tank3DBench
         var about = new VBoxContainer();
         about.AddThemeConstantOverride("separation", 6);
         about.AddChild(QText(q.Map, 20, QInk, bold: true));
-        about.AddChild(QHint($"Режим «{QuickMode(q.Map)}» · {QuickSize(q.Map)} · рельеф"));
+        about.AddChild(QHint(L.T("quick.map_about", QuickMode(q.Map), QuickSize(q.Map))));
         var maps = new HFlowContainer();
         maps.AddThemeConstantOverride("h_separation", 6);
         foreach (string name in QuickPool())
@@ -388,21 +383,21 @@ public sealed partial class Tank3DBench
         }
         about.AddChild(maps);
         card.AddChild(about);
-        grid.AddChild(QParam("Режим и карта", card));
+        grid.AddChild(QParam(L.T("quick.mode_and_map"), card));
 
         // the sides
         var sides = new VBoxContainer();
         sides.AddThemeConstantOverride("separation", 10);
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 8);
-        row.AddChild(QChip($"Вы — {QuickSideSaid(q.Player)}"));
-        row.AddChild(QChip($"ИИ — {QuickSideSaid(Across(q.Player))}"));
-        row.AddChild(QBtn("Поменять", () => { q.Player = Across(q.Player); QuickArt(); QuickShow(); }));
+        row.AddChild(QChip(L.T("quick.you_side", QuickSideSaid(q.Player))));
+        row.AddChild(QChip(L.T("quick.ai_side", QuickSideSaid(Across(q.Player)))));
+        row.AddChild(QBtn(L.T("quick.swap"), () => { q.Player = Across(q.Player); QuickArt(); QuickShow(); }));
         sides.AddChild(row);
-        sides.AddChild(QHint("Свою зону расстановки вы знаете до сборки. Кто ходит первым, решит жребий после «В бой».", wrap: true));
-        grid.AddChild(QParam("Стороны", sides));
+        sides.AddChild(QHint(L.T("quick.sides_hint"), wrap: true));
+        grid.AddChild(QParam(L.T("quick.sides"), sides));
 
-        grid.AddChild(QParam("Ваш бюджет прокачки", QStepper(q.Budget, q.Budget == 0 ? "бой без апгрейдов" : "очков", v =>
+        grid.AddChild(QParam(L.T("quick.your_budget"), QStepper(q.Budget, q.Budget == 0 ? L.T("quick.no_upgrades_battle") : L.T("quick.points_word"), v =>
         {
             q.Budget = v;
             QuickSquad.Trim(q.Squad, v);
@@ -410,17 +405,17 @@ public sealed partial class Tank3DBench
         int diff = q.Budget - q.AiBudget;
         var ai = new VBoxContainer();
         ai.AddThemeConstantOverride("separation", 10);
-        ai.AddChild(QStepper(q.AiBudget, q.AiBudget == 0 ? "без апгрейдов" : "очков", v => q.AiBudget = v));
-        ai.AddChild(diff != 0 ? QText($"Гандикап: у вас {(diff > 0 ? "+" : "−")}{Math.Abs(diff)}", 14, QAmber, bold: true)
-                              : QHint("Бюджеты равны"));
-        grid.AddChild(QParam("Бюджет ИИ — сложность", ai));
+        ai.AddChild(QStepper(q.AiBudget, q.AiBudget == 0 ? L.T("quick.no_upgrades") : L.T("quick.points_word"), v => q.AiBudget = v));
+        ai.AddChild(diff != 0 ? QText(L.T("quick.handicap", diff > 0 ? "+" : "−", Math.Abs(diff)), 14, QAmber, bold: true)
+                              : QHint(L.T("quick.budgets_equal")));
+        grid.AddChild(QParam(L.T("quick.ai_budget_difficulty"), ai));
 
         var doctrine = new VBoxContainer();
         doctrine.AddThemeConstantOverride("separation", 10);
         var picks = new HFlowContainer();
         picks.AddThemeConstantOverride("h_separation", 6);
         picks.AddThemeConstantOverride("v_separation", 6);
-        picks.AddChild(QBtn("Случайная", () => { q.Doctrine = null; QuickShow(); }, pressed: q.Doctrine is null, small: true));
+        picks.AddChild(QBtn(L.T("quick.random_cap"), () => { q.Doctrine = null; QuickShow(); }, pressed: q.Doctrine is null, small: true));
         for (int i = 0; i < QuickSquad.Doctrines.Length; i++)
         {
             int at = i;
@@ -429,8 +424,8 @@ public sealed partial class Tank3DBench
         doctrine.AddChild(picks);
         doctrine.AddChild(QHint(q.Doctrine is int d
             ? $"{QuickSquad.Doctrines[d].Play}: {string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))}."
-            : "Откроется по «В бой».", wrap: true));
-        grid.AddChild(QParam("Доктрина ИИ", doctrine));
+            : L.T("quick.doctrine_hidden"), wrap: true));
+        grid.AddChild(QParam(L.T("quick.ai_doctrine"), doctrine));
         return grid;
     }
 
@@ -487,27 +482,27 @@ public sealed partial class Tank3DBench
         top.AddThemeConstantOverride("separation", 24);
         var who = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         who.AddThemeConstantOverride("separation", 6);
-        who.AddChild(QEyebrow("Бой против ИИ · сборка"));
-        who.AddChild(QText("Ваш отряд", 28, QInk, bold: true));
+        who.AddChild(QEyebrow(L.T("quick.build_eyebrow")));
+        who.AddChild(QText(L.T("quick.your_squad"), 28, QInk, bold: true));
         var facts = new HFlowContainer();
         facts.AddThemeConstantOverride("h_separation", 8);
         foreach ((string label, string value) in new[]
                  {
-                     ("Карта", q.Map), ("Режим", QuickMode(q.Map)), ("Ваша сторона", QuickSideSaid(q.Player)),
-                     ("Бюджет ИИ", q.AiBudget.ToString()),
-                     ("Доктрина ИИ", q.Doctrine is int d ? QuickSquad.Doctrines[d].Name : "случайная"),
+                     (L.T("quick.map"), q.Map), (L.T("quick.mode"), QuickMode(q.Map)), (L.T("quick.your_side"), QuickSideSaid(q.Player)),
+                     (L.T("quick.ai_budget"), q.AiBudget.ToString()),
+                     (L.T("quick.ai_doctrine"), q.Doctrine is int d ? QuickSquad.Doctrines[d].Name : L.T("quick.random")),
                  })
             facts.AddChild(QChip($"{label}: {value}", () => { _qModal = QuickModal.Params; QuickShow(); }));
         who.AddChild(facts);
         top.AddChild(who);
         var budget = new VBoxContainer { SizeFlagsVertical = Control.SizeFlags.ShrinkEnd };
         budget.AddThemeConstantOverride("separation", 6);
-        var eb = QEyebrow("Очки прокачки");
+        var eb = QEyebrow(L.T("quick.upgrade_points"));
         eb.HorizontalAlignment = HorizontalAlignment.Right;
         budget.AddChild(eb);
         if (q.Budget > 0)
             budget.AddChild(QuickPips(used, q.Budget, 24));
-        var line = QHint(q.Budget > 0 ? $"Потрачено {used} из {q.Budget} · осталось {left}" : "Бюджет 0: бой без апгрейдов");
+        var line = QHint(q.Budget > 0 ? L.T("quick.budget_line", used, q.Budget, left) : L.T("quick.budget_zero"));
         line.HorizontalAlignment = HorizontalAlignment.Right;
         budget.AddChild(line);
         top.AddChild(budget);
@@ -527,20 +522,20 @@ public sealed partial class Tank3DBench
         var bar = new HBoxContainer();
         bar.AddThemeConstantOverride("separation", 8);
         int start = QuickSquad.Size * QuickSquad.CompanyLevel;
-        var qs = QEyebrow($"Готовые отряды, {Pts(start)}:");
+        var qs = QEyebrow(L.T("quick.presets_bar", Pts(start)));
         qs.VerticalAlignment = VerticalAlignment.Center;
         bar.AddChild(qs);
         foreach (QuickSquad.Company c in QuickSquad.Companies)
         {
             QuickSquad.Company company = c;
-            QuickPad b = QBtn(c.Name, () => QuickAsk(q.Squad.Any(s => !s.Empty), "Заменить отряд?",
-                $"«{company.Name}» встанет вместо собранного отряда: три машины на уровне {QuickSquad.CompanyLevel}.",
-                "Заменить", () => q.Squad = QuickSquad.OfCompany(company)));
+            QuickPad b = QBtn(c.Name, () => QuickAsk(q.Squad.Any(s => !s.Empty), L.T("quick.replace_ask"),
+                L.T("quick.replace_text", company.Name, QuickSquad.CompanyLevel),
+                L.T("quick.replace"), () => q.Squad = QuickSquad.OfCompany(company)));
             b.Disabled = q.Budget < start;
-            QTip(b, () => QTipBox($"Готовый отряд · {Pts(start)}", company.Name,
-                string.Join("\n", company.Slots.Select(s => $"{QuickSquad.ClassOf(s.Class).Short} — {QuickSquad.ClassOf(s.Class).BranchOf(s.Branch)!.Name}, ур. {QuickSquad.CompanyLevel}")),
-                null, $"{char.ToUpper(company.Play[0])}{company.Play[1..]}. Заменит текущий отряд; "
-                      + (q.Budget > start ? $"ещё {Pts(q.Budget - start)} останутся на прокачку." : "бюджет уйдёт весь.")));
+            QTip(b, () => QTipBox(L.T("quick.preset_tip", Pts(start)), company.Name,
+                string.Join("\n", company.Slots.Select(s => L.T("quick.preset_slot", QuickSquad.ClassOf(s.Class).Short, QuickSquad.ClassOf(s.Class).BranchOf(s.Branch)!.Name, QuickSquad.CompanyLevel))),
+                null, L.T("quick.preset_note", $"{char.ToUpper(company.Play[0])}{company.Play[1..]}",
+                      q.Budget > start ? L.T("quick.preset_left", Pts(q.Budget - start)) : L.T("quick.preset_all"))));
             bar.AddChild(b);
         }
         bar.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
@@ -548,20 +543,20 @@ public sealed partial class Tank3DBench
         // the points are the header's alone; the bar says only what holds the button
         if (missing > 0)
         {
-            Label hint = QText($"Не выбран класс: {missing} {(missing == 1 ? "машина" : "машины")}", 14, QRed, bold: true);
+            Label hint = QText(L.N("quick.no_class", missing), 14, QRed, bold: true);
             hint.VerticalAlignment = VerticalAlignment.Center;
             bar.AddChild(hint);
         }
-        QuickPad clear = QBtn("Очистить отряд", () => QuickAsk(true, "Очистить отряд?",
-            "Все три машины станут пустыми, прокачка снимется.", "Очистить", () => q.Squad = QuickSquad.Empty()));
+        QuickPad clear = QBtn(L.T("quick.clear_squad"), () => QuickAsk(true, L.T("quick.clear_ask"),
+            L.T("quick.clear_text"), L.T("quick.clear"), () => q.Squad = QuickSquad.Empty()));
         clear.Ink = QRed;
         clear.Rim = clear.Fill = new Color(0, 0, 0, 0);
         clear.HoverRim = new Color(QRed, 0.6f);
         clear.Disabled = q.Squad.All(s => s.Empty);
         bar.AddChild(clear);
         bar.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(1, 0) });
-        bar.AddChild(QBtn("К параметрам", () => { _qPage = QuickPage.Lobby; QuickShow(); }));
-        QuickPad go = QBtn("К РАССТАНОВКЕ", QuickTryGo, primary: true);
+        bar.AddChild(QBtn(L.T("quick.to_params"), () => { _qPage = QuickPage.Lobby; QuickShow(); }));
+        QuickPad go = QBtn(L.T("quick.to_deploy"), QuickTryGo, primary: true);
         go.Disabled = missing > 0;
         bar.AddChild(go);
         page.AddChild(QBox(bar, QPanelC, 12));
@@ -590,9 +585,9 @@ public sealed partial class Tank3DBench
     {
         QuickSetup q = _qs;
         int left = q.Budget - QuickSquad.Spent(q.Squad);
-        QuickAsk(left > 0, "Очки не потрачены",
-            $"Осталось {Pts(left)} из {q.Budget}. В бой они не перейдут: потратить их можно только здесь.",
-            "К расстановке", () => _qGo = true, no: "Потратить");
+        QuickAsk(left > 0, L.T("quick.unspent_ask"),
+            L.T("quick.unspent_text", Pts(left), q.Budget),
+            L.T("quick.to_deploy_btn"), () => _qGo = true, no: L.T("quick.spend"));
     }
 
     /// <summary>The battlefield, what the map asks of a squad, and what the squad comes to.</summary>
@@ -602,10 +597,10 @@ public sealed partial class Tank3DBench
         var aside = new VBoxContainer { CustomMinimumSize = new Vector2(236, 0) };
         aside.AddThemeConstantOverride("separation", 8);
         var head = new HBoxContainer();
-        var h2 = QText("Поле боя", 17, QInk, bold: true);
+        var h2 = QText(L.T("quick.battlefield"), 17, QInk, bold: true);
         h2.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         head.AddChild(h2);
-        head.AddChild(QBtn("Развернуть", () => { _qModal = QuickModal.Map; QuickShow(); }, small: true));
+        head.AddChild(QBtn(L.T("quick.expand"), () => { _qModal = QuickModal.Map; QuickShow(); }, small: true));
         aside.AddChild(head);
         aside.AddChild(QuickMinimap(q.Map, q.Player, 190, labels: true));
         aside.AddChild(QuickLegend(3));
@@ -613,14 +608,14 @@ public sealed partial class Tank3DBench
             aside.AddChild(QText(said, 12, QInk, wrap: true));
 
         aside.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
-        aside.AddChild(QText("Отряд вместе", 15, QInk, bold: true));
+        aside.AddChild(QText(L.T("quick.squad_together"), 15, QInk, bold: true));
         aside.AddChild(QuickSquadTable());
         foreach (string fact in QuickSquadSaid())
             aside.AddChild(QText(fact, 12, QInk, wrap: true));
         // a random doctrine is said in the header's chip; a chosen one, what it does
         if (q.Doctrine is int d)
-            aside.AddChild(QHint($"ИИ — «{QuickSquad.Doctrines[d].Name}»: {QuickSquad.Doctrines[d].Play.ToLowerInvariant()}. "
-                                 + $"Классы: {string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))}.", wrap: true));
+            aside.AddChild(QHint(L.T("quick.ai_doctrine_said", QuickSquad.Doctrines[d].Name, QuickSquad.Doctrines[d].Play.ToLowerInvariant(),
+                                 string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))), wrap: true));
         return QBox(aside, QPanelC, 12);
     }
 
@@ -629,14 +624,14 @@ public sealed partial class Tank3DBench
     {
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 8);
-        row.AddChild(QHint("Класс бесплатен, уровень стоит столько очков, какой у него номер.   "));
+        row.AddChild(QHint(L.T("quick.rules_cost")));
         row.AddChild(new QuickPad
         {
             Form = QuickPad.Shape.Hex, Dashed = true, Rim = QMuted, Fill = new Color(0, 0, 0, 0), RimWidth = 1,
             CustomMinimumSize = new Vector2(18, 16), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         });
-        row.AddChild(QHint("Пунктир и «*» — правила в стенде ещё нет: уровень покупается, в бою апгрейд не действует."));
+        row.AddChild(QHint(L.T("quick.rules_dash")));
         return row;
     }
 
@@ -662,11 +657,11 @@ public sealed partial class Tank3DBench
             }
         var said = new List<string>();
         if (water > 0)
-            said.Add($"Вода — {water} гекс. ОПВТ (LT, «Рейд» 1) не даст утонуть.");
+            said.Add(L.T("quick.map_water", L.N("quick.hexes", water), L.T("squad.branch.raid.name")));
         if (walls > 0)
-            said.Add($"Стены — {walls} гекс. HT их сносит, TD бьёт сквозь одну.");
+            said.Add(L.T("quick.map_walls", L.N("quick.hexes", walls)));
         if (wood > 0)
-            said.Add($"Лес — {wood} гекс. Зажигательный снаряд его поджигает.");
+            said.Add(L.T("quick.map_wood", L.N("quick.hexes", wood)));
         return string.Join("\n", said);
     }
 
@@ -677,8 +672,8 @@ public sealed partial class Tank3DBench
         grid.AddThemeConstantOverride("h_separation", 10);
         grid.AddThemeConstantOverride("v_separation", 2);
         if (_qs.Squad.All(s => s.Empty))
-            return QHint("Пока пусто: выберите классы машин.", wrap: true);
-        foreach (string h in new[] { "", "Шаги", "Мощь", "Лоб", "Башня" })
+            return QHint(L.T("quick.squad_empty"), wrap: true);
+        foreach (string h in new[] { "", L.T("quick.col_steps"), L.T("quick.col_power"), L.T("quick.col_front"), L.T("quick.turret") })
             grid.AddChild(QText(h, 11, QMuted, bold: true));
         foreach (QuickSquad.Slot s in _qs.Squad)
         {
@@ -694,7 +689,7 @@ public sealed partial class Tank3DBench
             grid.AddChild(QText(p.Steps.ToString(), 12, QInk));
             grid.AddChild(QText(QRoman(p.Might), 12, QInk));
             grid.AddChild(QText(QRoman(Gunnery.ArmourAt(p, Gunnery.Plate.Front)), 12, QInk));
-            grid.AddChild(QText(p.Turreted ? "есть" : "нет", 12, QInk));
+            grid.AddChild(QText(p.Turreted ? L.T("quick.yes") : L.T("quick.no"), 12, QInk));
         }
         return grid;
     }
@@ -706,10 +701,10 @@ public sealed partial class Tank3DBench
         if (squad.All(s => s.Empty))
             yield break;
         string[] front = squad.Where(s => s.Class is "TDP" or "HMP").Select(s => QuickSquad.ClassOf(s.Class!).Short).Distinct().ToArray();
-        yield return front.Length > 0 ? $"HT в лоб пробьёт: {string.Join(", ", front)}." : "HT в лоб пробить нечем: это могут только TD и HM.";
-        string[] acts = squad.SelectMany(QuickSquad.UpgradesOf).Where(u => u.Kind.StartsWith("способность"))
+        yield return front.Length > 0 ? L.T("quick.ht_front_yes", string.Join(", ", front)) : L.T("quick.ht_front_no");
+        string[] acts = squad.SelectMany(QuickSquad.UpgradesOf).Where(u => u.Ability)
                              .Select(u => u.Name).Distinct().ToArray();
-        yield return acts.Length > 0 ? $"Действия: {string.Join(", ", acts)}." : "Особых действий нет: только ход и выстрел.";
+        yield return acts.Length > 0 ? L.T("quick.actions", string.Join(", ", acts)) : L.T("quick.no_actions");
     }
 
     /// <summary>A machine's card: the class and its duty, the model with the
@@ -724,7 +719,7 @@ public sealed partial class Tank3DBench
         var head = new HBoxContainer { CustomMinimumSize = new Vector2(0, 26) };
         head.AddThemeConstantOverride("separation", 8);
         if (s.Empty)
-            head.AddChild(QEyebrow($"Машина {at + 1} · выберите класс"));
+            head.AddChild(QEyebrow(L.T("quick.slot_pick", at + 1)));
         else
         {
             QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
@@ -747,7 +742,7 @@ public sealed partial class Tank3DBench
             {
                 bool full = QuickSquad.ClassWhy(q.Squad, at, c.Tag).Length > 0;
                 QuickSquad.Class one = c;
-                QuickPad row = QBtn($"{c.Short}   {c.Name} — {(full ? "в отряде уже две" : c.Duty)}", () =>
+                QuickPad row = QBtn($"{c.Short}   {c.Name} — {(full ? L.T("quick.two_already") : c.Duty)}", () =>
                 {
                     q.Squad[at] = new QuickSquad.Slot(one.Tag, null, 0);
                     QuickShow();
@@ -833,7 +828,7 @@ public sealed partial class Tank3DBench
         int level = _qs.Squad[at].Level;
         if (to is not null)
             QTip(arrow, () => QuickClassTip(to, false,
-                level > 0 ? $"Сменит класс: прокачка снимется, вернётся {Pts(level)}." : null));
+                level > 0 ? L.T("quick.class_change", Pts(level)) : null));
         return arrow;
     }
 
@@ -867,6 +862,7 @@ public sealed partial class Tank3DBench
             Text = b.Name, FontSize = 14, Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
             Ink = QInk, HoverFill = other ? QSel : null, CustomMinimumSize = new Vector2(0, 28),
         };
+        head.SetMeta("q_branch", b.Id);
         head.Clicked += () =>
         {
             // the same level on the other branch costs nothing
@@ -875,8 +871,8 @@ public sealed partial class Tank3DBench
             QuickShow();
         };
         string ups = string.Join("\n", b.Levels.Select((u, i) => $"{i + 1}. {u.Name}{(u.Flag is null ? " *" : "")}"));
-        QTip(head, () => QTipBox($"Ветка · {b.Tag}", b.Name, ups, null,
-            chosen ? "Выбрана." : other ? $"Щелчок перенесёт уровень {s.Level} на эту ветку, бесплатно." : "Выбирается её первым уровнем."));
+        QTip(head, () => QTipBox(L.T("quick.branch_tip", b.Tag), b.Name, ups, null,
+            chosen ? L.T("quick.branch_chosen") : other ? L.T("quick.branch_move", s.Level) : L.T("quick.branch_first")));
         col.AddChild(head);
         for (int l = 1; l <= b.Levels.Length; l++)
         {
@@ -906,12 +902,12 @@ public sealed partial class Tank3DBench
                     q.Squad[at] = now with { Branch = b.Id, Level = level };
                 QuickShow();
             };
-            string state = open ? (l == mine ? "Открыт. Щелчок снимет этот уровень." : "Открыт.")
-                : shortOf ? $"Не хватает {Pts(need - left)}."
-                : other ? $"Сменит ветку: машина перейдёт на «{b.Name}», ур. {l}."
-                : need > 0 ? $"Откроет уровни до {l}: ещё {Pts(need)}." : $"Вернёт машину на уровень {l}.";
-            QTip(hex, () => QTipBox($"{b.Name} · уровень {level}", u.Name, u.Text, (u.Kind, Pts(level)),
-                                    state + (u.Flag is null ? "\nПунктир: в стенде правила ещё нет, в бою не действует." : "")));
+            string state = open ? (l == mine ? L.T("quick.lvl_open_drop") : L.T("quick.lvl_open"))
+                : shortOf ? L.T("quick.lvl_short", Pts(need - left))
+                : other ? L.T("quick.lvl_switch", b.Name, l)
+                : need > 0 ? L.T("quick.lvl_buy", l, Pts(need)) : L.T("quick.lvl_back", l);
+            QTip(hex, () => QTipBox(L.T("quick.level_tip", b.Name, level), u.Name, u.Text, (u.Kind, Pts(level)),
+                                    state + (u.Flag is null ? L.T("quick.lvl_dash_note") : "")));
             col.AddChild(hex);
             var nm = QText(u.Name + (u.Flag is null ? " *" : ""), 13, open ? QInk : QMuted, bold: open, wrap: true);
             nm.HorizontalAlignment = HorizontalAlignment.Center;
@@ -939,15 +935,15 @@ public sealed partial class Tank3DBench
 
     /// <summary>An upgrade's kind in a word, under its node.</summary>
     private static string QKind(QuickSquad.Upgrade u) =>
-        u.Flag is null ? "нет в стенде"
-        : u.Kind.StartsWith("способность") ? u.Kind.Contains("атака") ? "атака" : "действие"
-        : "пассивный";
+        u.Flag is null ? L.T("quick.kind_missing")
+        : u.Ability ? u.Attack ? L.T("quick.kind_attack") : L.T("quick.kind_action")
+        : L.T("quick.kind_passive");
 
     private static string QRoman(int n) => n switch { 0 => "0", 1 => "I", 2 => "II", 3 => "III", 4 => "IV", _ => "V" };
 
     private Control QuickClassTip(QuickSquad.Class c, bool full, string? note = null) =>
-        QTipBox($"Класс · {c.Short} · {c.Duty}", c.Name, c.Role, null, full ? "В отряде уже две машины этого класса." : note,
-                QuickClassRows(c), $"Особенность. {c.Trait}");
+        QTipBox(L.T("quick.class_tip", c.Short, c.Duty), c.Name, c.Role, null, full ? L.T("quick.class_full") : note,
+                QuickClassRows(c), L.T("quick.trait", c.Trait));
 
     /// <summary>A class's numbers as label and value: the tip's table, the hangar's sheet.</summary>
     private static (string, string)[] QuickClassRows(QuickSquad.Class c)
@@ -957,8 +953,8 @@ public sealed partial class Tank3DBench
                                            .Select(pl => QRoman(Gunnery.ArmourAt(p, pl))));
         return new[]
         {
-            ("Скорость", $"{p.Steps} шагов"), ("Огневая мощь", QRoman(p.Might)),
-            ("Броня лоб / борт / корма / крыша", armour), ("Масса", QRoman(p.Mass)), ("Башня", p.Turreted ? "есть" : "нет"),
+            (L.T("quick.speed"), L.N("quick.steps", p.Steps)), (L.T("quick.firepower"), QRoman(p.Might)),
+            (L.T("quick.armour"), armour), (L.T("quick.mass"), QRoman(p.Mass)), (L.T("quick.turret"), p.Turreted ? L.T("quick.yes") : L.T("quick.no")),
         };
     }
 
@@ -1003,10 +999,10 @@ public sealed partial class Tank3DBench
         }
         var head = new HBoxContainer();
         bool map = _qModal == QuickModal.Map;
-        var h2 = QText(map ? $"{_qs.Map} · {QuickMode(_qs.Map)}" : "Параметры боя против ИИ", 18, QInk, bold: true);
+        var h2 = QText(map ? $"{_qs.Map} · {QuickMode(_qs.Map)}" : L.T("quick.params_title"), 18, QInk, bold: true);
         h2.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         head.AddChild(h2);
-        head.AddChild(QBtn(map ? "Закрыть" : "Готово", QuickClose, small: true));
+        head.AddChild(QBtn(map ? L.T("quick.close") : L.T("quick.done"), QuickClose, small: true));
         box.AddChild(head);
         if (map)
         {
@@ -1016,7 +1012,7 @@ public sealed partial class Tank3DBench
         else
         {
             box.AddChild(QuickParams(thumb: 120));
-            box.AddChild(QHint("Отряд сохраняется. Если бюджет станет меньше потраченного, снимутся верхние уровни."));
+            box.AddChild(QHint(L.T("quick.params_hint")));
         }
         var panel = QBox(box, QPanelC, 14);
         var center = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -1038,11 +1034,11 @@ public sealed partial class Tank3DBench
     /// <summary>A question before a step that throws work away or burns points:
     /// <paramref name="act"/> on «<paramref name="yes"/>»; straight away when
     /// <paramref name="ask"/> is false, nothing to lose.</summary>
-    private void QuickAsk(bool ask, string head, string text, string yes, Action act, string no = "Отмена")
+    private void QuickAsk(bool ask, string head, string text, string yes, Action act, string? no = null)
     {
         if (ask)
         {
-            _qAsk = (head, text, yes, no, act);
+            _qAsk = (head, text, yes, no ?? L.T("quick.cancel"), act);
             _qModal = QuickModal.Ask;
         }
         else
@@ -1284,8 +1280,8 @@ public sealed partial class Tank3DBench
             c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(12) + 2), text, HorizontalAlignment.Left, -1, 12, ink);
         }
         // the own zone is the bottom one, the map being turned so
-        Chip("ВАША ЗОНА", own, QOlive.Lightened(0.35f), top: false);
-        Chip("ЗОНА ПРОТИВНИКА", foe, QRed, top: true);
+        Chip(L.T("quick.zone_own"), own, QOlive.Lightened(0.35f), top: false);
+        Chip(L.T("quick.zone_foe"), foe, QRed, top: true);
     }
 
     /// <summary>A zone's outer edges, the ones its hexes share with a hex not
@@ -1338,8 +1334,8 @@ public sealed partial class Tank3DBench
         grid.AddThemeConstantOverride("v_separation", 4);
         foreach ((Color c, string name) in new[]
                  {
-                     (QField, "Поле"), (QField.Lightened(0.32f), "Высота"), (QWood, "Лес"),
-                     (QWater, "Вода"), (QWall, "Стена"), (QAmber, "Точка"),
+                     (QField, L.T("quick.legend_field")), (QField.Lightened(0.32f), L.T("quick.legend_height")), (QWood, L.T("quick.legend_forest")),
+                     (QWater, L.T("quick.legend_water")), (QWall, L.T("quick.legend_wall")), (QAmber, L.T("quick.point")),
                  })
         {
             var row = new HBoxContainer();
@@ -1470,16 +1466,16 @@ public sealed partial class Tank3DBench
         bool mineFirst = _mt.First == q.Player;
         var sheet = new VBoxContainer();
         sheet.AddThemeConstantOverride("separation", 10);
-        sheet.AddChild(QEyebrow("Отряды открыты"));
-        sheet.AddChild(QText($"Жребий: {(mineFirst ? "первыми ходите вы" : "первым ходит ИИ")}", 22, QInk, bold: true));
-        sheet.AddChild(QHint($"Дальше начинается бой на карте «{q.Map}», режим «{QuickMode(q.Map)}»."));
+        sheet.AddChild(QEyebrow(L.T("quick.reveal_eyebrow")));
+        sheet.AddChild(QText(L.T("quick.toss", mineFirst ? L.T("quick.toss_you") : L.T("quick.toss_ai")), 22, QInk, bold: true));
+        sheet.AddChild(QHint(L.T("quick.reveal_next", q.Map, QuickMode(q.Map))));
         var cols = new HBoxContainer();
         cols.AddThemeConstantOverride("separation", 14);
-        cols.AddChild(QuickRevealSide($"Вы · {QuickSouthSaid(q.Player)}", q.Squad, q.Budget, q.Player, mineFirst, ""));
-        cols.AddChild(QuickRevealSide($"ИИ · {QuickSouthSaid(QuickAi)}", q.Ai, q.AiBudget, QuickAi, !mineFirst,
-                                      q.AiDoctrine is { } d ? $" · доктрина «{d.Name}»" : ""));
+        cols.AddChild(QuickRevealSide(L.T("quick.reveal_you", QuickSouthSaid(q.Player)), q.Squad, q.Budget, q.Player, mineFirst, ""));
+        cols.AddChild(QuickRevealSide(L.T("quick.reveal_ai", QuickSouthSaid(QuickAi)), q.Ai, q.AiBudget, QuickAi, !mineFirst,
+                                      q.AiDoctrine is { } d ? L.T("quick.reveal_doctrine", d.Name) : ""));
         sheet.AddChild(cols);
-        var go = QBtn("К БОЮ", () => { _qReveal?.QueueFree(); _qReveal = null; }, primary: true);
+        var go = QBtn(L.T("quick.to_battle"), () => { _qReveal?.QueueFree(); _qReveal = null; }, primary: true);
         go.SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd;
         sheet.AddChild(go);
         var over = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Stop };
@@ -1490,15 +1486,15 @@ public sealed partial class Tank3DBench
         Log.Print($"tank3d: quick: revealed - the AI {q.AiDoctrine?.Name}: {QuickSquad.Said(q.Ai)}");
     }
 
-    private string QuickSouthSaid(Side side) => QuickSouth(QuickMap(_quick!.Map), side) ? "юг" : "север";
+    private string QuickSouthSaid(Side side) => QuickSouth(QuickMap(_quick!.Map), side) ? L.T("quick.south") : L.T("quick.north");
 
     private Control QuickRevealSide(string title, QuickSquad.Slot[] squad, int budget, Side side, bool first, string extra)
     {
         var col = new VBoxContainer { CustomMinimumSize = new Vector2(380, 0) };
         col.AddThemeConstantOverride("separation", 8);
-        col.AddChild(QEyebrow(first ? "Ходит первым" : "Ходит вторым"));
+        col.AddChild(QEyebrow(first ? L.T("quick.moves_first") : L.T("quick.moves_second")));
         col.AddChild(QText(title, 18, SideInk(side), bold: true));
-        col.AddChild(QHint($"Потрачено {QuickSquad.Spent(squad)} из {budget}{extra}"));
+        col.AddChild(QHint(L.T("quick.reveal_spent", QuickSquad.Spent(squad), budget, extra)));
         foreach (QuickSquad.Slot s in squad)
         {
             if (s.Empty)
@@ -1515,7 +1511,7 @@ public sealed partial class Tank3DBench
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             });
             var text = new VBoxContainer();
-            text.AddChild(QText($"{c.Name} · {(s.Level > 0 ? $"{c.BranchOf(s.Branch)?.Name}, ур. {s.Level}" : "нейтральная")}", 14, QInk, bold: true));
+            text.AddChild(QText($"{c.Name} · {(s.Level > 0 ? L.T("quick.reveal_branch", c.BranchOf(s.Branch)?.Name ?? "", s.Level) : L.T("quick.neutral"))}", 14, QInk, bold: true));
             foreach (QuickSquad.Upgrade u in QuickSquad.UpgradesOf(s))
                 text.AddChild(QText($"•  {u.Name}{(u.Flag is null ? " *" : "")}", 13, QMuted));
             row.AddChild(text);
@@ -1558,7 +1554,7 @@ public sealed partial class Tank3DBench
                 case "mapview": _qModal = QuickModal.Map; break;
                 case "close": _qModal = QuickModal.None; _qAsk = null; break;
                 case "try-go": QuickTryGo(); continue;
-                case "clear": QuickAsk(true, "Очистить отряд?", "Все три машины станут пустыми, прокачка снимется.", "Очистить",
+                case "clear": QuickAsk(true, L.T("quick.clear_ask"), L.T("quick.clear_text"), L.T("quick.clear"),
                                        () => q.Squad = QuickSquad.Empty()); continue;
                 case "focus" when p.Length > 3:
                     // the keyboard's way to a node: its tip comes up with its focus
@@ -1634,7 +1630,7 @@ public sealed partial class Tank3DBench
         // the nodes of one level in the page's order: two a slot, a branch each
         var pads = _qRoot.FindChildren("*", "", true, false).OfType<QuickPad>()
                          .Where(x => level > 0 ? x.Form == QuickPad.Shape.Hex && x.Text == level.ToString()
-                                               : QuickSquad.Classes.SelectMany(c => c.Branches).Any(y => y.Name == x.Text)).ToList();
+                                               : x.HasMeta("q_branch")).ToList();
         // the hangar draws the podium's slot's tree alone
         if (_qHangar && at != _qhAt)
             return null;

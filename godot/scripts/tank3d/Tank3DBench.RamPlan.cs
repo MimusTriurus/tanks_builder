@@ -109,11 +109,11 @@ public sealed partial class Tank3DBench
             RamLock(plan);
         ShowRam(plan);
         _judgedNote = plan.Allowed
-            ? $"таран {MapAt(plan.Target)} → {MapAt(plan.Push.Legs[^1])}"
-              + (RamIntoDeep(plan) ? RamFloats ? " — поплывёт (ОПВТ)" : Snorkel(_other?.Id ?? -1) ? " — утонет (подбит)" : " — утонет (нет ОПВТ)" : "")
-              + (_ramWaiting is not null ? "" : plan.From != CellHere ? $" с {MapAt(plan.From)}: {plan.Steps} из {_reach?.Budget}" : plan.Steps > 0 ? $": разворот {plan.Steps}" : "")
-              + (_ramWaiting is null ? "; ПКМ — таранить" : "")
-            : $"таран нельзя: {plan.Why}";
+            ? L.T("ramplan.ram_to", MapAt(plan.Target), MapAt(plan.Push.Legs[^1]))
+              + (RamIntoDeep(plan) ? RamFloats ? L.T("ramplan.deep_floats") : Snorkel(_other?.Id ?? -1) ? L.T("ramplan.deep_knocked_out") : L.T("ramplan.deep_no_snorkel") : "")
+              + (_ramWaiting is not null ? "" : plan.From != CellHere ? L.T("ramplan.from_steps", MapAt(plan.From), plan.Steps, _reach?.Budget.ToString() ?? "") : plan.Steps > 0 ? L.T("ramplan.turn_steps", plan.Steps) : "")
+              + (_ramWaiting is null ? L.T("ramplan.rmb_ram") : "")
+            : L.T("ramplan.cannot", plan.Why);
         return true;
     }
 
@@ -187,23 +187,23 @@ public sealed partial class Tank3DBench
             }
         if (best is null && SideTo(CellHere, target) is int faced)
             return new RamPlan(target, CellHere, faced, -1, 0, new Ramming.Shove(Array.Empty<Vector2I>(), Ramming.Bar.None),
-                               "развернуться к цели лбом нечем — ход сделан");
+                               L.T("ramplan.no_face"));
         return best;
     }
 
     /// <summary>A refusal in the player's words.</summary>
     private static string RamWhy(Ramming.Bar why, Other o) => why switch
     {
-        Ramming.Bar.Mass => $"{o.Tag} тяжелее",
-        Ramming.Bar.Edge => "за целью край карты",
-        Ramming.Bar.Taken => "за целью стоит юнит",
-        Ramming.Bar.Uphill => "за целью возвышенность",
-        Ramming.Bar.Cliff => "за целью обрыв глубже уровня",
-        Ramming.Bar.Rock => "за целью скала",
-        Ramming.Bar.Masonry => "стена на гексе цели или за ней",
-        Ramming.Bar.Crosswise => "поперёк рампы",
-        Ramming.Bar.Landing => "рампе за целью некуда спустить",
-        _ => "нельзя",
+        Ramming.Bar.Mass => L.T("ramplan.why_mass", o.Tag),
+        Ramming.Bar.Edge => L.T("ramplan.why_edge"),
+        Ramming.Bar.Taken => L.T("ramplan.why_taken"),
+        Ramming.Bar.Uphill => L.T("ramplan.why_uphill"),
+        Ramming.Bar.Cliff => L.T("ramplan.why_cliff"),
+        Ramming.Bar.Rock => L.T("ramplan.why_rock"),
+        Ramming.Bar.Masonry => L.T("ramplan.why_masonry"),
+        Ramming.Bar.Crosswise => L.T("ramplan.why_crosswise"),
+        Ramming.Bar.Landing => L.T("ramplan.why_landing"),
+        _ => L.T("ramplan.why_other"),
     };
 
     /// <summary>The approach fixed as the firing post's is - the ribbon and
@@ -240,7 +240,7 @@ public sealed partial class Tank3DBench
             return false;
         if (!plan.Allowed)
         {
-            _orderNote = $"таран нельзя: {plan.Why}";
+            _orderNote = L.T("ramplan.cannot", plan.Why);
             return true;
         }
         if (plan.From != CellHere)
@@ -263,7 +263,7 @@ public sealed partial class Tank3DBench
         _mt.Bonus = true;
         if (!(_profile.FreeOrder && plan.From == CellHere && plan.Steps == 0))
             _mt.Drove = true;
-        _orderNote = $"таран {MapAt(cell)}";
+        _orderNote = L.T("ramplan.ram_at", MapAt(cell));
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {MapAt(cell)} from {MapAt(plan.From)} along {plan.Side}");
         return true;
     }
@@ -279,11 +279,11 @@ public sealed partial class Tank3DBench
         if (_field is null || _other is not { } o || OtherCell(o) != plan.Target || o.Fate == Fate.Destroyed
             || CellHere != plan.From)
         {
-            _orderNote = "таран сорвался";
+            _orderNote = L.T("ramplan.fell_through");
             Log.Print($"tank3d: match: the ram on {MapAt(plan.Target)} fell through");
             return;
         }
-        Drive(new List<Vector2I> { CellHere, plan.Target }, ram: true, $"таран {MapAt(plan.Target)}");
+        Drive(new List<Vector2I> { CellHere, plan.Target }, ram: true, L.T("ramplan.ram_at", MapAt(plan.Target)));
     }
 
     private void RamCancel()
@@ -301,7 +301,7 @@ public sealed partial class Tank3DBench
     {
         if (!_ramMode && MatchBonusSpent)
         {
-            _orderNote = "доп. действие этого хода уже сделано";
+            _orderNote = L.T("ramplan.bonus_spent");
             return;
         }
         _ramMode = !_ramMode;
@@ -312,9 +312,9 @@ public sealed partial class Tank3DBench
             _gearMode = Gear.None;
         if (_ramMode)
             _ambushMode = _attackMode = false;
-        _orderNote = !_ramMode ? "таран выключен"
-            : WallAhead ? "таран: наведи на танк, свой тоже, или щёлкни за стену"
-            : "таран: наведи на танк, свой тоже";
+        _orderNote = !_ramMode ? L.T("ramplan.mode_off")
+            : WallAhead ? L.T("ramplan.mode_on_wall")
+            : L.T("ramplan.mode_on");
     }
 
     // --- the picture -------------------------------------------------------------

@@ -270,25 +270,24 @@ public sealed partial class Tank3DBench
             : SpinShown() is int spin ? SpinCost(spin) ?? 0 : 0;
         if (shown is not null)
         {
-            string tab = _ways.Count > 1 ? $", Tab — другой ({_wayIx % _ways.Count + 1}/{_ways.Count})" : "";
+            string tab = _ways.Count > 1 ? L.T("course.tab_other", _wayIx % _ways.Count + 1, _ways.Count) : "";
             if (_postLock)
             {
                 int turn = _reach!.TurnTo(shown, GhostFace(shown)) ?? 0;
-                _courseNote = $"{(_ramLock ? "таран" : "огонь")} после хода: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab}";
+                _courseNote = L.T(_ramLock ? "course.ram_after_move" : "course.fire_after_move", shown.Spent, turn > 0 ? $"+{turn}" : "", _reach.Budget, tab);
             }
             else if (_lockCell is not null)
             {
                 int turn = _reach!.TurnTo(shown, GhostFace(shown)) ?? 0;
-                _courseNote = $"выбрано: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab};"
-                              + " разворот — роза/A/D/колесо, Enter — ехать, Esc — отмена";
+                _courseNote = L.T("course.chosen", shown.Spent, turn > 0 ? $"+{turn}" : "", _reach.Budget, tab);
             }
             else
-                _courseNote = $"путь {shown.Spent} из {_reach!.Budget}{tab}; щелчок — выбрать клетку";
+                _courseNote = L.T("course.path", shown.Spent, _reach!.Budget, tab);
         }
         else if (attack)
-            _courseNote = $"атака с места: гексов на осях огня {_attackCells.Count}; цель вне осей — наведи, покажет позицию";
+            _courseNote = L.T("course.attack_in_place", _attackCells.Count);
         else
-            _courseNote = $"{_reach!.Budget} шагов, клеток в досягаемости {_reach.Cells.Count}";
+            _courseNote = L.T("course.reach", _reach!.Budget, _reach.Cells.Count);
         // where and with which plate the enemy's ambushes meet it (Tank3DBench.Ambush)
         string forecast = shown is not null ? AmbushForecast(shown, GhostFace(shown))
             : SpinShown() is int about && about != HullSide() ? AmbushForecast(null, about) : "";

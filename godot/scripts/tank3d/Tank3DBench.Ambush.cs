@@ -48,7 +48,7 @@ public sealed partial class Tank3DBench
     private int? _ambushPick;
     private Button? _actAmbush;
 
-    private const string AmbushText = "Засада";
+    private static string AmbushText => L.T("ambush.button");
 
     /// <summary>The ambush stabilizer (upgrades.md, Д8): the watch goes on past
     /// the first round, and a ram does not lift it.</summary>
@@ -59,23 +59,23 @@ public sealed partial class Tank3DBench
     private string AmbushWhy(int axis, int second)
     {
         if (_fate != Fate.Alive)
-            return $"{_modelTag} не на ходу";
+            return L.T("ambush.why_out", _modelTag);
         if (_side != _mt.Turn)
-            return $"ходят {SideName(_mt.Turn)}";
+            return L.T("ambush.why_turn", SideName(_mt.Turn));
         if (MatchShotSpent)
-            return "атака этого хода уже сделана";
+            return L.T("ambush.why_shot_spent");
         if (System.Array.IndexOf(HexField.EdgeHeadings, axis) < 0)
-            return "это не ось";
+            return L.T("ambush.why_not_axis");
         if (second >= 0)
         {
             if (!_profile.WatchesSector)
-                return "две оси караулит только MT";
+                return L.T("ambush.why_sector_mt");
             int apart = ((second - axis) % 360 + 360) % 360;
             if (apart != 60 && apart != 300)
-                return "оси сектора должны быть соседними";
+                return L.T("ambush.why_sector_adjacent");
         }
         if (!_profile.Turreted && axis != HullSide())
-            return "каземат караулит по корпусу: сперва развернись";
+            return L.T("ambush.why_casemate");
         return "";
     }
 
@@ -97,7 +97,7 @@ public sealed partial class Tank3DBench
             _aimRound = null;
             _aimHold = true;
         }
-        _matchNote = second >= 0 ? "засада на две оси" : "засада";
+        _matchNote = second >= 0 ? L.T("ambush.set_two") : L.T("ambush.set");
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} in ambush on {MapAt(CellHere)} along {axis}"
                   + (second >= 0 ? $" and {second}" : ""));
     }
@@ -280,7 +280,7 @@ public sealed partial class Tank3DBench
             BattleEvent e = st.Events[i];
             if (e.Kind != BattleEventKind.AmbushFired || !e.Note.StartsWith(at))
                 continue;
-            string plate = "", outcome = "мимо";
+            string plate = "", outcome = L.T("ambush.miss");
             for (int j = i + 1; j < st.Events.Count && st.Events[j].Kind is not (BattleEventKind.AmbushFired
                      or BattleEventKind.Moved or BattleEventKind.Turned); j++)
             {
@@ -288,14 +288,15 @@ public sealed partial class Tank3DBench
                 if (h.Unit != _unitId || h.Kind is not (BattleEventKind.Hit or BattleEventKind.Glanced))
                     continue;
                 plate = h.Note;
-                outcome = h.Kind == BattleEventKind.Hit ? "подобьёт" : "не пробьёт";
+                outcome = h.Kind == BattleEventKind.Hit ? L.T("ambush.knocks") : L.T("ambush.no_pen");
                 break;
             }
             string side = plate switch
             {
-                "Front" => " лбом", "Side" => " бортом", "Rear" => " кормой", "Roof" => " сверху", _ => "",
+                "Front" => L.T("ambush.plate_front"), "Side" => L.T("ambush.plate_side"), "Rear" => L.T("ambush.plate_rear"),
+                "Roof" => L.T("ambush.plate_roof"), _ => "",
             };
-            said.Append($" · засада {st.Unit(e.Unit)?.Tag}: {MapAt(e.Cell)}{side} — {outcome}");
+            said.Append(L.T("ambush.forecast", st.Unit(e.Unit)?.Tag ?? "", MapAt(e.Cell), side, outcome));
         }
         _forecast = said.ToString();
         if (_forecast.Length > 0)
@@ -498,10 +499,10 @@ public sealed partial class Tank3DBench
             _gearMode = Gear.None;
         if (_ambushMode)
             _ramMode = _attackMode = false;
-        _orderNote = !_ambushMode ? "засада выключена"
-            : _profile.WatchesSector ? "засада: наведи на ось и щёлкни, затем соседнюю — сектор, или ту же — одна ось"
-            : _profile.Turreted ? "засада: наведи на ось и щёлкни"
-            : "засада по корпусу: щёлкни";
+        _orderNote = !_ambushMode ? L.T("ambush.off")
+            : _profile.WatchesSector ? L.T("ambush.mode_sector")
+            : _profile.Turreted ? L.T("ambush.mode_turret")
+            : L.T("ambush.mode_hull");
     }
 
     /// <summary>With «Засада» on, the axis under the pointer (or
@@ -562,7 +563,7 @@ public sealed partial class Tank3DBench
                 return true;
             }
             _ambushPick = axis;
-            _orderNote = "засада: соседняя ось — сектор, эта же или Enter — одна ось";
+            _orderNote = L.T("ambush.pick_second");
             return true;
         }
         int a = _ambushPick ?? axis;

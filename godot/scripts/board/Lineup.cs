@@ -25,11 +25,11 @@ public static class Lineup
     /// </summary>
     public static readonly (string Model, string Class, string Name)[] Pairs =
     {
-        ("LTR", "LTP", "лёгкий"),
-        ("MTR", "MTP", "средний"),
-        ("HTR", "HTP", "тяжёлый"),
-        ("TDR", "TDP", "ПТ-САУ"),
-        ("HMR", "HMP", "мортира"),
+        ("LTR", "LTP", L.T("lineup.light")),
+        ("MTR", "MTP", L.T("lineup.medium")),
+        ("HTR", "HTP", L.T("lineup.heavy")),
+        ("TDR", "TDP", L.T("lineup.td")),
+        ("HMR", "HMP", L.T("lineup.mortar")),
     };
 
     /// <summary>Each side's five, in its homes' order.</summary>

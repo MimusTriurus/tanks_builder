@@ -530,7 +530,7 @@ public sealed partial class Tank3DBench : Node3D
         // a match's unit is what it is: another one is taken by a click on it
         if (Match)
         {
-            _note = "в партии танк берут щелчком по нему";
+            _note = L.T("bench.match_take_click");
             return;
         }
         try
@@ -2776,111 +2776,110 @@ public sealed partial class Tank3DBench : Node3D
         _panel.Prepare();
         // How the tank is driven (Tank3DBench.Orders): the 2D harness's orders
         // on cells, or the keys.
-        _panel.Heading("tank3d.drive", "движение");
-        _panel.Toggle("tank3d.drive.cells", "по клеткам, как в 2D  (выкл. — WASD, --free-drive)",
+        _panel.Heading("tank3d.drive", L.T("bench.drive"));
+        _panel.Toggle("tank3d.drive.cells", L.T("bench.drive_cells"),
                       () => _rules, v => SetRules(v));
         // the line of fire, beads from the muzzle to the hull (Tank3DBench.Aim)
-        _panel.Toggle("tank3d.drive.axis", "линия огня  (--no-fire-axis)", () => _fireAxis, v => _fireAxis = v);
-        _panel.Toggle("tank3d.drive.reticle", "прицельный круг  (--reticle)", () => _reticle, v => _reticle = v);
+        _panel.Toggle("tank3d.drive.axis", L.T("bench.fire_axis"), () => _fireAxis, v => _fireAxis = v);
+        _panel.Toggle("tank3d.drive.reticle", L.T("bench.reticle"), () => _reticle, v => _reticle = v);
         _panel.Readout("tank3d.drive.note", () => _rules
-            ? "ЛКМ по своему — выбрать, ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\n"
-              + "W/S — клетка вперёд/назад, A/D — 60°, ESC — отмена, без приказа — снять выбор"
+            ? L.T("bench.drive_note_cells")
               + (_orderNote.Length > 0 ? "\n" + _orderNote : "")
-            : "WASD — езда, Q/E — башня, ПКМ — выстрел");
+            : L.T("bench.drive_note_free"));
         _panel.Expand("tank3d.drive", true);
-        _panel.Heading("tank3d.tank", "танк");
+        _panel.Heading("tank3d.tank", L.T("bench.tank"));
         var labels = new List<string>();
         foreach (string model in _models)
             labels.Add(PairAt(model) is int i and >= 0 ? $"{model}  {Pairs[i].Name}" : model);
         if (labels.Count > 0)
-            _panel.Choice("tank3d.tank.model", "модель", labels,
+            _panel.Choice("tank3d.tank.model", L.T("bench.model"), labels,
                           () => _models.FindIndex(m => string.Equals(m, _modelTag, StringComparison.OrdinalIgnoreCase)),
                           i => Pick(_models[i]));
         _panel.Readout("tank3d.tank.note", () =>
-            $"класс {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F1} px на единицу"
-            + (_model.Turreted ? "" : ", без башни"));
+            L.T("bench.tank_note", _profile.Tag, _profile.Size, _model.PixelsPerUnit)
+            + (_model.Turreted ? "" : L.T("bench.no_turret")));
         _panel.Expand("tank3d.tank", true);
         // The relief's lines (Stage3D.Relief): the brow off by default
         if (_stage?.Relief is not null)
         {
-            _panel.Heading("tank3d.relief", "рельеф");
-            _panel.Toggle("tank3d.relief.brow", "бровка уступов  (--brow)",
+            _panel.Heading("tank3d.relief", L.T("bench.relief"));
+            _panel.Toggle("tank3d.relief.brow", L.T("bench.brow"),
                           () => _stage.ShowBrow, v => _stage.ShowBrow = v);
-            _panel.Toggle("tank3d.relief.grid", "гекс-сетка  (Shift+G)",
+            _panel.Toggle("tank3d.relief.grid", L.T("bench.grid"),
                           () => _stage.ShowEdges, v => _stage.ShowEdges = v);
-            _panel.Toggle("tank3d.relief.turf", "трава на земле  (--no-turf — почва)",
+            _panel.Toggle("tank3d.relief.turf", L.T("bench.turf"),
                           () => _stage.ShowTurf, v => _stage.ShowTurf = v);
             if (Stage3D.Lawn() is not null)
-                _panel.Toggle("tank3d.relief.lawn", "  трава фото, а не пятнами  (--lawn)",
+                _panel.Toggle("tank3d.relief.lawn", L.T("bench.lawn"),
                               () => _stage.ShowLawn, v => _stage.ShowLawn = v);
             if (Stage3D.Pebbles() is not null)
-                _panel.Toggle("tank3d.relief.bed", "дно галькой, фото  (--bed)",
+                _panel.Toggle("tank3d.relief.bed", L.T("bench.bed"),
                               () => _stage.ShowBed, v => _stage.ShowBed = v);
             if (Stage3D.EarthPhoto() is not null)
-                _panel.Toggle("tank3d.relief.earth", "земля склонов, фото  (--earth)",
+                _panel.Toggle("tank3d.relief.earth", L.T("bench.earth"),
                               () => _stage.ShowEarth, v => _stage.ShowEarth = v);
             if (Stage3D.CragsOnDisk)
-                _panel.Toggle("tank3d.relief.crag", "скалы, фото  (--crag)",
+                _panel.Toggle("tank3d.relief.crag", L.T("bench.crag"),
                               () => _stage.ShowCrag, v => _stage.ShowCrag = v);
             if (Stage3D.SandPhoto() is not null)
-                _panel.Toggle("tank3d.relief.sand", "песок, фото  (--sand)",
+                _panel.Toggle("tank3d.relief.sand", L.T("bench.sand"),
                               () => _stage.ShowSand, v => _stage.ShowSand = v);
             if (Stage3D.ForestPhoto() is not null)
-                _panel.Toggle("tank3d.relief.forest", "земля под лесом, фото  (--forest)",
+                _panel.Toggle("tank3d.relief.forest", L.T("bench.forest"),
                               () => _stage.ShowForest, v => _stage.ShowForest = v);
             if (Stage3D.RoadPhotosOnDisk)
-                _panel.Toggle("tank3d.relief.roads", "дороги, фото  (--road-photo)",
+                _panel.Toggle("tank3d.relief.roads", L.T("bench.roads"),
                               () => _stage.ShowRoadPhoto, v => _stage.ShowRoadPhoto = v);
             _panel.Expand("tank3d.relief", true);
         }
         // Whether the pond is swum or drowned in - see TankTick.Amphibious.
-        _panel.Heading("tank3d.water", "вода");
-        _panel.Toggle("tank3d.water.amphibious", "ОПВТ: плывёт, без него тонет",
+        _panel.Heading("tank3d.water", L.T("bench.water"));
+        _panel.Toggle("tank3d.water.amphibious", L.T("bench.amphibious"),
                       () => _amphibious, v => _amphibious = v);
-        _panel.Toggle("tank3d.water.ripples", "рябь  (--no-ripples)", () => _ripples.Enabled, v =>
+        _panel.Toggle("tank3d.water.ripples", L.T("bench.ripples"), () => _ripples.Enabled, v =>
         {
             _ripples.Enabled = v;
             if (!v)
                 _ripples.Settle();
         });
-        _panel.Press("tank3d.water.pond", "к пруду: на берег, носом в воду", ToPond);
+        _panel.Press("tank3d.water.pond", L.T("bench.pond"), ToPond);
         _panel.Readout("tank3d.water.note", () =>
-            $"палуба {_deckPx:F0} px, осадка {_deckPx * _profile.Draught:F0} px"
-            + (Drowning ? $", тонет {Sink:P0}" : Swimming ? ", на плаву" : ""));
+            L.T("bench.water_note", _deckPx, _deckPx * _profile.Draught)
+            + (Drowning ? L.T("bench.sinking", Sink) : Swimming ? L.T("bench.afloat") : ""));
         _panel.Expand("tank3d.water", true);
         // The ram (Tank3DBench.Ram): which hull is rammed, where it stands, go.
-        _panel.Heading("tank3d.ram", "таран");
+        _panel.Heading("tank3d.ram", L.T("bench.ram"));
         if (labels.Count > 0)
-            _panel.Choice("tank3d.ram.target", "цель", labels,
+            _panel.Choice("tank3d.ram.target", L.T("bench.ram_target"), labels,
                           () => _models.FindIndex(m => string.Equals(m, _otherTag, StringComparison.OrdinalIgnoreCase)),
                           i => PickOther(_models[i]));
-        _panel.Press("tank3d.ram.place", "цель впереди: два гекса прямо, бортом", () => LineUp());
-        _panel.Press("tank3d.ram.go", "таранить  (T)", RamGo);
-        _panel.Press("tank3d.ram.remove", "убрать цель", RemoveOther);
+        _panel.Press("tank3d.ram.place", L.T("bench.ram_place"), () => LineUp());
+        _panel.Press("tank3d.ram.go", L.T("bench.ram_go"), RamGo);
+        _panel.Press("tank3d.ram.remove", L.T("bench.ram_remove"), RemoveOther);
         _panel.Readout("tank3d.ram.note", () => _other is null
-            ? "цели нет"
-            : $"{_other.Tag}, масса {_other.Profile.Mass} против {_profile.Mass}"
+            ? L.T("bench.no_target")
+            : L.T("bench.ram_note", _other.Tag, _other.Profile.Mass, _profile.Mass)
               + (_ramNote.Length > 0 ? $"\n{_ramNote}" : ""));
         _panel.Expand("tank3d.ram", true);
         // The brick walls (Tank3DBench.Walls): the ram through one.
         if (_walls.Count > 0)
         {
-            _panel.Heading("tank3d.walls", "стены");
-            _panel.Press("tank3d.walls.ram", "таранить стену  (T носом к стене)", () => WallRamGo(true));
+            _panel.Heading("tank3d.walls", L.T("bench.walls"));
+            _panel.Press("tank3d.walls.ram", L.T("bench.wall_ram"), () => WallRamGo(true));
             _panel.Readout("tank3d.walls.note", () =>
-                (_profile.Bulldozes ? "HT ломает стены ездой" : "стена держит; таран — приказом")
+                (_profile.Bulldozes ? L.T("bench.ht_bulldozes") : L.T("bench.wall_holds"))
                 + (_wallNote.Length > 0 ? "\n" + _wallNote : ""));
             _panel.Expand("tank3d.walls", true);
         }
         // The round in the air (Tank3DBench.Shell): the sprites' two switches.
-        _panel.Heading("tank3d.shell", "снаряд");
-        _panel.Toggle("tank3d.shell.tracer", "трассер  (--no-tracer)", () => _tracerOn, v => _tracerOn = v);
-        _panel.Toggle("tank3d.shell.smoke", "дымный след  (--tracer-smoke)", () => _tracerSmoke, v => _tracerSmoke = v);
-        _panel.Toggle("tank3d.shell.soft", "трассер без полос  (--tracer-soft)", () => _tracerSoft, v => _tracerSoft = v);
+        _panel.Heading("tank3d.shell", L.T("bench.shell"));
+        _panel.Toggle("tank3d.shell.tracer", L.T("bench.tracer"), () => _tracerOn, v => _tracerOn = v);
+        _panel.Toggle("tank3d.shell.smoke", L.T("bench.tracer_smoke"), () => _tracerSmoke, v => _tracerSmoke = v);
+        _panel.Toggle("tank3d.shell.soft", L.T("bench.tracer_soft"), () => _tracerSoft, v => _tracerSoft = v);
         _panel.Expand("tank3d.shell", true);
         // The wreck (Tank3DBench.Fx): what it leaves on the ground.
-        _panel.Heading("tank3d.wreck", "обломок");
-        _panel.Toggle("tank3d.wreck.scorch", "выжженное пятно  (--scorch)", () => _scorchOn, v =>
+        _panel.Heading("tank3d.wreck", L.T("bench.wreck"));
+        _panel.Toggle("tank3d.wreck.scorch", L.T("bench.scorch"), () => _scorchOn, v =>
         {
             _scorchOn = v;
             if (!v)

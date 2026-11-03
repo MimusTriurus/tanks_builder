@@ -60,38 +60,29 @@ public sealed partial class Tank3DBench
     /// and «Атака» are, which the card would say twice.</summary>
     private static string GroupName(GroupShape shape) => shape switch
     {
-        GroupShape.Diamond => "Движение",
-        GroupShape.Circle => "Основное действие",
-        _ => "Доп. действие",
+        GroupShape.Diamond => L.T("acttips.group_move"),
+        GroupShape.Circle => L.T("acttips.group_action"),
+        _ => L.T("acttips.group_bonus"),
     };
 
     /// <summary>What each act does, by its icon's name: the rules as the bench
     /// plays them, in the player's words.</summary>
     private static readonly Dictionary<string, string> ActText = new()
     {
-        ["move"] = "Танк едет по синей зоне. Первый щелчок по клетке выбирает её и открывает розу разворота, второй — едет. "
-                   + "Если разворота на клетке не остаётся, едет с первого щелчка. После атаки или доп. действия ехать может только LT.",
-        ["attack"] = "Выстрел по цели на оси огня. Оранжевым залиты гексы, куда орудие бьёт с места. "
-                     + "На цель вне осей наведи — покажет, откуда попадёт после хода. Свой танк — цель только в этом режиме; "
-                     + "ПКМ по врагу стреляет и без него.",
-        ["ambush"] = "Орудие ждёт на оси: танк, въехавший на неё, получает выстрел. Ставится последней — ход на этом кончается. "
-                     + "MT держит сектор из двух соседних осей, каземат — ось корпуса. Снимается любым приказом юниту.",
-        ["incendiary"] = "Следующий выстрел — зажигательный. Непробитый корпус загорается, лес, где остановился снаряд, тоже. "
-                         + "Пробитый подбит, как обычно.",
-        ["ram"] = "Въехать в танк рядом и сдвинуть его на гекс, если хватает массы; свой тоже можно. "
-                  + "Со стеной перед носом щелчок по гексу за ней проламывает стену.",
-        ["smoke"] = "Дымовая шашка на соседний гекс. Дым закрывает линии огня, как лес, и держится два раунда "
-                    + "или пока в него не въедут.",
-        ["mine"] = "Мина на соседний гекс, живая сразу: танк, въехавший на неё, подбит.",
-        ["repair"] = "Свой подбитый танк рядом снова в бою.",
-        ["winch"] = $"Танк в {Battle.WinchReach} гексах по оси подтягивается на гекс ближе — со всем, что этот гекс с ним сделает.",
-        ["douse"] = "Потушить пожар на своём корпусе. Тратит доп. действие, выстрел остаётся.",
+        ["move"] = L.T("acttips.text_move"),
+        ["attack"] = L.T("acttips.text_attack"),
+        ["ambush"] = L.T("acttips.text_ambush"),
+        ["incendiary"] = L.T("acttips.text_incendiary"),
+        ["ram"] = L.T("acttips.text_ram"),
+        ["smoke"] = L.T("acttips.text_smoke"),
+        ["mine"] = L.T("acttips.text_mine"),
+        ["repair"] = L.T("acttips.text_repair"),
+        ["winch"] = L.T("acttips.text_winch", Battle.WinchReach),
+        ["douse"] = L.T("acttips.text_douse"),
         // the corner's buttons (TurnTipHook)
-        ["endturn"] = "Передать ход другой стороне. Чего юнит не сделал в этом ходу, то пропадает. "
-                      + "Если приказ ждёт подтверждения — клетка выбрана, ось засады наведена, — Enter сперва его подтверждает.",
-        ["ready"] = "Расстановка закончена: экран уходит другой стороне, а после её «В бой» начинается первый раунд.",
-        ["undo"] = "Вернуть юнит туда, откуда он поехал, с тем же курсом, — ход можно сделать заново. "
-                   + "Только пока после хода ничего не сделано и юнит цел. Ctrl+Backspace — партия заново.",
+        ["endturn"] = L.T("acttips.text_endturn"),
+        ["ready"] = L.T("acttips.text_ready"),
+        ["undo"] = L.T("acttips.text_undo"),
     };
 
     /// <summary>A corner button's card (Tank3DBench.Undo, Match): no group, the
@@ -111,9 +102,9 @@ public sealed partial class Tank3DBench
     /// placement.</summary>
     private (string Name, string TextKey) TipWords(ActTip tip) => tip.Icon switch
     {
-        "endturn" when Deploying => ("В бой", "ready"),
-        "endturn" => ("Конец хода", "endturn"),
-        "undo" => ("Отменить ход", "undo"),
+        "endturn" when Deploying => (L.T("acttips.ready_name"), "ready"),
+        "endturn" => (L.T("acttips.endturn_name"), "endturn"),
+        "undo" => (L.T("acttips.undo_name"), "undo"),
         _ => (tip.Name, tip.Icon),
     };
 
@@ -172,10 +163,10 @@ public sealed partial class Tank3DBench
         {
             _tipWasOff = tip.Button.Disabled;
             _tipWhy = !_tipWasOff ? ""
-                : tip.Group is null ? (tip.Icon == "undo" ? UndoWhy() : "партия окончена")
+                : tip.Group is null ? (tip.Icon == "undo" ? UndoWhy() : L.T("acttips.why_over"))
                 : tip.Group.Shape == GroupShape.Diamond ? MatchMoveWhy()
-                : tip.Group.Shape == GroupShape.Circle ? MatchShotWhy(CellHere) is { Length: > 0 } s ? s : "атака этого хода уже сделана"
-                : "доп. действие этого хода уже сделано";
+                : tip.Group.Shape == GroupShape.Circle ? MatchShotWhy(CellHere) is { Length: > 0 } s ? s : L.T("acttips.why_shot_spent")
+                : L.T("acttips.why_bonus_spent");
             _actTip.QueueRedraw();
         }
         float dt = (float)GetProcessDeltaTime();
@@ -245,7 +236,7 @@ public sealed partial class Tank3DBench
         string key = tip.Group is null ? tip.Key : ActKeyOf(tip.Button);
         if (key.Length > 0)
         {
-            string says = $"клавиша {key}";
+            string says = L.T("acttips.key", key);
             float w = font.GetStringSize(says, HorizontalAlignment.Left, -1, 13).X;
             c.DrawString(font, new Vector2(left + TipW - pad - w, top + 26.0f), says, HorizontalAlignment.Left, -1, 13, CardDim);
         }

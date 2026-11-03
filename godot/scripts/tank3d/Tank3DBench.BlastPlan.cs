@@ -208,7 +208,7 @@ public sealed partial class Tank3DBench
     /// spared and why.</summary>
     private string BlastSays()
     {
-        var says = new StringBuilder("взорвётся");
+        var says = new StringBuilder(L.T("blastplan.blows"));
         void Name(BlastHit hit, string head)
         {
             bool any = false;
@@ -218,16 +218,16 @@ public sealed partial class Tank3DBench
                     continue;
                 says.Append(any ? ", " : head).Append(m.Tag);
                 if (m.Side == _side)
-                    says.Append(" (свой!)");
+                    says.Append(L.T("blastplan.own"));
                 any = true;
             }
         }
-        Name(BlastHit.Fire, "; подожжёт ");
-        Name(BlastHit.Chain, "; цепь: ");
-        Name(BlastHit.Wet, "; в воде не загорится: ");
-        Name(BlastHit.Alight, "; уже горит: ");
+        Name(BlastHit.Fire, L.T("blastplan.sets_fire"));
+        Name(BlastHit.Chain, L.T("blastplan.chain"));
+        Name(BlastHit.Wet, L.T("blastplan.wet"));
+        Name(BlastHit.Alight, L.T("blastplan.alight"));
         if (_blastMarks.Count == 0)
-            says.Append("; рядом никого");
+            says.Append(L.T("blastplan.nobody"));
         return says.ToString();
     }
 

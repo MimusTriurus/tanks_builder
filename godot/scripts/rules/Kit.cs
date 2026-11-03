@@ -54,20 +54,20 @@ public static class Kits
     /// says - in upgrades.md's order.</summary>
     public static readonly (Kit Kit, string Id, string Name)[] All =
     {
-        (Kit.Trawl, "trawl", "трал"),
-        (Kit.Snorkel, "snorkel", "ОПВТ"),
-        (Kit.Smoke, "smoke", "шашка"),
-        (Kit.Incendiary, "incendiary", "зажигательный"),
-        (Kit.WideTracks, "wide_tracks", "широкие гусеницы"),
-        (Kit.Reverse, "reverse", "задний ход"),
-        (Kit.SpallLiner, "spall_liner", "подбой"),
-        (Kit.Extinguisher, "extinguisher", "автотушение"),
-        (Kit.Thermal, "thermal", "тепловизор"),
-        (Kit.Winch, "winch", "лебёдка"),
-        (Kit.MineLayer, "mine_layer", "заградитель"),
-        (Kit.RepairKit, "repair_kit", "ремкомплект"),
-        (Kit.DoubleTurn, "double_turn", "двойной поворот"),
-        (Kit.AmbushStabilizer, "ambush_stabilizer", "стабилизатор засады"),
+        (Kit.Trawl, "trawl", L.T("kit.trawl")),
+        (Kit.Snorkel, "snorkel", L.T("kit.snorkel")),
+        (Kit.Smoke, "smoke", L.T("kit.smoke")),
+        (Kit.Incendiary, "incendiary", L.T("kit.incendiary")),
+        (Kit.WideTracks, "wide_tracks", L.T("kit.wide_tracks")),
+        (Kit.Reverse, "reverse", L.T("kit.reverse")),
+        (Kit.SpallLiner, "spall_liner", L.T("kit.spall_liner")),
+        (Kit.Extinguisher, "extinguisher", L.T("kit.extinguisher")),
+        (Kit.Thermal, "thermal", L.T("kit.thermal")),
+        (Kit.Winch, "winch", L.T("kit.winch")),
+        (Kit.MineLayer, "mine_layer", L.T("kit.mine_layer")),
+        (Kit.RepairKit, "repair_kit", L.T("kit.repair_kit")),
+        (Kit.DoubleTurn, "double_turn", L.T("kit.double_turn")),
+        (Kit.AmbushStabilizer, "ambush_stabilizer", L.T("kit.ambush_stabilizer")),
     };
 
     /// <summary>

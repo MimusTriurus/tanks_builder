@@ -75,7 +75,7 @@
 | `scenes/` | сцены 3D-линии и инструменты: `Tank3D`, `Match3D`, `Tree3D`, `Relief3D`, `Editor` |
 | `scenes/legacy/` | спрайтовые сцены устаревшей 2D-линии: `Main`, `Abbey`, `TankTest*`, `CaponTest`, `Events*`, `Effects`, `Wood`, `Wall`, `Relief` |
 | `scripts/` | C# по предмету, не по линии (2D и 3D делят почти всё): `core` — инфраструктура и панель; `rules` — правила GDD; `board` — поле, карты, рельеф; `stage3d` — объёмная доска; `water`, `props`, `walls`; `tank` — танк и его часы, общие для обеих линий; `sprite` — атлас и спрайт танка (2D); `tank3d` — 3D-модель и `Tank3DBench.*`; `cel` — cel-эффекты 3D; `effects` — `Proc*` и взрывы листом; `editor`; `benches` — корни остальных сцен; `test` — `SelfTest` |
-| `data/` | настройки стенда, читаемые с диска (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets`, `match` (числа партии: пат) |
+| `data/` | настройки стенда, читаемые с диска (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets`, `match` (числа партии: пат), `lang/ru.json` и `lang/en.json` (текст игры, см. «Текст игры») |
 | `maps/`, `perf/` | карты `maps/*.json` ([docs/editor.md](docs/editor.md)) и эталоны `--perf` ([docs/perf.md](docs/perf.md)) |
 | `tools/` | `stage_sounds.sh` и `render/` — вспомогательные скрипты вне движка |
 
@@ -148,6 +148,22 @@ Godot, запущенный другой сборкой движка, переп
 `SelfTest`. Единственное объявленное исключение между корнями —
 `Session`: редактор жмёт Run и меняет сцену на 3D-стенд (`Ctrl+F5` — на партию), они кнопкой
 `Edit  F5` возвращает. Раскрой — [docs/architecture.md](docs/architecture.md).
+
+## Текст игры — в `data/lang/`
+
+Всё, что видит игрок на 3D-линии, — ключи в `data/lang/ru.json` и
+`data/lang/en.json`, в коде `L.T("ключ", …)` (`{0}` — подстановка) и `L.N("ключ", n)`
+(массив форм числа: по-русски одно / несколько / много, по-английски one / other);
+загрузчик — `scripts/core/L.cs`. Язык — флаг `-- --lang ru|en`, без него английский
+(`L.Default`); ключа нет в языке — берётся русский, нет и его — на экране сам ключ,
+а в логе строка `lang: no "…"`.
+- **Новый текст для игрока — только ключом в оба файла**, префикс — часть имени
+  файла (`hangar.`, `match.`, `squad.`…). Фразу целиком одним ключом с
+  плейсхолдерами, а не склейкой кусков: в английском другой порядок слов.
+- **Код не сравнивает показанный текст**: вид апгрейда — `Upgrade.Ability`/`Attack`,
+  заголовок ветки ищется по `meta q_branch`, а не по названию.
+- Не переводятся: логи (`Log.Print`, `GD.PrintErr`), исключения, токены `--do` и
+  `--quick-do`, теги и id (`LTP`, `raid`), устаревшая 2D-линия и `panel.json`.
 
 ## Код кадра не выделяет память
 

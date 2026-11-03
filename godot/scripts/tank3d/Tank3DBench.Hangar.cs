@@ -92,14 +92,14 @@ public sealed partial class Tank3DBench
         // «В бой»: the placement next, as «К расстановке» was
         var go = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         go.AddThemeConstantOverride("separation", 4);
-        QuickPad button = QBtn("В БОЙ", QuickTryGo, primary: true);
+        QuickPad button = QBtn(L.T("hangar.go"), QuickTryGo, primary: true);
         button.FontSize = 22;
         button.CustomMinimumSize = Vector2.Zero;
         button.Fit(new Vector2(46, 12));
         button.Disabled = missing > 0;
         go.AddChild(button);
-        var sub = QText(missing > 0 ? $"в отряде {QuickSquad.Size - missing} из {QuickSquad.Size}"
-                        : left > 0 ? $"осталось {Pts(left)} · дальше расстановка" : "дальше расстановка",
+        var sub = QText(missing > 0 ? L.T("hangar.in_squad", QuickSquad.Size - missing, QuickSquad.Size)
+                        : left > 0 ? L.T("hangar.left_then_deploy", Pts(left)) : L.T("hangar.then_deploy"),
                         12, missing > 0 ? QRed : QMuted);
         sub.HorizontalAlignment = HorizontalAlignment.Center;
         go.AddChild(sub);
@@ -127,7 +127,7 @@ public sealed partial class Tank3DBench
         int start = QuickSquad.Size * QuickSquad.CompanyLevel;
         var col = new VBoxContainer { CustomMinimumSize = new Vector2(290, 0) };
         col.AddThemeConstantOverride("separation", 8);
-        col.AddChild(QText("Готовые отряды", 17, QInk, bold: true));
+        col.AddChild(QText(L.T("hangar.presets"), 17, QInk, bold: true));
         foreach (QuickSquad.Company c in QuickSquad.Companies)
             col.AddChild(QuickHangarCompany(c, start));
         col.AddChild(new Control { SizeFlagsVertical = Control.SizeFlags.ExpandFill });
@@ -147,7 +147,7 @@ public sealed partial class Tank3DBench
         col.AddChild(map);
         // short lines, unwrapped: a wrapped label measures itself a word a line first
         col.AddChild(QText(QuickMode(q.Map), 15, QInk, bold: true));
-        col.AddChild(QText("Параметры и карта ✎", 12, QOlive));
+        col.AddChild(QText(L.T("hangar.params_door"), 12, QOlive));
         QuickHangarDeaf(col);
         // a box the layout sizes; a click on it opens the parameters
         PanelContainer door = QBox(col, QInset, 10);
@@ -186,7 +186,7 @@ public sealed partial class Tank3DBench
                 {
                     Form = QuickPad.Shape.Hex, Dashed = true, Rim = QMuted, Fill = new Color(0, 0, 0, 0), RimWidth = 2,
                     Ink = QMuted, FontSize = 22, Size = (Vector2)QhView * 0.55f, MouseFilter = Control.MouseFilterEnum.Ignore,
-                    Text = !b.Empty ? "" : k == at ? $"Слот {k + 1} пуст.\nВыберите класс\nтегами под подиумом" : $"слот {k + 1} пуст",
+                    Text = !b.Empty ? "" : k == at ? L.T("hangar.slot_empty_front", k + 1) : L.T("hangar.slot_empty", k + 1),
                     Picture = b.Empty ? null : QuickArtOf(b.Class!, q.Player),
                 };
             stage.AddChild(view);
@@ -199,9 +199,9 @@ public sealed partial class Tank3DBench
             pick.Clicked += () => { _qhAt = slot; QuickShow(); };
             stage.AddChild(pick);
             QuickSquad.Slot o = q.Squad[k];
-            string said = o.Empty ? "пусто"
+            string said = o.Empty ? L.T("hangar.empty")
                 : $"{QuickSquad.ClassOf(o.Class!).Short} · "
-                  + (QuickSquad.ClassOf(o.Class!).BranchOf(o.Branch) is { } br && o.Level > 0 ? $"{br.Name} {QRoman(o.Level)}" : "без прокачки")
+                  + (QuickSquad.ClassOf(o.Class!).BranchOf(o.Branch) is { } br && o.Level > 0 ? $"{br.Name} {QRoman(o.Level)}" : L.T("hangar.no_upgrades"))
                   + $" · {Pts(o.Level)}";
             var name = QText(said, k == at ? 15 : 12, k == at ? QInk : QMuted, bold: true);
             stage.AddChild(name);
@@ -209,8 +209,8 @@ public sealed partial class Tank3DBench
             _qhRing[k].Name = name;
         }
 
-        QuickPad clear = QBtn("Очистить отряд", () => QuickAsk(true, "Очистить отряд?",
-            "Все три машины станут пустыми, прокачка снимется.", "Очистить", () => { _qs.Squad = QuickSquad.Empty(); _qhAt = 0; _qhSpin = 0; }), small: true);
+        QuickPad clear = QBtn(L.T("quick.clear_squad"), () => QuickAsk(true, L.T("quick.clear_ask"),
+            L.T("quick.clear_text"), L.T("quick.clear"), () => { _qs.Squad = QuickSquad.Empty(); _qhAt = 0; _qhSpin = 0; }), small: true);
         clear.Ink = QRed;
         clear.HoverRim = new Color(QRed, 0.6f);
         clear.Disabled = q.Squad.All(x => x.Empty);
@@ -234,7 +234,7 @@ public sealed partial class Tank3DBench
                 HoverRim = QOlive, Disabled = full,
             };
             tag.Clicked += () => QuickHangarSet(at, one.Tag);
-            QTip(tag, () => QuickClassTip(one, full, s.Level > 0 && !mine ? $"Сменит класс: прокачка снимется, вернётся {Pts(s.Level)}." : null));
+            QTip(tag, () => QuickClassTip(one, full, s.Level > 0 && !mine ? L.T("quick.class_change", Pts(s.Level)) : null));
             strip.AddChild(tag);
         }
         stage.AddChild(strip);
@@ -333,8 +333,8 @@ public sealed partial class Tank3DBench
         };
         arrow.Clicked += () => { _qhAt = to; QuickShow(); };
         QuickSquad.Slot s = _qs.Squad[to];
-        QTip(arrow, () => QTipBox(dir < 0 ? "Прошлая машина" : "Следующая машина", $"Слот {to + 1}",
-            s.Empty ? "Пусто: класс ещё не выбран." : QuickSquad.ClassOf(s.Class!).Name, null, null));
+        QTip(arrow, () => QTipBox(dir < 0 ? L.T("hangar.prev_tank") : L.T("hangar.next_tank"), L.T("hangar.slot", to + 1),
+            s.Empty ? L.T("hangar.slot_unset") : QuickSquad.ClassOf(s.Class!).Name, null, null));
         return arrow;
     }
 
@@ -362,14 +362,14 @@ public sealed partial class Tank3DBench
         pad.CustomMinimumSize = new Vector2(0, 54);
         if (short_)
             col.Modulate = new Color(1, 1, 1, 0.45f);
-        pad.Clicked += () => QuickAsk(q.Squad.Any(x => !x.Empty), "Заменить отряд?",
-            $"«{c.Name}» встанет вместо собранного отряда: три машины на уровне {QuickSquad.CompanyLevel}.",
-            "Заменить", () => { q.Squad = QuickSquad.OfCompany(c); _qhAt = 0; _qhSpin = 0; });
-        QTip(pad, () => QTipBox($"Готовый отряд · {Pts(start)}", c.Name,
-            string.Join("\n", c.Slots.Select(x => $"{QuickSquad.ClassOf(x.Class).Short} — {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}, ур. {QuickSquad.CompanyLevel}")),
-            null, short_ ? $"Бюджет {q.Budget}: на роту нужно {Pts(start)}."
-                : $"{char.ToUpper(c.Play[0])}{c.Play[1..]}. Заменит текущий отряд; "
-                  + (q.Budget > start ? $"ещё {Pts(q.Budget - start)} останутся на прокачку." : "бюджет уйдёт весь.")));
+        pad.Clicked += () => QuickAsk(q.Squad.Any(x => !x.Empty), L.T("quick.replace_ask"),
+            L.T("quick.replace_text", c.Name, QuickSquad.CompanyLevel),
+            L.T("quick.replace"), () => { q.Squad = QuickSquad.OfCompany(c); _qhAt = 0; _qhSpin = 0; });
+        QTip(pad, () => QTipBox(L.T("quick.preset_tip", Pts(start)), c.Name,
+            string.Join("\n", c.Slots.Select(x => L.T("quick.preset_slot", QuickSquad.ClassOf(x.Class).Short, QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name, QuickSquad.CompanyLevel))),
+            null, short_ ? L.T("hangar.preset_short", q.Budget, Pts(start))
+                : L.T("quick.preset_note", $"{char.ToUpper(c.Play[0])}{c.Play[1..]}",
+                  q.Budget > start ? L.T("quick.preset_left", Pts(q.Budget - start)) : L.T("quick.preset_all"))));
         return pad;
     }
 
@@ -391,7 +391,7 @@ public sealed partial class Tank3DBench
         var col = new VBoxContainer { CustomMinimumSize = new Vector2(320, 0) };
         col.AddThemeConstantOverride("separation", 10);
         var head = new HBoxContainer();
-        var h = QText("Прокачка", 17, QInk, bold: true);
+        var h = QText(L.T("hangar.upgrades"), 17, QInk, bold: true);
         h.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         head.AddChild(h);
         // the budget by the tree that spends it, the squad's whole: spent olive, free dark
@@ -402,10 +402,10 @@ public sealed partial class Tank3DBench
             head.AddChild(pips);
         }
         else
-            head.AddChild(QHint("бюджет 0: без апгрейдов"));
+            head.AddChild(QHint(L.T("hangar.budget_zero")));
         col.AddChild(head);
         if (s.Empty)
-            col.AddChild(QHint("Дерево появится, когда у слота будет класс.", wrap: true));
+            col.AddChild(QHint(L.T("hangar.tree_later"), wrap: true));
         else
         {
             var tree = new HBoxContainer();
@@ -413,7 +413,7 @@ public sealed partial class Tank3DBench
             foreach (QuickSquad.Branch b in QuickSquad.ClassOf(s.Class!).Branches)
                 tree.AddChild(QuickBranch(_qhAt, s, b, left));
             col.AddChild(tree);
-            col.AddChild(QHint("Пунктир и «*» — правила в стенде нет.", wrap: true));
+            col.AddChild(QHint(L.T("hangar.dash_note"), wrap: true));
         }
         // the machine under its tree: what it is, its numbers, what it carries
         col.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
@@ -430,8 +430,7 @@ public sealed partial class Tank3DBench
     {
         if (s.Empty)
         {
-            col.AddChild(QHint($"Слот {_qhAt + 1} пуст. Класс выбирается тегами под подиумом. "
-                               + "Класс бесплатен, очки стоит только прокачка.", wrap: true));
+            col.AddChild(QHint(L.T("hangar.slot_empty_hint", _qhAt + 1), wrap: true));
             return;
         }
         QuickSquad.Class c = QuickSquad.ClassOf(s.Class!);
@@ -445,9 +444,9 @@ public sealed partial class Tank3DBench
         col.AddChild(QText(c.Role, 13, QMuted, wrap: true));
         // the numbers two lines, not a table: the tree over them has the height
         (string, string)[] n = QuickClassRows(c);
-        col.AddChild(QText($"{n[0].Item2} · мощь {n[1].Item2} · масса {n[3].Item2} · башня {n[4].Item2}", 13, QInk, wrap: true));
-        col.AddChild(QText($"Броня лоб / борт / корма / крыша: {n[2].Item2}", 13, QInk, wrap: true));
-        col.AddChild(QText($"Особенность. {c.Trait}", 13, QInk, wrap: true));
+        col.AddChild(QText(L.T("hangar.unit_numbers", n[0].Item2, n[1].Item2, n[3].Item2, n[4].Item2), 13, QInk, wrap: true));
+        col.AddChild(QText(L.T("hangar.unit_armour", n[2].Item2), 13, QInk, wrap: true));
+        col.AddChild(QText(L.T("quick.trait", c.Trait), 13, QInk, wrap: true));
         // what it carries is the tree's open nodes: nothing said again (as on the old build)
     }
 }

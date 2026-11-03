@@ -167,7 +167,7 @@ public sealed partial class Tank3DBench
         AddChild(burn);
         burn.Build(model.HullLength * model.PixelsPerUnit);
         _blazes.Add(new Blaze { Id = id, Side = side, Tag = tag, Burn = burn, Since = _mt.TurnNo });
-        _matchNote = $"{SideName(side)} {tag} горит";
+        _matchNote = L.T("blast.on_fire", SideName(side), tag);
         Log.Print($"tank3d: match: {SideName(side)} {tag}#{id} on {MapAt(cell)} catches fire (turn {_mt.TurnNo})");
     }
 
@@ -259,11 +259,11 @@ public sealed partial class Tank3DBench
     {
         if (!Match)
             return;
-        string why = !Burning(_unitId) ? $"{_modelTag} не горит"
-            : _side != _mt.Turn ? $"ходят {SideName(_mt.Turn)}"
-            : _mt.Bonus ? "доп. действие этого хода уже сделано"
-            : _passIn is not null ? "ход передаётся"
-            : MatchBusy ? "дождись конца приказа"
+        string why = !Burning(_unitId) ? L.T("blast.not_burning", _modelTag)
+            : _side != _mt.Turn ? L.T("blast.their_turn", SideName(_mt.Turn))
+            : _mt.Bonus ? L.T("blast.bonus_spent")
+            : _passIn is not null ? L.T("blast.passing")
+            : MatchBusy ? L.T("blast.busy")
             : "";
         if (why.Length > 0)
         {
@@ -275,7 +275,7 @@ public sealed partial class Tank3DBench
         _mt.Bonus = true;
         _ramMode = false;
         Unlock();
-        _orderNote = $"{_modelTag} потушен";
+        _orderNote = L.T("blast.doused", _modelTag);
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} puts its fire out");
     }
 

@@ -101,7 +101,7 @@ public sealed partial class Tank3DBench
         }
         if (Match && ram)
         {
-            _orderNote = "таран в партии ещё не сделан";
+            _orderNote = L.T("orders.ram_not_in_match");
             return;
         }
         Vector2I here = CellHere;
@@ -117,11 +117,11 @@ public sealed partial class Tank3DBench
             List<Vector2I> path = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes);
             if (path.Count == 0)
             {
-                _orderNote = $"к {MapAt(cell)} пути нет";
+                _orderNote = L.T("orders.no_way", MapAt(cell));
                 Log.Print($"tank3d: no route {MapAt(here)} -> {MapAt(cell)}");
                 return;
             }
-            Drive(path, ram: true, $"таран {MapAt(OtherCell(_other!))}");
+            Drive(path, ram: true, L.T("orders.ram_at", MapAt(OtherCell(_other!))));
             Log.Print($"tank3d: route {MapAt(here)} -> {MapAt(cell)} (ram): {MapAt(path, " ")}");
             return;
         }
@@ -138,7 +138,7 @@ public sealed partial class Tank3DBench
         if ((shown ?? reach.RouteTo(cell)) is not { } route)
         {
             bool anyWay = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes).Count > 0;
-            _orderNote = cell == here ? "" : anyWay ? $"до {MapAt(cell)} не хватает шагов ({reach.Budget})" : $"к {MapAt(cell)} пути нет";
+            _orderNote = cell == here ? "" : anyWay ? L.T("orders.short_steps", MapAt(cell), reach.Budget) : L.T("orders.no_way", MapAt(cell));
             Log.Print($"tank3d: no move {MapAt(here)} -> {MapAt(cell)}: {(anyWay ? $"over the budget of {reach.Budget}" : "no way")}");
             return;
         }
@@ -150,8 +150,8 @@ public sealed partial class Tank3DBench
         _routeGoal = (cell, _routeFace ?? route.End.Heading);
         string risk = route.Risk == Steps.Risk.None ? "" : $", {route.Risk}";
         Drive(route.Cells(), ram: false,
-              $"к {MapAt(cell)}: {route.Spent + turn} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}"
-              + $"{(turn > 0 ? $", разворот {turn}" : "")}{risk}");
+              L.T("orders.move_to", MapAt(cell), route.Spent + turn, reach.Budget) + (route.Back ? L.T("orders.move_back") : "")
+              + (turn > 0 ? L.T("orders.move_turn", turn) : "") + risk);
         Log.Print($"tank3d: move {MapAt(here)} -> {MapAt(cell)}: {MapAt(route)}{(turn > 0 ? $" then t{face} (+{turn})" : "")} of {reach.Budget}{risk}"
                  + $" ({reach.RoutesTo(cell).Count} way(s) of that cost)");
     }
@@ -371,7 +371,7 @@ public sealed partial class Tank3DBench
             if (!RamRunning)
             {
                 _speed = 0.0f;
-                _orderNote = _routeRams ? "таран: не разогнался" : "путь занят";
+                _orderNote = _routeRams ? L.T("orders.ram_no_speed") : L.T("orders.way_taken");
             }
             else
                 _orderNote = "";
@@ -386,7 +386,7 @@ public sealed partial class Tank3DBench
             // capon's gate: stop where it is.
             _speed = 0.0f;
             _route = null;
-            _orderNote = "дальше не проехать";
+            _orderNote = L.T("orders.no_further");
             return;
         }
         _rig.Position = nextPos;
@@ -455,7 +455,7 @@ public sealed partial class Tank3DBench
         if (RouteMoving)
         {
             _shotWaiting = cell;
-            _aimNote = $"выстрел по {MapAt(cell)} — после остановки";
+            _aimNote = L.T("orders.shot_after_stop", MapAt(cell));
             return;
         }
         AimCell(cell);
@@ -560,9 +560,9 @@ public sealed partial class Tank3DBench
     /// <summary>What shut the lane, in the player's words.</summary>
     private string LaneWhy(Shot shot, Vector2I at) => shot.Stop switch
     {
-        Barrier.Tank => $"на линии огня танк {at}",
-        Barrier.Ground => $"линию огня закрывает рельеф {at}",
-        _ => $"линию огня закрывает {(_field!.CoverAt(at) == Cover.Forest ? "лес" : "дым")} {at}",
+        Barrier.Tank => L.T("orders.lane_tank", at),
+        Barrier.Ground => L.T("orders.lane_ground", at),
+        _ => _field!.CoverAt(at) == Cover.Forest ? L.T("orders.lane_forest", at) : L.T("orders.lane_smoke", at),
     };
 
     /// <summary>The left button under the rules, as the 2D harness reads it:
@@ -625,7 +625,7 @@ public sealed partial class Tank3DBench
         }
         if (!_chosen)
         {
-            _orderNote = "танк не выбран — щёлкни по нему";
+            _orderNote = L.T("orders.not_chosen");
             return;
         }
         if (_other is { } o && cell == OtherCell(o))

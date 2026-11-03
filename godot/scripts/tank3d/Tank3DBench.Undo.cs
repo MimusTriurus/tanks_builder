@@ -69,27 +69,27 @@ public sealed partial class Tank3DBench
     private string UndoWhy()
     {
         if (!Match || MatchOver)
-            return "партия окончена";
+            return L.T("undo.over");
         if (_side != _mt.Turn || _moveSnap is not { } s || !_mt.Drove)
-            return "отменять нечего — хода ещё не было";
+            return L.T("undo.nothing");
         if (_fate != Fate.Alive)
-            return "юнит подбит — ход не отменить";
+            return L.T("undo.knocked");
         if (_passIn is not null)
-            return "ход передаётся";
+            return L.T("undo.passing");
         if (MatchBusy)
-            return "дождись конца приказа";
+            return L.T("undo.wait_order");
         if (_mt.Fired != s.Fired || _mt.Bonus != s.Bonus)
-            return "после хода было действие — ход не отменить";
+            return L.T("undo.acted");
         if (_razed.Count != s.Razed)
-            return "лес снесён — ход не отменить";
+            return L.T("undo.wood_razed");
         if (MinesSpent() != s.MinesSpent)
-            return "сработала мина — ход не отменить";
+            return L.T("undo.mine");
         // a round was fired at it on the way: the enemy's ambush is spent (Д7)
         if (_ambushShots != s.AmbushShots)
-            return "сработала засада — ход не отменить";
+            return L.T("undo.ambush");
         // smoke driven into is gone (Д8)
         if (_smokeDispersed != s.SmokeDispersed)
-            return "дым рассеян — ход не отменить";
+            return L.T("undo.smoke");
         return "";
     }
 
@@ -124,7 +124,7 @@ public sealed partial class Tank3DBench
         _ruts?.Lift();
         _mt.Drove = false;
         _moveSnap = null;
-        _matchNote = "ход отменён";
+        _matchNote = L.T("undo.done");
         Choose(true);
         GlideTo(_rig.Position);
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} move taken back to {MapAt(s.Cell)}");

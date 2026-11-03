@@ -34,13 +34,13 @@ public sealed partial class Tank3DBench
     {
         if (!_fieryMode && (MatchShotSpent || !RigBurns))
         {
-            _orderNote = !RigBurns ? $"у {_modelTag} нет зажигательных" : "атака этого хода уже сделана";
+            _orderNote = !RigBurns ? L.T("incendiary.none", _modelTag) : L.T("incendiary.shot_spent");
             return;
         }
         _fieryMode = !_fieryMode;
         if (_fieryMode)
             _ambushMode = false;
-        _orderNote = _fieryMode ? "зажигательный: правая кнопка по цели" : "зажигательный выключен";
+        _orderNote = _fieryMode ? L.T("incendiary.mode_on") : L.T("incendiary.mode_off");
     }
 
     /// <summary>The round leaves: incendiary if the mode was on, and the mode

@@ -614,7 +614,7 @@ public sealed partial class Tank3DBench
             // ours are fired on only with «Атака» chosen (Tank3DBench.Acts)
             if (Match && !_attackMode && !_ramMode && FriendOn(cell))
             {
-                _orderNote = "по своему — только через «Атака» (2)";
+                _orderNote = L.T("shell.friend_attack_only");
                 return;
             }
             // the ram, when its preview is up (Tank3DBench.RamPlan)
@@ -751,16 +751,16 @@ public sealed partial class Tank3DBench
         if (MatchShotWhy(cell) is { Length: > 0 } turn)
             return turn;
         if (cells <= 0)
-            return "по своему гексу не стреляют";
+            return L.T("shell.own_hex");
         if (axis < 0)
-            return "гекс не на оси огня";
+            return L.T("shell.off_axis");
         // the distance's gates are the rules' (Gunnery.MayTarget, Д2)
         switch (Gunnery.MayTarget(_profile.Lobs, cells, tank))
         {
             case Gunnery.Distance.MortarBand:
-                return $"миномёт бьёт на {Gunnery.LobShortest}–{Gunnery.LobReach} клетки, до цели {cells}";
+                return L.T("shell.mortar_band", Gunnery.LobShortest, Gunnery.LobReach, cells);
             case Gunnery.Distance.PointBlank:
-                return "по танку вплотную нельзя: нужен пустой гекс между";
+                return L.T("shell.point_blank");
         }
         // Under the rules the 2D gate as well: the wood, the smoke, the rise or
         // a hull on the lane (Tank3DBench.Orders, LaneShut).
@@ -847,7 +847,7 @@ public sealed partial class Tank3DBench
             elevIn = Mathf.Clamp(elev / (Mathf.DegToRad(ElevDeg) * dt), -1.0f, 1.0f);
         bool stopped = (elev > 0.0f && _model.Elevation >= Mathf.DegToRad(_model.ElevMax) - 1e-4f)
                     || (elev < 0.0f && _model.Elevation <= Mathf.DegToRad(_model.ElevMin) + 1e-4f);
-        _aimNote = lay is null ? "цель вне досягаемости" : stopped ? "ствол на упоре: не дотянется" : "";
+        _aimNote = lay is null ? L.T("shell.out_of_reach") : stopped ? L.T("shell.barrel_stop") : "";
         bool laid = Mathf.Abs(Mathf.RadToDeg(yaw)) < LaidYaw
                     && (Mathf.Abs(Mathf.RadToDeg(elev)) < LaidElev || stopped);
         if (!laid)

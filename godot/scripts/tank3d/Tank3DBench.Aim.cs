@@ -53,6 +53,10 @@ public sealed partial class Tank3DBench
     private static readonly Color AimHeld = new(0.62f, 0.68f, 0.76f);
     private static readonly Color AimOff = new(0.66f, 0.66f, 0.63f);
 
+    /// <summary>Where the free order's "after the move" part of the judged note
+    /// starts: the pill over the target shows the note from it on.</summary>
+    private static readonly string AfterMove = L.T("aim.after_move");
+
     private readonly Dictionary<TankModel, Toon.Rim?> _halos = new();
     private bool _overOwn, _overTarget;
     private Parked? _overParked;
@@ -98,11 +102,11 @@ public sealed partial class Tank3DBench
             {
                 if (!Fires)
                     return Why;
-                string what = Pierces ? $"пробьёт ({Level})" : Glances ? "рикошет" : "не пробьёт";
+                string what = Pierces ? L.T("aim.pierces", Level) : Glances ? L.T("aim.ricochet") : L.T("aim.no_pierce");
                 if (Onward is { } leg)
-                    what += leg.Through ? $" → насквозь: {leg.Says}" : $" → {leg.Says}";
-                string through = Holed is { } h ? $"сквозь {h.Hull!.Tag} ({FaceWord(h.Face)}) → "
-                    : Breach is null ? "" : "сквозь стену → ";
+                    what += leg.Through ? L.T("aim.onward_through", leg.Says) : $" → {leg.Says}";
+                string through = Holed is { } h ? L.T("aim.through_hull", h.Hull!.Tag, FaceWord(h.Face))
+                    : Breach is null ? "" : L.T("aim.through_wall");
                 return $"{through}{FaceWord(Face)} · {what}";
             }
         }
@@ -165,13 +169,13 @@ public sealed partial class Tank3DBench
             CasemateGhost(from, o);
             GhostTrack(from, o);
             _judged = Judge(from, o);
-            _judgedNote = $"цель {o.Tag} {MapAt(_judged.Cell)}{(from != CellHere ? $" из {MapAt(from)}" : "")}: {_judged.Says}"
-                          + (_postLock && !driving ? "; ПКМ — ехать и стрелять" : "")
-                          + (_postNone ? "; ни с одной клетки хода" : "");
+            _judgedNote = L.T("aim.target", o.Tag, MapAt(_judged.Cell), from != CellHere ? L.T("aim.from", MapAt(from)) : "", _judged.Says)
+                          + (_postLock && !driving ? L.T("aim.rmb_drive_fire") : "")
+                          + (_postNone ? L.T("aim.no_cell") : "");
             if (_lockCell is Vector2I after && _profile.FreeOrder && !driving && !_postLock)
             {
                 Judged then = Judge(after, o);
-                _judgedNote += $"; после хода из {MapAt(after)}: {then.Says}";
+                _judgedNote += AfterMove + L.T("aim.after_from", MapAt(after), then.Says);
             }
             // a knocked-out target goes up: whom it takes with it (Tank3DBench.BlastPlan)
             BlastPlanTick(_judged, o);
@@ -418,7 +422,7 @@ public sealed partial class Tank3DBench
         }
         if (why.Length == 0 && !_profile.Lobs && WallOnAxis(from, axis, cells, passOne: wallPass) is { } wall)
         {
-            why = $"снаряд уйдёт в стену {MapAt(wall.Cell)}";
+            why = L.T("aim.into_wall", MapAt(wall.Cell));
             end = wall.At;
             stop = wall.Cell;
         }
@@ -1164,7 +1168,7 @@ void fragment() {
         // grey line into what shuts it says that, and the rims of the units
         // in reach (ReachTick) say who can be hit; the words are on the
         // status line (the author's notes, 2026-10-29 and 2026-10-31).
-        int semi = _judgedNote.IndexOf("; после хода", System.StringComparison.Ordinal);
+        int semi = _judgedNote.IndexOf(AfterMove, System.StringComparison.Ordinal);
         if (semi >= 0)
             Pill(ink, font, over + new Vector2(0, size * 0.8f), _judgedNote[(semi + 2)..], new Color(0.92f, 0.95f, 0.98f),
                  new Color(0.05f, 0.27f, 0.49f), size);

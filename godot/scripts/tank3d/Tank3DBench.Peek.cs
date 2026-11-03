@@ -279,23 +279,23 @@ public sealed partial class Tank3DBench
         // the figures: a label, then the slots
         float x = left + 14.0f, slots = left + 78.0f;
         float y = top + 60.0f;
-        PeekRow(c, font, x, slots, y, "огонь", profile.Might, PeekMight, PeekMark.Dot, PeekFire);
+        PeekRow(c, font, x, slots, y, L.T("peek.fire"), profile.Might, PeekMight, PeekMark.Dot, PeekFire);
         y += 20.0f;
         if (turn)
             TurnSteps(c, font, x, slots, y);
         else
-            PeekRow(c, font, x, slots, y, "ход", profile.Steps, PeekSteps, PeekMark.Dot, CardPale);
+            PeekRow(c, font, x, slots, y, L.T("peek.move"), profile.Steps, PeekSteps, PeekMark.Dot, CardPale);
         y += 20.0f;
-        PeekRow(c, font, x, slots, y, "вес", profile.Mass, PeekMass, PeekMark.Square, CardPale);
+        PeekRow(c, font, x, slots, y, L.T("peek.mass"), profile.Mass, PeekMass, PeekMark.Square, CardPale);
         // the plates under their own heading, each on its line
         y += 24.0f;
-        c.DrawString(font, new Vector2(x, y + 4.0f), "броня", HorizontalAlignment.Left, -1, 13, CardDim);
+        c.DrawString(font, new Vector2(x, y + 4.0f), L.T("peek.armor"), HorizontalAlignment.Left, -1, 13, CardDim);
         y += 18.0f;
-        PeekPlate(c, font, profile, x + 10.0f, slots, y, "лоб", Gunnery.Plate.Front);
+        PeekPlate(c, font, profile, x + 10.0f, slots, y, L.T("peek.front"), Gunnery.Plate.Front);
         y += 18.0f;
-        PeekPlate(c, font, profile, x + 10.0f, slots, y, "борт", Gunnery.Plate.Side);
+        PeekPlate(c, font, profile, x + 10.0f, slots, y, L.T("peek.side"), Gunnery.Plate.Side);
         y += 18.0f;
-        PeekPlate(c, font, profile, x + 10.0f, slots, y, "корма", Gunnery.Plate.Rear);
+        PeekPlate(c, font, profile, x + 10.0f, slots, y, L.T("peek.rear"), Gunnery.Plate.Rear);
     }
 
     /// <summary>
@@ -306,7 +306,7 @@ public sealed partial class Tank3DBench
     /// </summary>
     private void TurnSteps(Control c, Font font, float x, float slots, float y)
     {
-        c.DrawString(font, new Vector2(x, y + 4.0f), "ход", HorizontalAlignment.Left, -1, 13, CardDim);
+        c.DrawString(font, new Vector2(x, y + 4.0f), L.T("peek.move"), HorizontalAlignment.Left, -1, 13, CardDim);
         bool live = CourseShown && _reach is not null;
         int budget = live ? _reach!.Budget : _profile.Steps;
         int left = Match && _mt.Drove ? 0 : budget;

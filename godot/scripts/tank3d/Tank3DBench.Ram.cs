@@ -200,7 +200,7 @@ public sealed partial class Tank3DBench
             catch (Exception e)
             {
                 Log.Print($"tank3d: target {_otherTag}: {e.Message}");
-                _ramNote = $"цель {_otherTag} не загрузилась";
+                _ramNote = L.T("ram.target_not_loaded", _otherTag);
                 return;
             }
         }
@@ -501,7 +501,7 @@ public sealed partial class Tank3DBench
         {
             Log.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {MapAt(o.Cell)} along {heading} - "
                      + Ramming.Because(push.Why));
-            _ramNote = $"отказ: {Ramming.Because(push.Why)}";
+            _ramNote = L.T("ram.refused", Ramming.Because(push.Why));
             _speed = 0.0f;
             RamOver();
             return;
@@ -517,7 +517,7 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"ram: frame {_frame}, {_modelTag} shoves {o.Tag} {MapAt(o.Cell)} -> {MapAt(push.Legs, " -> ")} along {heading}, "
                  + $"keep {keep:F2}, at {Mathf.Abs(_speed):F0} px/s");
-        _ramNote = $"{_modelTag} сдвинул {o.Tag}: {MapAt(o.Cell)} → {MapAt(push.Legs[^1])}";
+        _ramNote = L.T("ram.pushed", _modelTag, o.Tag, MapAt(o.Cell), MapAt(push.Legs[^1]));
         o.Legs.Clear();
         foreach (Vector2I c in push.Legs)
             o.Legs.Add(CellWorld(c));
@@ -938,7 +938,7 @@ public sealed partial class Tank3DBench
                 o.Fate = Fate.Knocked;
                 Quench(o.Id, steam: false);
                 Founder(o.Model, cell);
-                _matchNote = $"{SideName(o.Side)} {o.Tag} утонул";
+                _matchNote = L.T("ram.drowned", SideName(o.Side), o.Tag);
                 Log.Print($"tank3d: match: {SideName(o.Side)} {o.Tag}#{o.Id} on {MapAt(cell)} drowned - no wading gear");
                 MatchCheckEnd();
             }
@@ -1140,10 +1140,10 @@ public sealed partial class Tank3DBench
             Settle(0.0f, snap: true);
             _ruts?.Lift();
             PlaceOther(two, HeadingOf(way) + 90.0f);
-            _ramNote = $"цель {_otherTag} на {two}, таран вдоль {heading}";
+            _ramNote = L.T("ram.target_placed", _otherTag, two, heading);
             return true;
         }
-        _ramNote = "некуда поставить цель: нет двух гексов прямо";
+        _ramNote = L.T("ram.no_room");
         return false;
     }
 

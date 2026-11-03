@@ -54,23 +54,23 @@ public sealed partial class Tank3DBench
     private string SmokeWhy(Vector2I cell)
     {
         if (_field is null)
-            return "нет доски";
+            return L.T("smoke.no_board");
         if (_fate != Fate.Alive)
-            return $"{_modelTag} не на ходу";
+            return L.T("smoke.not_running", _modelTag);
         if (_side != _mt.Turn)
-            return $"ходят {SideName(_mt.Turn)}";
+            return L.T("smoke.their_turn", SideName(_mt.Turn));
         if (!RigSmokes)
-            return $"у {_modelTag} нет дымовой шашки";
+            return L.T("smoke.no_grenade", _modelTag);
         if (MatchBonusSpent)
-            return "доп. действие этого хода уже сделано";
+            return L.T("smoke.bonus_spent");
         if (HexField.HeadingTo(CellHere, cell) < 0 || !_field.InBounds(cell))
-            return "дым — только на соседний гекс";
+            return L.T("smoke.adjacent_only");
         if (UnitStanding(cell) is not null || (_other is { Unit: true } o && o.Fate != Fate.Destroyed && OtherCell(o) == cell))
-            return "на гекс с танком дым не ложится";
+            return L.T("smoke.not_on_tank");
         if (_field.CoverAt(cell) != Cover.None)
-            return "гекс занят: лес, стена или мина";
+            return L.T("smoke.hex_taken");
         if (_field.Smoked(cell))
-            return "там уже дым";
+            return L.T("smoke.already");
         return "";
     }
 
@@ -86,7 +86,7 @@ public sealed partial class Tank3DBench
         _field!.SetSmoke(cell, true);
         _smokeLeft[cell] = SmokeRounds;
         SmokeCloudAt(cell);
-        _matchNote = "дымовая шашка";
+        _matchNote = L.T("smoke.grenade");
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} lays smoke on {MapAt(cell)} for {SmokeRounds} rounds");
     }
 
@@ -199,7 +199,7 @@ public sealed partial class Tank3DBench
     {
         if (!_smokeMode && MatchBonusSpent)
         {
-            _orderNote = "доп. действие этого хода уже сделано";
+            _orderNote = L.T("smoke.bonus_spent");
             return;
         }
         _smokeMode = !_smokeMode;
@@ -209,7 +209,7 @@ public sealed partial class Tank3DBench
             _gearMode = Gear.None;
             _ambushMode = _attackMode = false;
         }
-        _orderNote = _smokeMode ? "дым: щёлкни по соседнему гексу" : "дым выключен";
+        _orderNote = _smokeMode ? L.T("smoke.mode_on") : L.T("smoke.mode_off");
     }
 
     /// <summary>The left button with «Дым» on: smoke on the hex under it.</summary>

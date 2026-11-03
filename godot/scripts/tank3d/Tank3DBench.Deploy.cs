@@ -209,7 +209,7 @@ public sealed partial class Tank3DBench
         _deployMovedShown = -1;
         // the toss said on the first side's banner (Tank3DBench.Match)
         // in a quick battle the toss is said with the reveal
-        Banner($"{(side == _mt.First && _quick is null ? TossSaid : "")}Расстановка: {SideName(side)}", SideInk(side));
+        Banner(L.T("deploy.banner", side == _mt.First && _quick is null ? TossSaid : "", SideName(side)), SideInk(side));
         Log.Print($"tank3d: match: {SideName(side)} place their tanks");
     }
 
@@ -224,15 +224,15 @@ public sealed partial class Tank3DBench
     private string DeployWhy(Vector2I cell)
     {
         if (_field is null || !Deploying)
-            return "расстановки нет";
+            return L.T("deploy.none");
         if (!_deployCells.Contains(cell))
-            return $"{MapAt(cell)} не в зоне расстановки {SideName(_deploy!.Value)}";
+            return L.T("deploy.out_of_zone", MapAt(cell), SideName(_deploy!.Value));
         if (cell == CellHere)
             return "";
         if (_parked.Any(p => p.Cell == cell))
-            return $"на {MapAt(cell)} уже стоит танк";
+            return L.T("deploy.occupied", MapAt(cell));
         if (_field.IsWater(cell) || _field.IsRamp(cell) || _field.FoundationAt(cell) == Foundation.Rock)
-            return $"на {MapAt(cell)} танк не поставить";
+            return L.T("deploy.unplaceable", MapAt(cell));
         return "";
     }
 
@@ -261,13 +261,13 @@ public sealed partial class Tank3DBench
     private string PlaceWhy(int id, Vector2I cell, int side)
     {
         if (!Deploying)
-            return "расстановка окончена";
+            return L.T("deploy.over");
         if (side >= 0 && !HexField.EdgeHeadings.Contains(side))
-            return $"{side} — не грань гекса";
+            return L.T("deploy.not_edge", side);
         if (id != _unitId && UnitStanding(id) is not { } p)
-            return $"юнита #{id} нет на доске";
+            return L.T("deploy.no_unit", id);
         if (id != _unitId && UnitStanding(id)!.Side != _deploy)
-            return $"#{id} не {SideName(_deploy!.Value)}";
+            return L.T("deploy.not_side", id, SideName(_deploy!.Value));
         if (id != _unitId && UnitStanding(id)!.Cell == cell)
             return "";
         // onto an own tank: the two change places
@@ -383,7 +383,7 @@ public sealed partial class Tank3DBench
         _mt.Turn = _mt.First;
         if (_side != _mt.First && FirstReady(_mt.First) is { } first)
             TakeOver(first);
-        Banner($"В бой · раунд 1 · ходят {SideName(_mt.Turn)}", SideInk(_mt.Turn));
+        Banner(L.T("deploy.battle_banner", SideName(_mt.Turn)), SideInk(_mt.Turn));
         QuickReveal();
         // from straight down into the isometric view from the side to move, smoothly
         CameraTurnTo(IsoYawOf(_mt.Turn), Mathf.DegToRad(IsoPitchDeg));
@@ -663,7 +663,7 @@ public sealed partial class Tank3DBench
 
     /// <summary>The HUD's line in placement.</summary>
     private string DeployHud() =>
-        $"Расстановка: {SideName(_deploy!.Value)} · {_modelTag} на {MapAt(CellHere)}"
+        L.T("deploy.hud", SideName(_deploy!.Value), _modelTag, MapAt(CellHere))
         + (_orderNote.Length > 0 ? $" · {_orderNote}" : "");
 
     // --- the camera: straight down in placement, isometric into battle ------------
@@ -782,9 +782,9 @@ public sealed partial class Tank3DBench
         row.AddChild(says);
         var reset = new Button
         {
-            Text = "Вернуть ряд",
+            Text = L.T("deploy.reset"),
             FocusMode = Control.FocusModeEnum.None,
-            TooltipText = "все танки стороны — на свои места ряда, как стояли",
+            TooltipText = L.T("deploy.reset_tip"),
         };
         reset.AddThemeFontSizeOverride("font_size", 15);
         reset.Pressed += DeployReset;
@@ -794,9 +794,9 @@ public sealed partial class Tank3DBench
         {
             var back = new Button
             {
-                Text = "К сборке",
+                Text = L.T("deploy.back"),
                 FocusMode = Control.FocusModeEnum.None,
-                TooltipText = "назад к сборке отряда и параметрам боя; расстановка начнётся заново",
+                TooltipText = L.T("deploy.back_tip"),
             };
             back.AddThemeFontSizeOverride("font_size", 15);
             back.Pressed += QuickBackToBuild;
@@ -830,7 +830,6 @@ public sealed partial class Tank3DBench
         for (int i = 0; i < _lineup.Count; i++)
             if (SideOf(_lineup[i]) == _deploy)
                 all++;
-        _deploySays.Text = $"Расстановка: {SideName(_deploy!.Value)} · переставлено {moved} из {all}\n"
-                           + "ЛКМ: танк — взять, клетка — поставить, стрелка — развернуть · Shift+ЛКМ по танку — поменять местами";
+        _deploySays.Text = L.T("deploy.panel", SideName(_deploy!.Value), moved, all);
     }
 }

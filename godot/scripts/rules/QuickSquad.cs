@@ -28,8 +28,9 @@ public static class QuickSquad
     public const int Size = 3, SameClass = 2, BudgetDefault = 6, BudgetMax = 12, CompanyLevel = 1;
 
     /// <summary>An upgrade on a tree: its name, what kind it is, its rule in a
-    /// line, and the bench's flag for it - null where there is no rule yet.</summary>
-    public sealed record Upgrade(string Name, string Kind, string Text, Kit? Flag);
+    /// line, and the bench's flag for it - null where there is no rule yet;
+    /// whether it is an ability and an attack, apart from the words of its kind.</summary>
+    public sealed record Upgrade(string Name, string Kind, string Text, Kit? Flag, bool Ability = false, bool Attack = false);
 
     /// <summary>A branch of a class's tree: three levels, in order.</summary>
     public sealed record Branch(string Id, string Name, string Tag, Upgrade[] Levels);
@@ -59,79 +60,80 @@ public static class QuickSquad
     /// squads are made of and the branches it levels.</summary>
     public sealed record Doctrine(string Id, string Name, string[] Pool, string[] Branches, string Play);
 
-    private static Upgrade U(string name, string kind, string text, Kit? flag = null) => new(name, kind, text, flag);
+    private static Upgrade U(string name, string kind, string text, Kit? flag = null) =>
+        new(name, L.T(kind), text, flag, kind.StartsWith("squad.kind.ability", StringComparison.Ordinal), kind == "squad.kind.ability_attack");
 
     // the upgrades the trees share, said once
-    private static readonly Upgrade Snorkel = U("ОПВТ", "пассивный", "В глубокой воде танк плывёт, а не тонет. Выезд на берег с любой стороны.", Kit.Snorkel);
-    private static readonly Upgrade WideTracks = U("Широкие гусеницы", "пассивный", "Грязь для танка — обычная земля: не останавливает и не режет шаги.", Kit.WideTracks);
-    private static readonly Upgrade SmokePot = U("Дымовая шашка", "способность · доп. действие", "Дым на соседний гекс. На лес и на танк не ложится.", Kit.Smoke);
-    private static readonly Upgrade Incendiary = U("Зажигательный снаряд", "способность · атака", "Вместо обычного выстрела. Лес загорается, непробитый танк загорается.", Kit.Incendiary);
-    private static readonly Upgrade MineLayer = U("Минный заградитель", "способность · доп. действие", "Мина на соседний гекс. Видна всем и бьёт и своих.", Kit.MineLayer);
-    private static readonly Upgrade Stabilizer = U("Стабилизатор засады", "пассивный", "Засада не снимается тараном и не тратится первым выстрелом. У MT даёт только защиту от тарана.", Kit.AmbushStabilizer);
-    private static readonly Upgrade Thermal = U("Тепловизор", "пассивный", "Свой выстрел и ось засады идут сквозь дым.", Kit.Thermal);
-    private static readonly Upgrade MineGuard = U("Противоминная защита", "пассивный", "Мина не подбивает, а поджигает танк. Путь обрывается на гексе мины.");
-    private static readonly Upgrade Winch = U("Лебёдка", "способность · доп. действие", "Притягивает танк с дистанции 2 по оси на гекс между. Цель не тяжелее.", Kit.Winch);
-    private static readonly Upgrade RepairKit = U("Ремкомплект", "способность · доп. действие", "Соседний свой подбитый танк снова активен. Утопленного не поднять.", Kit.RepairKit);
-    private static readonly Upgrade SpallLiner = U("Противоосколочный подбой", "пассивный", "Взрыв соседнего танка этот танк не поджигает.", Kit.SpallLiner);
-    private static readonly Upgrade Extinguisher = U("Автоматическое тушение", "пассивный, с ценой", "Горящий танк гаснет сам. Цена — одно дополнительное действие.", Kit.Extinguisher);
-    private static readonly Upgrade DoubleTurn = U("Двойной поворот", "способность · доп. действие", "Поворот корпуса на 60° без шага, после движения.", Kit.DoubleTurn);
-    private static readonly Upgrade Reverse = U("Задний ход", "пассивный", "Назад до двух клеток и с поворотом.", Kit.Reverse);
+    private static readonly Upgrade Snorkel = U(L.T("squad.up.snorkel.name"), "squad.kind.passive", L.T("squad.up.snorkel.text"), Kit.Snorkel);
+    private static readonly Upgrade WideTracks = U(L.T("squad.up.wide_tracks.name"), "squad.kind.passive", L.T("squad.up.wide_tracks.text"), Kit.WideTracks);
+    private static readonly Upgrade SmokePot = U(L.T("squad.up.smoke_pot.name"), "squad.kind.ability_bonus", L.T("squad.up.smoke_pot.text"), Kit.Smoke);
+    private static readonly Upgrade Incendiary = U(L.T("squad.up.incendiary.name"), "squad.kind.ability_attack", L.T("squad.up.incendiary.text"), Kit.Incendiary);
+    private static readonly Upgrade MineLayer = U(L.T("squad.up.mine_layer.name"), "squad.kind.ability_bonus", L.T("squad.up.mine_layer.text"), Kit.MineLayer);
+    private static readonly Upgrade Stabilizer = U(L.T("squad.up.stabilizer.name"), "squad.kind.passive", L.T("squad.up.stabilizer.text"), Kit.AmbushStabilizer);
+    private static readonly Upgrade Thermal = U(L.T("squad.up.thermal.name"), "squad.kind.passive", L.T("squad.up.thermal.text"), Kit.Thermal);
+    private static readonly Upgrade MineGuard = U(L.T("squad.up.mine_guard.name"), "squad.kind.passive", L.T("squad.up.mine_guard.text"));
+    private static readonly Upgrade Winch = U(L.T("squad.up.winch.name"), "squad.kind.ability_bonus", L.T("squad.up.winch.text"), Kit.Winch);
+    private static readonly Upgrade RepairKit = U(L.T("squad.up.repair_kit.name"), "squad.kind.ability_bonus", L.T("squad.up.repair_kit.text"), Kit.RepairKit);
+    private static readonly Upgrade SpallLiner = U(L.T("squad.up.spall_liner.name"), "squad.kind.passive", L.T("squad.up.spall_liner.text"), Kit.SpallLiner);
+    private static readonly Upgrade Extinguisher = U(L.T("squad.up.extinguisher.name"), "squad.kind.passive_cost", L.T("squad.up.extinguisher.text"), Kit.Extinguisher);
+    private static readonly Upgrade DoubleTurn = U(L.T("squad.up.double_turn.name"), "squad.kind.ability_bonus", L.T("squad.up.double_turn.text"), Kit.DoubleTurn);
+    private static readonly Upgrade Reverse = U(L.T("squad.up.reverse.name"), "squad.kind.passive", L.T("squad.up.reverse.text"), Kit.Reverse);
 
     /// <summary>The five classes, in <see cref="Lineup.Roster"/>'s order.</summary>
     public static readonly Class[] Classes =
     {
-        new("LTP", "LT", "Лёгкий танк", "разведка и фланг",
-            "Охотник и разведчик. В лоб не пробивает никого, живёт огнём в борт и корму и подвижностью.",
-            "Свободный порядок: может выстрелить до движения и уйти.",
+        new("LTP", "LT", L.T("squad.class.LTP.name"), L.T("squad.class.LTP.duty"),
+            L.T("squad.class.LTP.role"),
+            L.T("squad.class.LTP.trait"),
             new[]
             {
-                new Branch("raid", "Рейд", "подвижность", new[] { Snorkel, WideTracks,
-                    U("Выстрел на ходу", "пассивный, классовый", "Атака LT на любом гексе пути, между шагами. Засада на ходу не ставится.") }),
-                new Branch("sabotage", "Диверсия", "инструменты", new[] { SmokePot, Incendiary, MineLayer }),
+                new Branch("raid", L.T("squad.branch.raid.name"), L.T("squad.branch.raid.tag"), new[] { Snorkel, WideTracks,
+                    U(L.T("squad.up.shoot_on_move.name"), "squad.kind.passive_class", L.T("squad.up.shoot_on_move.text")) }),
+                new Branch("sabotage", L.T("squad.branch.sabotage.name"), L.T("squad.branch.sabotage.tag"), new[] { SmokePot, Incendiary, MineLayer }),
             }),
-        new("MTP", "MT", "Средний танк", "засада и опора",
-            "Рабочая лошадка и часовой, середина во всём.",
-            "Секторная засада: караулит две соседние оси, на каждой свой выстрел.",
+        new("MTP", "MT", L.T("squad.class.MTP.name"), L.T("squad.class.MTP.duty"),
+            L.T("squad.class.MTP.role"),
+            L.T("squad.class.MTP.trait"),
             new[]
             {
-                new Branch("sentry", "Часовой", "засада", new[] { Stabilizer, Thermal,
-                    U("Широкий сектор", "пассивный, классовый", "Секторная засада на три оси (120°), выстрелов по-прежнему два.") }),
-                new Branch("prop", "Опора", "отряд", new[] { MineGuard, Winch, RepairKit }),
+                new Branch("sentry", L.T("squad.branch.sentry.name"), L.T("squad.branch.sentry.tag"), new[] { Stabilizer, Thermal,
+                    U(L.T("squad.up.wide_sector.name"), "squad.kind.passive_class", L.T("squad.up.wide_sector.text")) }),
+                new Branch("prop", L.T("squad.branch.prop.name"), L.T("squad.branch.prop.tag"), new[] { MineGuard, Winch, RepairKit }),
             }),
-        new("HTP", "HT", "Тяжёлый танк", "прорыв",
-            "Якорь и бульдозер. В лоб его берут только TD и HM.",
-            "Таранит с ходу, посреди пути; единственный, кто убирает укрытия с карты.",
+        new("HTP", "HT", L.T("squad.class.HTP.name"), L.T("squad.class.HTP.duty"),
+            L.T("squad.class.HTP.role"),
+            L.T("squad.class.HTP.trait"),
             new[]
             {
-                new Branch("ram", "Таран", "убрать с пути", new[]
+                new Branch("ram", L.T("squad.branch.ram.name"), L.T("squad.branch.ram.tag"), new[]
                 {
-                    U("Форсированный двигатель", "способность · до движения", "В этот ход пересечение оси засады не вызывает выстрела, если танк не остановился на ней."),
-                    U("Таранный отвал", "пассивный", "Протараненный теряет движение в свою ближайшую активацию."),
-                    U("Толчок на два гекса", "пассивный, классовый", "Таран отбрасывает цель на два гекса. Стены на пути сносятся."),
+                    U(L.T("squad.up.boost.name"), "squad.kind.ability_premove", L.T("squad.up.boost.text")),
+                    U(L.T("squad.up.ram_blade.name"), "squad.kind.passive", L.T("squad.up.ram_blade.text")),
+                    U(L.T("squad.up.double_push.name"), "squad.kind.passive_class", L.T("squad.up.double_push.text")),
                 }),
-                new Branch("storm", "Штурм", "дойти", new[] { SpallLiner, MineGuard, Extinguisher }),
+                new Branch("storm", L.T("squad.branch.storm.name"), L.T("squad.branch.storm.tag"), new[] { SpallLiner, MineGuard, Extinguisher }),
             }),
-        new("TDP", "TD", "Истребитель танков", "огонь сквозь преграду",
-            "Огневая мощь через препятствие. Башни нет, наводится корпусом за шаги.",
-            "Тяжёлый снаряд проходит сквозь одну стену или один танк.",
+        new("TDP", "TD", L.T("squad.class.TDP.name"), L.T("squad.class.TDP.duty"),
+            L.T("squad.class.TDP.role"),
+            L.T("squad.class.TDP.trait"),
             new[]
             {
-                new Branch("aim", "Наводка", "корпус", new[] { DoubleTurn, Reverse,
-                    U("Сквозь лес", "пассивный, классовый", "Тяжёлый снаряд проходит гекс леса с мощью −1. Лес не горит.") }),
-                new Branch("ambush", "Засада", "ожидание", new[] { Thermal, Stabilizer, SmokePot }),
+                new Branch("aim", L.T("squad.branch.aim.name"), L.T("squad.branch.aim.tag"), new[] { DoubleTurn, Reverse,
+                    U(L.T("squad.up.through_forest.name"), "squad.kind.passive_class", L.T("squad.up.through_forest.text")) }),
+                new Branch("ambush", L.T("squad.branch.ambush.name"), L.T("squad.branch.ambush.tag"), new[] { Thermal, Stabilizer, SmokePot }),
             }),
-        new("HMP", "HM", "Тяжёлый миномёт", "навес издалека",
-            "Артиллерия. Пробивает всех, но гибнет от любого попадания в борт.",
-            "Навес на 3–5 гексов поверх всего; мёртвая зона 1–2.",
+        new("HMP", "HM", L.T("squad.class.HMP.name"), L.T("squad.class.HMP.duty"),
+            L.T("squad.class.HMP.role"),
+            L.T("squad.class.HMP.trait"),
             new[]
             {
-                new Branch("support", "Поддержка", "навес", new[]
+                new Branch("support", L.T("squad.branch.support.name"), L.T("squad.branch.support.tag"), new[]
                 {
-                    U("Дымовой снаряд", "способность · атака", "Дым на гекс оси вместо выстрела, навесом на 3–5."),
+                    U(L.T("squad.up.smoke_round.name"), "squad.kind.ability_attack", L.T("squad.up.smoke_round.text")),
                     Incendiary,
-                    U("Вилка 3–6", "пассивный, классовый", "Дальность миномёта 6 вместо 5. Мёртвая зона 1–2 та же."),
+                    U(L.T("squad.up.bracket.name"), "squad.kind.passive_class", L.T("squad.up.bracket.text")),
                 }),
-                new Branch("guard", "Самооборона", "выжить", new[] { SmokePot, Reverse, DoubleTurn }),
+                new Branch("guard", L.T("squad.branch.guard.name"), L.T("squad.branch.guard.tag"), new[] { SmokePot, Reverse, DoubleTurn }),
             }),
     };
 
@@ -139,21 +141,21 @@ public static class QuickSquad
     /// «Сводная» first: the timer's fill in PvP.</summary>
     public static readonly Company[] Companies =
     {
-        new("Сводная", "всего понемногу", new[] { ("LTP", "raid"), ("MTP", "prop"), ("HMP", "guard") }),
-        new("Бронегруппа", "давление и прорыв", new[] { ("HTP", "ram"), ("TDP", "aim"), ("MTP", "sentry") }),
-        new("Разведрота", "обход и засады", new[] { ("LTP", "raid"), ("LTP", "sabotage"), ("MTP", "sentry") }),
-        new("Артдивизион", "дистанция и навес", new[] { ("HMP", "support"), ("MTP", "prop"), ("TDP", "ambush") }),
+        new(L.T("squad.company.composite.name"), L.T("squad.company.composite.play"), new[] { ("LTP", "raid"), ("MTP", "prop"), ("HMP", "guard") }),
+        new(L.T("squad.company.armour.name"), L.T("squad.company.armour.play"), new[] { ("HTP", "ram"), ("TDP", "aim"), ("MTP", "sentry") }),
+        new(L.T("squad.company.recon.name"), L.T("squad.company.recon.play"), new[] { ("LTP", "raid"), ("LTP", "sabotage"), ("MTP", "sentry") }),
+        new(L.T("squad.company.artillery.name"), L.T("squad.company.artillery.play"), new[] { ("HMP", "support"), ("MTP", "prop"), ("TDP", "ambush") }),
     };
 
     /// <summary>The three doctrines (meta.md, «Доктрины»).</summary>
     public static readonly Doctrine[] Doctrines =
     {
-        new("armour", "Бронегруппа", new[] { "HTP", "TDP", "MTP" }, new[] { "ram", "storm", "aim" },
-            "Медленно давит, ломает укрытия"),
-        new("recon", "Разведбат", new[] { "LTP", "MTP" }, new[] { "raid", "sabotage", "sentry" },
-            "Обходит, ставит дым, мины и засады"),
-        new("artillery", "Артдивизион", new[] { "HMP", "MTP", "TDP" }, new[] { "support", "prop", "ambush" },
-            "Держит дистанцию, бьёт навесом, чинит своих"),
+        new("armour", L.T("squad.doctrine.armour.name"), new[] { "HTP", "TDP", "MTP" }, new[] { "ram", "storm", "aim" },
+            L.T("squad.doctrine.armour.play")),
+        new("recon", L.T("squad.doctrine.recon.name"), new[] { "LTP", "MTP" }, new[] { "raid", "sabotage", "sentry" },
+            L.T("squad.doctrine.recon.play")),
+        new("artillery", L.T("squad.doctrine.artillery.name"), new[] { "HMP", "MTP", "TDP" }, new[] { "support", "prop", "ambush" },
+            L.T("squad.doctrine.artillery.play")),
     };
 
     public static Class ClassOf(string tag) =>
@@ -175,7 +177,7 @@ public static class QuickSquad
         for (int i = 0; i < squad.Count; i++)
             if (i != at && string.Equals(squad[i].Class, tag, StringComparison.OrdinalIgnoreCase))
                 others++;
-        return others >= SameClass ? $"не больше {SameClass} машин одного класса" : "";
+        return others >= SameClass ? L.T("squad.why.same_class", SameClass) : "";
     }
 
     /// <summary>Why slot <paramref name="at"/> may not go to <paramref name="level"/>
@@ -186,11 +188,11 @@ public static class QuickSquad
     {
         Slot s = squad[at];
         if (s.Empty)
-            return "сначала класс";
+            return L.T("squad.why.class_first");
         if (level < 0 || level > 3)
-            return "уровней три";
+            return L.T("squad.why.three_levels");
         int others = Spent(squad) - s.Level;
-        return others + level > budget ? $"не хватает очков: уровень {level} стоит {level}, свободно {budget - others}" : "";
+        return others + level > budget ? L.T("squad.why.no_points", level, budget - others) : "";
     }
 
     /// <summary>The upgrades a slot carries: its branch's levels up to its own.</summary>

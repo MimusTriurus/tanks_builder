@@ -430,7 +430,7 @@ void fragment() {
         Steps.Route way = _ways[_wayIx % _ways.Count];
         if (_reach.TurnTo(way, side) is null)
         {
-            _orderNote = way.Final ? "здесь путь кончается — разворота нет" : "на этот разворот шагов нет";
+            _orderNote = way.Final ? L.T("ghost.way_ends") : L.T("ghost.no_steps_to_turn");
             return false;
         }
         _lockFace = side;

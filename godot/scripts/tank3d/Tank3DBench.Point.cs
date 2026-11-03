@@ -120,12 +120,12 @@ public sealed partial class Tank3DBench
         if (green && brown)
         {
             _mt.Drawn = true;
-            Banner($"Ничья: очки кончились у обеих сторон · раунд {_mt.Round}", Colors.White, stay: true);
+            Banner(L.T("point.draw", _mt.Round), Colors.White, stay: true);
             Log.Print($"tank3d: match: both sides out of points - drawn in round {_mt.Round}");
             return true;
         }
         _mt.Won = green ? Side.Brown : Side.Green;
-        Banner($"Победа по очкам: {SideName(_mt.Won.Value)} · раунд {_mt.Round}", SideInk(_mt.Won.Value), stay: true);
+        Banner(L.T("point.victory", SideName(_mt.Won.Value), _mt.Round), SideInk(_mt.Won.Value), stay: true);
         Log.Print($"tank3d: match: {SideName(Across(_mt.Won.Value))} out of points - {SideName(_mt.Won.Value)} win in round {_mt.Round}");
         return true;
     }
@@ -136,8 +136,8 @@ public sealed partial class Tank3DBench
         if (_pointCells is null)
             return "";
         Side? now = PointHolder();
-        return $" · точка: {(now is Side h ? $"держат {SideName(h)}" : "никто не держит")}"
-               + $" · очки: зелёные {_mt.Score[0]}, коричневые {_mt.Score[1]}";
+        return L.T("point.hud", now is Side h ? L.T("point.held_by", SideName(h)) : L.T("point.held_by_none"),
+                   _mt.Score[0], _mt.Score[1]);
     }
 
     /// <summary>Every frame of a match: the point's hexes outlined in gold,
