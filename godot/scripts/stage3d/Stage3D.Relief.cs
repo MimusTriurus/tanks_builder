@@ -149,8 +149,10 @@ public sealed partial class Stage3D
     internal static ImageTexture? Pebbles() => Photo("river_small_rocks/river_small_rocks_diff_2k.jpg", "bed");
 
     /// <summary>The earth photograph in place of the soil art (<see cref="ShowEarth"/>,
-    /// ambientCG Ground037, CC0).</summary>
-    internal static ImageTexture? EarthPhoto() => Photo("Ground037/Ground037_2K-JPG_Color.jpg", "earth");
+    /// Poly Haven dry_ground_rocks, CC0): of four bare earths tried on the
+    /// slopes the nearest the painted soil (the user's pick, 2026-11-03);
+    /// ambientCG Ground037 before it was moss and greyed them.</summary>
+    internal static ImageTexture? EarthPhoto() => Photo("dry_ground_rocks/dry_ground_rocks_diff_2k.jpg", "earth");
 
     /// <summary>The stone of a rock nobody named (<see cref="ShowCrag"/>,
     /// ambientCG Rock023, CC0).</summary>
