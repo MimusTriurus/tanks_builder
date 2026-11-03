@@ -94,6 +94,12 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--bed</c>: the pebble photograph on the water's bed, not
     /// the flat ink (<see cref="Stage3D.ShowBed"/>; docs/new_style.md).</summary>
     private bool _bedOn;
+    /// <summary><c>--earth</c>: the earth photograph in place of the soil art
+    /// (<see cref="Stage3D.ShowEarth"/>; docs/new_style.md).</summary>
+    private bool _earthOn;
+    /// <summary><c>--crag</c>: the rocks in photographs
+    /// (<see cref="Stage3D.ShowCrag"/>; docs/new_style.md).</summary>
+    private bool _cragOn;
     /// <summary><c>--no-turf</c>: no grass on the relief's ground texture; with
     /// it the ground is bare soil everywhere (<see cref="Stage3D.ShowTurf"/>).</summary>
     private bool _turfOn = true;
@@ -1146,6 +1152,8 @@ public sealed partial class Tank3DBench : Node3D
             ShowBrow = _browOn,
             ShowLawn = _lawnOn,
             ShowBed = _bedOn,
+            ShowEarth = _earthOn,
+            ShowCrag = _cragOn,
             ShowTurf = _turfOn,
         };
         AddChild(_stage);
@@ -1557,6 +1565,8 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--brow") _browOn = true;
             else if (a == "--lawn") _lawnOn = true;
             else if (a == "--bed") _bedOn = true;
+            else if (a == "--earth") _earthOn = true;
+            else if (a == "--crag") _cragOn = true;
             else if (a == "--no-turf") _turfOn = false;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
@@ -2789,6 +2799,12 @@ public sealed partial class Tank3DBench : Node3D
             if (Stage3D.Pebbles() is not null)
                 _panel.Toggle("tank3d.relief.bed", "дно галькой, фото  (--bed)",
                               () => _stage.ShowBed, v => _stage.ShowBed = v);
+            if (Stage3D.EarthPhoto() is not null)
+                _panel.Toggle("tank3d.relief.earth", "земля склонов, фото  (--earth)",
+                              () => _stage.ShowEarth, v => _stage.ShowEarth = v);
+            if (Stage3D.CragsOnDisk)
+                _panel.Toggle("tank3d.relief.crag", "скалы, фото  (--crag)",
+                              () => _stage.ShowCrag, v => _stage.ShowCrag = v);
             _panel.Expand("tank3d.relief", true);
         }
         // Whether the pond is swum or drowned in - see TankTick.Amphibious.

@@ -121,27 +121,90 @@ public sealed partial class Stage3D
     /// cobbles a board can see.</summary>
     private const float BedTile = 2.2f;
 
-    private static ImageTexture? _bed;
-    private static bool _bedRead;
+    /// <summary>The new style's photographs read so far, by file: each read
+    /// once, null when it is not on disk (docs/new_style.md).</summary>
+    private static readonly Dictionary<string, ImageTexture?> _photos = new();
 
-    /// <summary>The pebble photograph, read once, with its mipmaps; null when
-    /// it is not on disk.</summary>
-    internal static ImageTexture? Pebbles()
+    /// <summary>A tiling photograph under <see cref="AssetRoot.Ground"/>,
+    /// read once, with its mipmaps; null when it is not on disk.</summary>
+    private static ImageTexture? Photo(string file, string what)
     {
-        if (_bedRead)
-            return _bed;
-        _bedRead = true;
-        string path = AssetRoot.Ground + "/river_small_rocks/river_small_rocks_diff_2k.jpg";
+        if (_photos.TryGetValue(file, out ImageTexture? had))
+            return had;
+        _photos[file] = null;
+        string path = AssetRoot.Ground + "/" + file;
         if (!System.IO.File.Exists(path))
             return null;
         Image img = Image.LoadFromFile(path);
         if (img is null || img.IsEmpty())
             return null;
         img.GenerateMipmaps();
-        _bed = ImageTexture.CreateFromImage(img);
-        Log.Print($"stage3d: bed {path} {img.GetWidth()}x{img.GetHeight()}");
-        return _bed;
+        ImageTexture tex = ImageTexture.CreateFromImage(img);
+        _photos[file] = tex;
+        Log.Print($"stage3d: {what} {path} {img.GetWidth()}x{img.GetHeight()}");
+        return tex;
     }
+
+    /// <summary>The pebble photograph on the water's bed (<see cref="ShowBed"/>).</summary>
+    internal static ImageTexture? Pebbles() => Photo("river_small_rocks/river_small_rocks_diff_2k.jpg", "bed");
+
+    /// <summary>The earth photograph in place of the soil art (<see cref="ShowEarth"/>,
+    /// ambientCG Ground037, CC0).</summary>
+    internal static ImageTexture? EarthPhoto() => Photo("Ground037/Ground037_2K-JPG_Color.jpg", "earth");
+
+    /// <summary>The stone of a rock nobody named (<see cref="ShowCrag"/>,
+    /// ambientCG Rock023, CC0).</summary>
+    internal static ImageTexture? Crag() => Photo("Rock023/Rock023_2K-JPG_Color.jpg", "crag");
+
+    /// <summary>The grain of a rock with a type of its own - its layers keep
+    /// their palette, the photograph gives them its light and dark
+    /// (<see cref="ShowCrag"/>, Poly Haven rock_face, CC0).</summary>
+    internal static ImageTexture? Face() => Photo("rock_face/rock_face_diff_2k.jpg", "face");
+
+    /// <summary>Both rock photographs are on disk (<see cref="ShowCrag"/>).</summary>
+    internal static bool CragsOnDisk => Crag() is not null && Face() is not null;
+
+    /// <summary>The earth photograph (<see cref="EarthPhoto"/>) in place of the
+    /// soil art the slopes, banks and bare ground wear, and so of the grain
+    /// everything over it carries. Off by default, the new style
+    /// (docs/new_style.md); <c>--earth</c> and the panel switch it on when the
+    /// file is there.</summary>
+    public bool ShowEarth
+    {
+        get => _showEarth;
+        set
+        {
+            _showEarth = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("earth_on", value && EarthPhoto() is not null ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showEarth;
+
+    /// <summary>The rocks in photographs: a crag in the stone of
+    /// <see cref="Crag"/>, a typed rock's layers grained by <see cref="Face"/>.
+    /// Off by default, the new style (docs/new_style.md); <c>--crag</c> and
+    /// the panel switch it on when both files are there.</summary>
+    public bool ShowCrag
+    {
+        get => _showCrag;
+        set
+        {
+            _showCrag = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("crag_on", value && CragsOnDisk ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showCrag;
+
+    /// <summary>A tile of the earth photograph, in circumradii: as the lawn's.</summary>
+    private const float EarthTile = 1.4f;
+
+    /// <summary>A tile of the rock photographs, in circumradii: a level's wall
+    /// is about a third of a hex tall, and the stone's beds read across it.</summary>
+    private const float CragTile = 1.2f;
 
     private static ImageTexture? _lawn;
     private static bool _lawnRead;
@@ -515,6 +578,19 @@ void fragment() {
             ink.Param("bed_tile", 1.0f / (r * BedTile));
         }
         ink.Param("bed_on", ShowBed && Pebbles() is not null ? 1.0f : 0.0f);
+        if (EarthPhoto() is { } earth)
+        {
+            ink.Param("earth_tex", earth);
+            ink.Param("earth_tile", 1.0f / (r * EarthTile));
+        }
+        ink.Param("earth_on", ShowEarth && EarthPhoto() is not null ? 1.0f : 0.0f);
+        if (CragsOnDisk)
+        {
+            ink.Param("crag_tex", Crag()!);
+            ink.Param("face_tex", Face()!);
+            ink.Param("crag_tile", 1.0f / (r * CragTile));
+        }
+        ink.Param("crag_on", ShowCrag && CragsOnDisk ? 1.0f : 0.0f);
         ink.Param("turf_on", ShowTurf ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
@@ -865,6 +941,25 @@ uniform float bed_tile = 0.01;
 uniform float bed_gain = 0.8;
 // how far the stones stand out of their own mean tone: the water flattens them
 uniform float bed_contrast = 1.7;
+// The new style's photographs (docs/new_style.md), each one tile per this
+// many world units, laid from three sides like the art: the earth in place
+// of the soil art; a crag's stone; a typed rock's grain off the face's
+// light and dark, its mean and how far that is stretched
+uniform sampler2D earth_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float earth_on = 0.0;
+uniform float earth_tile = 0.01;
+uniform sampler2D crag_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform sampler2D face_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float crag_on = 0.0;
+uniform float crag_tile = 0.01;
+uniform float crag_gain = 1.0;
+uniform float face_mean = 0.3;
+uniform float face_contrast = 10.0;
+
+vec3 photo3(sampler2D t, vec3 p, vec3 tw, float k) {
+    return texture(t, p.xz * k).rgb * tw.y + texture(t, p.zy * k).rgb * tw.x
+         + texture(t, p.xy * k).rgb * tw.z;
+}
 // The lawn photograph (AssetRoot.Ground), one tile per this many world units,
 // and how bright: on when it is on disk and switched on
 uniform sampler2D lawn_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
@@ -939,6 +1034,8 @@ vec4 cell_ink(vec2 cr) {
     vec3 soil = texture(art, art_rect.xy + tri(ground.xz * art_tile) * art_rect.zw).rgb * tw.y;
     soil += texture(art, art_rect.xy + tri(ground.zy * art_tile) * art_rect.zw).rgb * tw.x;
     soil += texture(art, art_rect.xy + tri(ground.xy * art_tile) * art_rect.zw).rgb * tw.z;
+    if (earth_on > 0.5)
+        soil = photo3(earth_tex, ground, tw, earth_tile);
     float grain = dot(soil, vec3(0.299, 0.587, 0.114));
     // the kinds, each its own colour carrying the art's grain
     soil = mix(soil, sand_ink * (0.6 + 0.6 * grain), smoothstep(0.25, 0.6, COLOR.r));
@@ -947,10 +1044,17 @@ vec4 cell_ink(vec2 cr) {
     // rock: the tight share (Relief.Cliff), cut where the wall stands; a rock
     // with a type of its own paints itself (RockPaint), a crag as it always was
     if (rock_id >= 0 && texelFetch(rock_tab, ivec2(9, rock_id), 0).x > 0.5) {
-        vec4 rk = rock_look(rock_id, ground, normalize(ground_n), grain, COLOR.g, rock_aux);
+        float rgrain = grain;
+        if (crag_on > 0.5)
+            rgrain = clamp(0.5 + (dot(photo3(face_tex, ground, tw, crag_tile), vec3(0.299, 0.587, 0.114))
+                                  - face_mean) * face_contrast, -0.5, 1.5);
+        vec4 rk = rock_look(rock_id, ground, normalize(ground_n), rgrain, COLOR.g, rock_aux);
         soil = mix(soil, rk.rgb, rk.a);
-    } else
-        soil = mix(soil, rock_ink * (0.55 + 0.7 * grain), smoothstep(0.5, 0.62, COLOR.g));
+    } else {
+        vec3 crag = crag_on > 0.5 ? photo3(crag_tex, ground, tw, crag_tile) * crag_gain
+                                  : rock_ink * (0.55 + 0.7 * grain);
+        soil = mix(soil, crag, smoothstep(0.5, 0.62, COLOR.g));
+    }
     soil = mix(soil, wood_ink * (0.6 + 0.6 * grain), 0.6 * smoothstep(0.3, 0.7, COLOR.b));
     // grass over the rest, in patches, the earth through it on steep banks
     // (the cells' painted lawn, Grass3D, is a hexagon a cell - off on the relief)
