@@ -173,7 +173,6 @@
   "hangar.upgrades": "Upgrades",
   "hangar.budget_zero": "budget 0: no upgrades",
   "hangar.tree_later": "The tree appears once the slot has a class.",
-  "hangar.dash_note": "Dashed and “*” — no rule on the bench.",
   "hangar.slot_empty_hint": "Slot {0} is empty. Pick a class with the tags below the podium. Classes are free; only upgrades cost points.",
   "hangar.unit_numbers": "{0} · power {1} · mass {2} · turret {3}",
   "hangar.unit_armour": "Armor front / side / rear / roof: {0}",

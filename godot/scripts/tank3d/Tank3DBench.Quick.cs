@@ -315,6 +315,7 @@ public sealed partial class Tank3DBench
             _qRoot.RemoveChild(n);
             n.QueueFree();
         }
+        QLarge = _qHangar && _qPage != QuickPage.Lobby;
         _qRoot.AddChild(_qPage == QuickPage.Lobby ? QuickLobby() : _qHangar ? QuickHangar() : QuickBuild());
         _qOver?.QueueFree();
         _qOver = _qModal == QuickModal.None ? null : QuickDialog();
@@ -863,8 +864,8 @@ public sealed partial class Tank3DBench
         col.AddThemeConstantOverride("separation", 0);
         var head = new QuickPad
         {
-            Text = b.Name, FontSize = 14, Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
-            Ink = QInk, HoverFill = other ? QSel : null, CustomMinimumSize = new Vector2(0, 28),
+            Text = b.Name, FontSize = QSize(14), Bold = true, RimWidth = 0, Fill = new Color(0, 0, 0, 0),
+            Ink = QInk, HoverFill = other ? QSel : null, CustomMinimumSize = new Vector2(0, QSize(14) * 2),
         };
         head.SetMeta("q_branch", b.Id);
         head.Clicked += () =>
@@ -918,7 +919,7 @@ public sealed partial class Tank3DBench
             QTip(hex, () => QTipBox(L.T("quick.level_tip", b.Name, level), u.Name, u.Text, (u.Kind, Pts(level)),
                                     state + (u.Flag is null ? L.T("quick.lvl_dash_note") : "")));
             col.AddChild(hex);
-            var nm = QText(u.Name + (u.Flag is null ? " *" : ""), 13, open ? QInk : QMuted, bold: open, wrap: true);
+            var nm = QText(u.Name + (u.Flag is null ? " *" : ""), 13, open ? QInk : QMuted, bold: open, wrap: true);
             nm.HorizontalAlignment = HorizontalAlignment.Center;
             // two lines, never more and never fewer: a longer name must not make
             // this tree taller than the next card's, or the stage over it shorter
@@ -964,8 +965,8 @@ public sealed partial class Tank3DBench
 
     private static readonly Dictionary<string, Texture2D?> QIcons = new();
 
-    /// <summary>An upgrade's name under its node, px high: two lines of 13 px and their spacing.</summary>
-    private static readonly float QNameHigh = Mathf.Ceil(QuickPad.FontOf(true).GetHeight(13) * 2 + 6);
+    /// <summary>An upgrade's name under its node, px high: two lines of its size and their spacing.</summary>
+    private static float QNameHigh => Mathf.Ceil(QuickPad.FontOf(true).GetHeight(QSize(13)) * 2 + 6);
 
     /// <summary>An upgrade's kind in a word, under its node.</summary>
     private static string QKind(QuickSquad.Upgrade u) =>
@@ -1224,7 +1225,7 @@ public sealed partial class Tank3DBench
     private static readonly Color QField = new("5F8A3A"), QWood = new("3F5E2A"), QWater = new("3E6E8E"), QWall = new("8B5A3C");
 
     /// <summary>The strip a zone's name stands in, above or below the map, px.</summary>
-    private const float QMapStrip = 22.0f;
+    private static float QMapStrip => QLarge ? 28.0f : 22.0f;
 
     /// <summary>What the ground outside the zones fades to.</summary>
     private static readonly Color QFaint = new("2E352B");
@@ -1306,12 +1307,12 @@ public sealed partial class Tank3DBench
             foreach (Vector2I v in zone)
                 x += Mid(v).X;
             x /= zone.Count;
-            Vector2 size = font.GetStringSize(text, HorizontalAlignment.Left, -1, 12) + new Vector2(16, 4);
+            Vector2 size = font.GetStringSize(text, HorizontalAlignment.Left, -1, QSize(12)) + new Vector2(16, 4);
             float y = top ? (strip - size.Y) * 0.5f : c.Size.Y - strip + (strip - size.Y) * 0.5f;
             var rect = new Rect2(new Vector2(Mathf.Clamp(x - size.X * 0.5f, 0, c.Size.X - size.X), y), size);
             c.DrawRect(rect, QPanelC);
             c.DrawRect(rect, ink, false, 1.0f);
-            c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(12) + 2), text, HorizontalAlignment.Left, -1, 12, ink);
+            c.DrawString(font, rect.Position + new Vector2(8, font.GetAscent(QSize(12)) + 2), text, HorizontalAlignment.Left, -1, QSize(12), ink);
         }
         // the own zone is the bottom one, the map being turned so
         Chip(L.T("quick.zone_own"), own, QOlive.Lightened(0.35f), top: false);
@@ -1387,10 +1388,27 @@ public sealed partial class Tank3DBench
 
     // --- the bits ------------------------------------------------------------------
 
+    /// <summary>The hangar's pages (<c>--hangar</c> past the lobby) set in its type scale.</summary>
+    private static bool QLarge;
+
+    /// <summary>The hangar's type scale (author 2026-11-03, after XAG 101: 18 px of glyph
+    /// at 1080p on a PC is the floor, a font size of 17 in this 1600×900 layout): five
+    /// steps the screens' sizes go to by role - caption 17 (kinds, meta lines, kickers),
+    /// body 18, subhead 20, heading 22, title 28. The lobby and the old build keep theirs.</summary>
+    private static int QSize(int size) => !QLarge ? size : size switch
+    {
+        <= 12 => 17,
+        13 => 18,
+        <= 16 => 20,
+        <= 18 => 22,
+        <= 22 => 28,
+        _ => size,
+    };
+
     private static Label QText(string text, int size, Color ink, bool bold = false, bool wrap = false)
     {
         var l = new Label { Text = text, AutowrapMode = wrap ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off };
-        l.AddThemeFontSizeOverride("font_size", size);
+        l.AddThemeFontSizeOverride("font_size", QSize(size));
         l.AddThemeColorOverride("font_color", ink);
         if (bold)
             l.AddThemeFontOverride("font", QuickPad.BoldFont);
@@ -1409,7 +1427,7 @@ public sealed partial class Tank3DBench
         bool picked = pressed;
         var b = new QuickPad
         {
-            Text = text, FontSize = primary ? 16 : small ? 13 : 14, Bold = primary,
+            Text = text, FontSize = QSize(primary ? 16 : small ? 13 : 14), Bold = primary,
             Rim = primary ? QOlive : picked ? QOlive : QLine,
             Fill = primary ? QOlive : picked ? QSel : QInset,
             Ink = primary ? QOnOlive : QInk,
@@ -1426,7 +1444,7 @@ public sealed partial class Tank3DBench
     {
         var b = new QuickPad
         {
-            Text = text, FontSize = 13, Rim = QLine, Fill = QPanelC, Ink = QInk,
+            Text = text, FontSize = QSize(13), Rim = QLine, Fill = QPanelC, Ink = QInk,
             HoverRim = clicked is null ? null : QOlive,
             MouseFilter = clicked is null ? Control.MouseFilterEnum.Ignore : Control.MouseFilterEnum.Stop,
         }.Fit(new Vector2(10, 4));

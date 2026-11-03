@@ -99,7 +99,7 @@ public sealed partial class Tank3DBench
         var go = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         go.AddThemeConstantOverride("separation", 4);
         QuickPad button = QBtn(L.T("hangar.go"), QuickTryGo, primary: true);
-        button.FontSize = 22;
+        button.FontSize = QSize(22);
         button.CustomMinimumSize = Vector2.Zero;
         button.Fit(new Vector2(46, 12));
         button.Disabled = missing > 0;
@@ -131,7 +131,7 @@ public sealed partial class Tank3DBench
     {
         QuickSetup q = _qs;
         int start = QuickSquad.Size * QuickSquad.CompanyLevel;
-        var col = new VBoxContainer { CustomMinimumSize = new Vector2(290, 0) };
+        var col = new VBoxContainer { CustomMinimumSize = new Vector2(350, 0) };
         col.AddThemeConstantOverride("separation", 8);
         col.AddChild(QText(L.T("hangar.presets"), 17, QInk, bold: true));
         foreach (QuickSquad.Company c in QuickSquad.Companies)
@@ -368,21 +368,18 @@ public sealed partial class Tank3DBench
         col.OffsetLeft = 10;
         col.OffsetRight = -10;
         col.OffsetTop = 6;
-        var head = new HBoxContainer();
-        head.AddThemeConstantOverride("separation", 8);
-        head.AddChild(QText(c.Name, 14, QInk, bold: true));
-        var play = QText(c.Play, 12, QMuted);
-        play.ClipText = true;
-        play.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
-        play.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        head.AddChild(play);
-        col.AddChild(head);
-        col.AddChild(QText(string.Join(" · ", c.Slots.Select(x =>
-            $"{QuickSquad.ClassOf(x.Class).Short} {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}")), 12, QOlive));
+        // its name and its three; its play is the tip's (in the type scale it no longer fits beside the name)
+        col.AddChild(QText(c.Name, 14, QInk, bold: true));
+        var three = QText(string.Join(" · ", c.Slots.Select(x =>
+            $"{QuickSquad.ClassOf(x.Class).Short} {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}")), 12, QOlive);
+        three.ClipText = true;
+        three.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        col.AddChild(three);
         pad.AddChild(col);
         QuickHangarDeaf(col);
         // two short lines, unwrapped: a fixed height, a label measures nothing before the layout
-        pad.CustomMinimumSize = new Vector2(0, 54);
+        Font font = QuickPad.FontOf(true);
+        pad.CustomMinimumSize = new Vector2(0, Mathf.Ceil(font.GetHeight(QSize(14)) + font.GetHeight(QSize(12)) + 14));
         if (short_)
             col.Modulate = new Color(1, 1, 1, 0.45f);
         // the one the squad was taken from: lit while it is as taken, its rim only once changed
@@ -434,7 +431,7 @@ public sealed partial class Tank3DBench
             CustomMinimumSize = new Vector2(360, 0), CaretBlink = true,
         };
         edit.AddThemeFontOverride("font", QuickPad.BoldFont);
-        edit.AddThemeFontSizeOverride("font_size", 22);
+        edit.AddThemeFontSizeOverride("font_size", QSize(22));
         edit.AddThemeColorOverride("font_color", QInk);
         edit.AddThemeColorOverride("caret_color", QOlive);
         edit.AddThemeColorOverride("selection_color", new Color(QOlive, 0.45f));
@@ -487,7 +484,7 @@ public sealed partial class Tank3DBench
         QuickSetup q = _qs;
         QuickSquad.Slot s = q.Squad[_qhAt];
         int left = q.Budget - QuickSquad.Spent(q.Squad);
-        var col = new VBoxContainer { CustomMinimumSize = new Vector2(320, 0) };
+        var col = new VBoxContainer { CustomMinimumSize = new Vector2(400, 0) };
         col.AddThemeConstantOverride("separation", 10);
         var head = new HBoxContainer();
         var h = QText(L.T("hangar.upgrades"), 17, QInk, bold: true);
@@ -512,7 +509,6 @@ public sealed partial class Tank3DBench
             foreach (QuickSquad.Branch b in QuickSquad.ClassOf(s.Class!).Branches)
                 tree.AddChild(QuickBranch(_qhAt, s, b, left));
             col.AddChild(tree);
-            col.AddChild(QHint(L.T("hangar.dash_note"), wrap: true));
         }
         // the machine under its tree: what it is, its numbers, what it carries
         col.AddChild(new ColorRect { Color = QLine, CustomMinimumSize = new Vector2(0, 1) });
@@ -549,11 +545,11 @@ public sealed partial class Tank3DBench
         duty.VerticalAlignment = VerticalAlignment.Center;
         name.AddChild(duty);
         col.AddChild(name);
-        col.AddChild(QText(c.Role, 13, QMuted, wrap: true));
+        // its role is the class tab's tip: in the type scale the column has no room for it
         // the numbers two lines, not a table: the tree over them has the height
         (string, string)[] n = QuickClassRows(c);
         col.AddChild(QText(L.T("hangar.unit_numbers", n[0].Item2, n[1].Item2, n[3].Item2, n[4].Item2), 13, QInk, wrap: true));
-        col.AddChild(QText(L.T("hangar.unit_armour", n[2].Item2), 13, QInk, wrap: true));
+        col.AddChild(QText(L.T("hangar.unit_armour", n[2].Item2.Replace(" / ", " / ")), 13, QInk, wrap: true));
         col.AddChild(QText(L.T("quick.trait", c.Trait), 13, QInk, wrap: true));
         // what it carries is the tree's open nodes: nothing said again (as on the old build)
     }
@@ -588,7 +584,7 @@ public sealed partial class Tank3DBench
             return box;
         // the chevrons stand as tall as the two lines, from the class's top to the branch's foot
         Font font = QuickPad.FontOf(true);
-        float high = font.GetHeight(big) + font.GetHeight(small) + 2;
+        float high = font.GetHeight(QSize(big)) + font.GetHeight(QSize(small)) + 2;
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         row.AddThemeConstantOverride("separation", front ? 12 : 8);
         row.AddChild(new QuickRank
