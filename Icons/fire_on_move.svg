@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>fire_on_move_2_move_reticle</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path id="m2_dot1_ink" data-name="m2 dot1 ink" d="M8.31 57.89 C8.31 56.344 9.564 55.09 11.11 55.09 C12.656 55.09 13.91 56.344 13.91 57.89 C13.91 59.436 12.656 60.69 11.11 60.69 C9.564 60.69 8.31 59.436 8.31 57.89 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot2_ink" data-name="m2 dot2 ink" d="M16.39 49.41 C16.39 47.643 17.823 46.21 19.59 46.21 C21.357 46.21 22.79 47.643 22.79 49.41 C22.79 51.177 21.357 52.61 19.59 52.61 C17.823 52.61 16.39 51.177 16.39 49.41 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot3_ink" data-name="m2 dot3 ink" d="M25.01 40.29 C25.01 38.247 26.667 36.59 28.71 36.59 C30.753 36.59 32.41 38.247 32.41 40.29 C32.41 42.333 30.753 43.99 28.71 43.99 C26.667 43.99 25.01 42.333 25.01 40.29 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot4_ink" data-name="m2 dot4 ink" d="M34.34 30.46 C34.34 28.14 36.22 26.26 38.54 26.26 C40.86 26.26 42.74 28.14 42.74 30.46 C42.74 32.78 40.86 34.66 38.54 34.66 C36.22 34.66 34.34 32.78 34.34 30.46 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_head_ink" data-name="m2 head ink" d="M56.5 12.5 L50.3 34.3 L45.3 23.7 L34.7 18.7 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="m2_head_ink-2" data-name="m2 head ink" d="M54 10 L47.8 31.8 L42.8 21.2 L32.2 16.2 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+    <path id="m2_head" data-name="m2 head" d="M54 10 L47.8 31.8 L42.8 21.2 L32.2 16.2 Z" fill="#4f8fd8"/>
+    <path id="m2_head_lit" data-name="m2 head lit" d="M37.5 16.5 L50 12.8" fill="none" stroke="#cfe6ff" stroke-width="2.2" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path id="m2_dot1_ink-2" data-name="m2 dot1 ink" d="M5.81 55.39 C5.81 53.844 7.064 52.59 8.61 52.59 C10.156 52.59 11.41 53.844 11.41 55.39 C11.41 56.936 10.156 58.19 8.61 58.19 C7.064 58.19 5.81 56.936 5.81 55.39 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot2_ink-2" data-name="m2 dot2 ink" d="M13.89 46.91 C13.89 45.143 15.323 43.71 17.09 43.71 C18.857 43.71 20.29 45.143 20.29 46.91 C20.29 48.677 18.857 50.11 17.09 50.11 C15.323 50.11 13.89 48.677 13.89 46.91 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot3_ink-2" data-name="m2 dot3 ink" d="M22.51 37.79 C22.51 35.747 24.167 34.09 26.21 34.09 C28.253 34.09 29.91 35.747 29.91 37.79 C29.91 39.833 28.253 41.49 26.21 41.49 C24.167 41.49 22.51 39.833 22.51 37.79 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot4_ink-2" data-name="m2 dot4 ink" d="M31.84 27.96 C31.84 25.64 33.72 23.76 36.04 23.76 C38.36 23.76 40.24 25.64 40.24 27.96 C40.24 30.28 38.36 32.16 36.04 32.16 C33.72 32.16 31.84 30.28 31.84 27.96 Z" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-miterlimit="10"/>
+    <path id="m2_dot1" data-name="m2 dot1" d="M5.81 55.39 C5.81 53.844 7.064 52.59 8.61 52.59 C10.156 52.59 11.41 53.844 11.41 55.39 C11.41 56.936 10.156 58.19 8.61 58.19 C7.064 58.19 5.81 56.936 5.81 55.39 Z" fill="#24609a"/>
+    <path id="m2_dot2" data-name="m2 dot2" d="M13.89 46.91 C13.89 45.143 15.323 43.71 17.09 43.71 C18.857 43.71 20.29 45.143 20.29 46.91 C20.29 48.677 18.857 50.11 17.09 50.11 C15.323 50.11 13.89 48.677 13.89 46.91 Z" fill="#2d6aa8"/>
+    <path id="m2_dot3" data-name="m2 dot3" d="M22.51 37.79 C22.51 35.747 24.167 34.09 26.21 34.09 C28.253 34.09 29.91 35.747 29.91 37.79 C29.91 39.833 28.253 41.49 26.21 41.49 C24.167 41.49 22.51 39.833 22.51 37.79 Z" fill="#3d7dc2"/>
+    <path id="m2_dot4" data-name="m2 dot4" d="M31.84 27.96 C31.84 25.64 33.72 23.76 36.04 23.76 C38.36 23.76 40.24 25.64 40.24 27.96 C40.24 30.28 38.36 32.16 36.04 32.16 C33.72 32.16 31.84 30.28 31.84 27.96 Z" fill="#4f8fd8"/>
+  </g>
+  <path id="r_ring_shadow" d="M 34.00 38.00 C 34.00 42.42 30.42 46.00 26.00 46.00 C 21.58 46.00 18.00 42.42 18.00 38.00 C 18.00 33.58 21.58 30.00 26.00 30.00 C 30.42 30.00 34.00 33.58 34.00 38.00 Z " transform="translate(2.5 2.5)" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="r_ticks_shadow" d="M 26 25 L 26 29 M 26 47 L 26 51 M 13 38 L 17 38 M 35 38 L 39 38" transform="translate(2.5 2.5)" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="r_ring_ink" d="M 34.00 38.00 C 34.00 42.42 30.42 46.00 26.00 46.00 C 21.58 46.00 18.00 42.42 18.00 38.00 C 18.00 33.58 21.58 30.00 26.00 30.00 C 30.42 30.00 34.00 33.58 34.00 38.00 Z " fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="r_ticks_ink" d="M 26 25 L 26 29 M 26 47 L 26 51 M 13 38 L 17 38 M 35 38 L 39 38" fill="none" stroke="#16130f" stroke-width="7.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="r_ring" d="M 34.00 38.00 C 34.00 42.42 30.42 46.00 26.00 46.00 C 21.58 46.00 18.00 42.42 18.00 38.00 C 18.00 33.58 21.58 30.00 26.00 30.00 C 30.42 30.00 34.00 33.58 34.00 38.00 Z " fill="none" stroke="#ff4433" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="r_ticks" d="M 26 25 L 26 29 M 26 47 L 26 51 M 13 38 L 17 38 M 35 38 L 39 38" fill="none" stroke="#ff4433" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

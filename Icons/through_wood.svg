@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>through_wood_1_shell_tree</title>
+  <g transform="translate(34 33) scale(0.85) translate(-33 -31)">
+  <path id="t_trunk_shadow" d="M 22.75 45.00 L 29.25 45.00 L 29.25 55.40 L 22.75 55.40 Z " transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="t_shadow" d="M 26.00 3.40 L 36.40 17.70 L 31.20 17.70 L 41.60 32.00 L 33.80 32.00 L 45.50 46.30 L 6.50 46.30 L 18.20 32.00 L 10.40 32.00 L 20.80 17.70 L 15.60 17.70 Z " transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="t_trunk_ink" d="M 22.75 45.00 L 29.25 45.00 L 29.25 55.40 L 22.75 55.40 Z " fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="t_ink" d="M 26.00 3.40 L 36.40 17.70 L 31.20 17.70 L 41.60 32.00 L 33.80 32.00 L 45.50 46.30 L 6.50 46.30 L 18.20 32.00 L 10.40 32.00 L 20.80 17.70 L 15.60 17.70 Z " fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="t_trunk" d="M 22.75 45.00 L 29.25 45.00 L 29.25 55.40 L 22.75 55.40 Z " fill="#8a6a45"/>
+  <path id="t" d="M 26.00 3.40 L 36.40 17.70 L 31.20 17.70 L 41.60 32.00 L 33.80 32.00 L 45.50 46.30 L 6.50 46.30 L 18.20 32.00 L 10.40 32.00 L 20.80 17.70 L 15.60 17.70 Z " fill="#5d9b3c"/>
+  <path id="t_shade" d="M 26.00 3.40 L 36.40 17.70 L 31.20 17.70 L 41.60 32.00 L 33.80 32.00 L 45.50 46.30 L 28.60 46.30 L 28.60 8.60 Z " fill="#3f6e2a"/>
+  <path id="t_lit" d="M 23.40 9.90 L 19.50 16.40 M 22.10 24.20 L 15.60 32.00 M 20.80 38.50 L 13.00 45.00 " fill="none" stroke="#a6d97a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="tr_shadow" d="M 3 30 L 40 30 M 8 38 L 40 38" transform="translate(2.5 2.5)" fill="none" stroke="#16130f" stroke-width="7.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="s_shadow" d="M 30.50 28.60 L 49.40 28.60 C 56.15 28.60 60.20 34.00 60.20 34.00 C 60.20 34.00 56.15 39.40 49.40 39.40 L 30.50 39.40 Z " transform="translate(2.5 2.5)" fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="tr_ink" d="M 3 30 L 40 30 M 8 38 L 40 38" fill="none" stroke="#16130f" stroke-width="7.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="s_ink" d="M 30.50 28.60 L 49.40 28.60 C 56.15 28.60 60.20 34.00 60.20 34.00 C 60.20 34.00 56.15 39.40 49.40 39.40 L 30.50 39.40 Z " fill="#16130f" stroke="#16130f" stroke-width="5" stroke-linejoin="round"/>
+  <path id="tr" d="M 3 30 L 40 30 M 8 38 L 40 38" fill="none" stroke="#fbf5e6" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="s" d="M 30.50 28.60 L 49.40 28.60 C 56.15 28.60 60.20 34.00 60.20 34.00 C 60.20 34.00 56.15 39.40 49.40 39.40 L 30.50 39.40 Z " fill="#ffb02e"/>
+  <path id="s_band" d="M 38.60 28.60 L 38.60 39.40 L 34.55 39.40 L 34.55 28.60 Z " fill="#b8682c"/>
+  <path id="s_lit" d="M 52.10 31.97 L 41.30 31.98 " fill="none" stroke="#ffe9a8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
