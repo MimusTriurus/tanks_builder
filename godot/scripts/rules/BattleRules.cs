@@ -84,11 +84,12 @@ public static partial class Battle
             return "already moved";
         if (u.Pinned)
             return "pinned by a ram blade";
-        if ((s.Fired || s.Bonus) && !u.Class.FreeOrder)
+        // the forced engine is a bonus act said before the move, not after it
+        if ((s.Fired || (s.Bonus && !s.Overdrive)) && !u.Class.FreeOrder)
             return "only LT moves after acting";
         s.Drove = true;
         Lift(s, u, "moved");
-        Dictionary<int, Queue<int>>? picks = AmbushPicks(s, u, path, face, back);
+        Dictionary<int, Queue<int>>? picks = AmbushPicks(s, u, path, face, back, stopOnly: s.Overdrive);
         return Walk(s, u, path, face, back, pose => picks is null || AmbushesAt(s, u, pose, picks));
     }
 
@@ -185,9 +186,12 @@ public static partial class Battle
     /// stabilizer's second round the same among the poses after its first.
     /// Poses past where the move stops on its own (a mine, the deep) are not
     /// had: the walk on the copy stops there too. Null with no ambush to fire.
+    /// <paramref name="stopOnly"/> - the forced engine (upgrades.md): only the
+    /// pose the move ends in is had; an ambush whose axis is only crossed does
+    /// not fire, and is not spent.
     /// </summary>
     public static Dictionary<int, Queue<int>>? AmbushPicks(BattleState s, BattleUnit u, IReadOnlyList<Vector2I> path,
-                                                          int face, bool? back)
+                                                          int face, bool? back, bool stopOnly = false)
     {
         bool any = false;
         foreach (BattleUnit w in s.Units)
@@ -197,8 +201,10 @@ public static partial class Battle
         BattleState t = s.Clone();
         BattleUnit tu = t.Unit(u.Id)!;
         var seen = new Dictionary<int, List<(int Pose, bool Knocks)>>();
+        int last = -1;
         Walk(t, tu, path, face, back, pose =>
         {
+            last = Math.Max(last, pose);
             foreach (BattleUnit w in t.Units)
             {
                 if (w.Side == tu.Side || w.Fate != UnitFate.Alive || !w.Ambushing)
@@ -215,6 +221,9 @@ public static partial class Battle
             }
             return true;
         });
+        if (stopOnly)
+            foreach (var poses in seen.Values)
+                poses.RemoveAll(p => p.Pose != last);
         if (seen.Count == 0)
             return null;
         var picks = new Dictionary<int, Queue<int>>();
@@ -597,7 +606,8 @@ public static partial class Battle
         {
             WallDownAll(s, target);
         }
-        Ramming.Shove push = Ramming.Of(s.Board, c => c != target && s.At(c) is not null, u.Class, victim.Class, target, way);
+        Ramming.Shove push = Ramming.Of(s.Board, c => c != target && s.At(c) is not null, u.Class, victim.Class, target, way,
+                                        two: (u.Kit & Kit.PushTwo) != 0);
         if (!push.Allowed)
         {
             s.Events.Add(new BattleEvent(BattleEventKind.RamRefused, u.Id, target, way, Ramming.Because(push.Why)));
@@ -612,33 +622,51 @@ public static partial class Battle
         if ((victim.Kit & Kit.AmbushStabilizer) == 0)
             Lift(s, victim, "was rammed");
         u.Heading = way;
-        Vector2I landing = push.Legs[^1];
+        // the hexes the target is thrown on to and stops on: one - the ramp's
+        // slide lands at its foot - or, with the push of two (upgrades.md,
+        // «Толчок на два гекса»), two in turn, as a path: each one's effects
+        // had, and a hull knocked out, drowned or stopped by a mine on the
+        // first goes no further. The bulldozer's walls come down on all three.
+        IReadOnlyList<Vector2I> hexes = push.Two ? push.Legs : new[] { push.Legs[^1] };
         if (u.Class.Bulldozes)
-            WallDownAll(s, landing);
-        victim.Cell = landing;
-        s.Events.Add(new BattleEvent(BattleEventKind.Shoved, victim.Id, landing, way));
-        u.Cell = target;
-        s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, target, way));
-        // the ram blade (upgrades.md, «Таранный отвал»): no move in its next activation
-        if ((u.Kit & Kit.RamBlade) != 0 && victim.Fate == UnitFate.Alive && !victim.Pinned)
+            foreach (Vector2I h in hexes)
+                WallDownAll(s, h);
+        bool pin = (u.Kit & Kit.RamBlade) != 0 && victim.Fate == UnitFate.Alive && !victim.Pinned;
+        for (int i = 0; i < hexes.Count; i++)
         {
-            victim.Pinned = true;
-            s.Events.Add(new BattleEvent(BattleEventKind.Pinned, victim.Id, landing, u.Id));
-        }
-        if (victim.Fate == UnitFate.Alive)
-            Entered(s, victim, way, forward: way == victim.Heading);
-        else
-        {
-            if (s.Board.IsDeep(landing) && victim.Fate == UnitFate.Knocked)
+            Vector2I at = hexes[i];
+            victim.Cell = at;
+            s.Events.Add(new BattleEvent(BattleEventKind.Shoved, victim.Id, at, way));
+            if (i == 0)
+            {
+                u.Cell = target;
+                s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, target, way));
+                // the ram blade (upgrades.md, «Таранный отвал»): no move in its next activation
+                if (pin)
+                {
+                    victim.Pinned = true;
+                    s.Events.Add(new BattleEvent(BattleEventKind.Pinned, victim.Id, at, u.Id));
+                }
+            }
+            if (victim.Fate == UnitFate.Alive)
+            {
+                bool stops = Entered(s, victim, way, forward: way == victim.Heading);
+                if (victim.Fate != UnitFate.Alive || stops)
+                    break;
+                continue;
+            }
+            if (s.Board.IsDeep(at) && victim.Fate == UnitFate.Knocked)
             {
                 victim.Fate = UnitFate.Drowned;
-                s.Events.Add(new BattleEvent(BattleEventKind.Drowned, victim.Id, landing));
+                s.Events.Add(new BattleEvent(BattleEventKind.Drowned, victim.Id, at));
             }
             // a hull out of the fight shoved on to an axis is crossing it too
             // (units.md: «Отброшенный тараном вражеский танк»; states.md: the
             // ambush's round on it is the one that destroys it)
             Disperse(s, victim);
             Ambushes(s, victim);
+            if (victim.Fate != UnitFate.Knocked)
+                break;
         }
         Entered(s, u, way, forward: true);
         Over(s);
@@ -683,6 +711,33 @@ public static partial class Battle
         s.Bonus = true;
         Lift(s, u, "doused");
         Douse(s, u);
+        return null;
+    }
+
+    /// <summary>
+    /// The forced engine (upgrades.md, «Форсированный двигатель», 2026-11-02;
+    /// п. 5б): said before the move - an exception to «the move first, then the
+    /// acts», as LT's free order is. This turn the move's crossings of an enemy
+    /// ambush's axis draw no fire; an ambush fires only on the hull stopped on
+    /// its axis, and one crossed is not spent (<see cref="AmbushPicks"/>,
+    /// <c>stopOnly</c>). It is the turn's bonus act: no ram, no putting a fire
+    /// out after it.
+    /// </summary>
+    public static string? Overdrive(BattleState s)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.Overdrive) == 0)
+            return "no forced engine";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
+        if (s.Drove)
+            return "said before the move";
+        if (u.Pinned)
+            return "pinned by a ram blade";
+        s.Bonus = s.Overdrive = true;
+        Lift(s, u, "overdrive");
+        s.Events.Add(new BattleEvent(BattleEventKind.Overdrive, u.Id, u.Cell));
         return null;
     }
 
@@ -1099,7 +1154,7 @@ public static partial class Battle
         s.TurnNo++;
         s.Turn = ending == Camp.Green ? Camp.Brown : Camp.Green;
         s.Active = null;
-        s.Drove = s.Fired = s.Bonus = false;
+        s.Drove = s.Fired = s.Bonus = s.Overdrive = false;
         // the round over once player 2 has moved (match.md, «Ход и раунд»)
         if (s.Turn == s.First)
         {

@@ -109,6 +109,13 @@ public sealed partial class Tank3DBench
 
     private enum RamPhase { None, Push, Dwell, Back }
 
+    /// <summary>The push of two under way (upgrades.md, «Толчок на два гекса»):
+    /// its first hex, the target's fate as it was thrown, and a mine on the
+    /// first hex having gone off under it - either stops it there.</summary>
+    private bool _pushTwo, _pushHalt;
+    private Vector2I _pushFirst;
+    private Fate _pushFate;
+
     /// <summary>The share of the class's top speed below which a hull only
     /// touches the other: a nudge at a crawl is parking, not a ram.</summary>
     private const float RamFloor = 0.2f;
@@ -496,7 +503,9 @@ public sealed partial class Tank3DBench
         Vector2I mineCell = _field!.FlatCellAt(Board(at));
         // in a match the standing units stand behind it too (Tank3DBench.Match)
         Ramming.Shove push = Ramming.Of(_field, c => (Blocks && c == mineCell) || (Match && ParkedCells.Contains(c)),
-                                        _profile, o.Profile, o.Cell, heading);
+                                        _profile, o.Profile, o.Cell, heading,
+                                        // the push of two (upgrades.md, «Толчок на два гекса»)
+                                        two: Match && RigHas(Kit.PushTwo));
         if (!push.Allowed)
         {
             Log.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {MapAt(o.Cell)} along {heading} - "
@@ -523,6 +532,11 @@ public sealed partial class Tank3DBench
             o.Legs.Add(CellWorld(c));
         o.Leg = 0;
         o.Cell = push.Legs[^1];
+        // the push of two: what the first hex does may stop it there (OtherTick)
+        _pushTwo = push.Two;
+        _pushFirst = push.Legs[0];
+        _pushFate = o.Fate;
+        _pushHalt = false;
         o.Way = way;
         _otherCell = o.Cell;
         // The belts drag: across the way they go, as wide as they are across it.
@@ -816,6 +830,18 @@ public sealed partial class Tank3DBench
         o.Slid = 0.0f;
         if (_ram == RamPhase.Push)
             o.Slid = o.Speed * dt;
+        // the push of two (upgrades.md, «Толчок на два гекса»; Battle.Ram): a
+        // hull knocked out, drowned or stopped by a mine on the first hex goes
+        // no further
+        else if (_pushTwo && o.Leg >= 1 && o.Leg < o.Legs.Count && (_pushHalt || o.Fate != _pushFate))
+        {
+            o.Legs.RemoveRange(o.Leg, o.Legs.Count - o.Leg);
+            o.Cell = _pushFirst;
+            _otherCell = _pushFirst;
+            o.Speed = 0.0f;
+            _pushTwo = false;
+            Log.Print($"ram: {o.Tag} stops on {MapAt(_pushFirst)} - the first hex of the push of two ended it");
+        }
         else if (o.Leg >= 1 && o.Leg < o.Legs.Count)
         {
             // Down the slope and on to its foot, braking to the middle of it.

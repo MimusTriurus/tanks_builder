@@ -80,7 +80,7 @@ public sealed partial class Tank3DBench
             // the relief's sea (BoardMap.Moated): the printout in the map's cells
             Shift = _moat,
             Turn =CampOf(_mt.Turn), First = CampOf(_mt.First), Round = _mt.Round, TurnNo = _mt.TurnNo,
-            Drove = _mt.Drove, Fired = _mt.Fired, Bonus = _mt.Bonus, LastStrike = _mt.LastStrike,
+            Drove = _mt.Drove, Fired = _mt.Fired, Bonus = _mt.Bonus, Overdrive = _mt.Overdrive, LastStrike = _mt.LastStrike,
             // the control point (Tank3DBench.Point)
             Point = _pointCells, Score = (int[])_mt.Score.Clone(), LastShift = _mt.LastShift,
             Holder = _mt.Holder is Side held ? CampOf(held) : null,

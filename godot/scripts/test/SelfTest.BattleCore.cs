@@ -608,6 +608,65 @@ public static partial class SelfTest
                   $"pinned {pinned}; move {stuck}; fire {fired ?? "ok"}; freed {freed}; later {later ?? "ok"}; {Said(s)}");
         }
 
+        // upgrades.md «Толчок на два гекса» (2026-11-04): a green heavy at (4,9)
+        // rams a brown medium at (4,8) - with it the medium lands on (4,6), the
+        // heavy on (4,8); without it on (4,7); a tank on (4,6) stops it on
+        // (4,7); a mine on (4,7) knocks it out there and it goes no further.
+        {
+            BattleState Rammed(Kit kit, Vector2I[]? mines = null, bool blocker = false)
+            {
+                BattleState t = Probe(9, 10, mines: mines);
+                Put(t, 0, "HTR", Camp.Green, 4, 9, 90, kit: kit);
+                Put(t, 1, "MTR", Camp.Brown, 4, 8, 270);
+                if (blocker)
+                    Put(t, 2, "LTR", Camp.Brown, 4, 6, 270);
+                Act(t, 0, st => Battle.Ram(st, new Vector2I(4, 8)));
+                return t;
+            }
+            BattleState two = Rammed(Kit.PushTwo), one = Rammed(Kit.None), held = Rammed(Kit.PushTwo, blocker: true),
+                        mined = Rammed(Kit.PushTwo, mines: new[] { new Vector2I(4, 7) });
+            check("the push of two: thrown two hexes, the heavy on the first; a tank behind or a mine on the first stops it there",
+                  two.Unit(1)!.Cell == new Vector2I(4, 6) && two.Unit(0)!.Cell == new Vector2I(4, 8)
+                  && one.Unit(1)!.Cell == new Vector2I(4, 7)
+                  && held.Unit(1)!.Cell == new Vector2I(4, 7)
+                  && mined.Unit(1)!.Cell == new Vector2I(4, 7) && mined.Unit(1)!.Fate == UnitFate.Knocked,
+                  $"two: {Said(two)}; one: {Said(one)}; held: {Said(held)}; mined: {Said(mined)}");
+        }
+
+        // upgrades.md «Форсированный двигатель» (2026-11-04): a green medium at
+        // (4,8) watches up; a brown medium crosses the axis at (4,5) - fired on
+        // without it, not with it (the ambush kept); with it, stopping on the
+        // axis is fired on; said after the move it is refused; the medium may
+        // still move after saying it.
+        {
+            var mid = new Vector2I(4, 5);
+            Vector2I[] across = { HexField.Step(mid, 30), mid, HexField.Step(mid, 210) };
+            BattleState Crossed(Kit kit, bool say, Vector2I[] path)
+            {
+                BattleState t = Probe(9, 10);
+                Put(t, 0, "MTR", Camp.Green, 4, 8, 90);
+                t.Unit(0)!.Watch = 90;
+                t.Unit(0)!.WatchShots = 1;
+                Put(t, 1, "MTR", Camp.Brown, across[0].X, across[0].Y, 210, kit: kit);
+                Act(t, 1, st => (say ? Battle.Overdrive(st) : null) ?? Battle.Move(st, path, -1));
+                return t;
+            }
+            static bool Fired(BattleState t) => t.Events.Any(e => e.Kind == BattleEventKind.AmbushFired);
+            static bool Refused(BattleState t) => t.Events.Any(e => e.Note == "REFUSED");
+            BattleState plain = Crossed(Kit.None, false, across), forced = Crossed(Kit.Overdrive, true, across),
+                        stopped = Crossed(Kit.Overdrive, true, new[] { across[1] });
+            string? late = null;
+            BattleState after = Probe(9, 10);
+            Put(after, 0, "MTR", Camp.Brown, 4, 5, 90, kit: Kit.Overdrive);
+            Put(after, 1, "LTR", Camp.Green, 0, 0, 90);
+            Act(after, 0, st => Battle.Move(st, new[] { new Vector2I(4, 4) }, -1));
+            late = Battle.Overdrive(after);
+            check("the forced engine: an ambush's axis crossed draws no fire and the ambush stays; stopped on it, fired on; said before the move only",
+                  Fired(plain) && !Fired(forced) && !Refused(forced) && forced.Unit(0)!.Ambushing
+                  && forced.Unit(1)!.Cell == across[2] && Fired(stopped) && late is not null,
+                  $"plain: {Said(plain)}; forced: {Said(forced)}; stopped: {Said(stopped)}; after the move: {late}");
+        }
+
         // Д8, upgrades.md «Противоосколочный подбой»: the mortar's bomb sets off
         // a knocked medium at (4,5); of the two lights beside it the lined one
         // does not catch.

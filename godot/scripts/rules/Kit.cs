@@ -10,11 +10,12 @@ namespace TankSpriteTest;
 /// board (<c>Tank3DBench._amphibious</c>) until the match gave each unit its
 /// kit (docs/battle-core-plan.md, Д1).
 ///
-/// <b>Seventeen of upgrades.md's twenty-two have a flag here, each read by the
+/// <b>Nineteen of upgrades.md's twenty-two have a flag here, each read by the
 /// rules</b> (Д1, Д8; the 2026-11-02 revision: the trawl became the mine guard,
 /// the auto-extinguisher and the double turn pay with the bonus act; 2026-11-04:
-/// the 3-6 bracket, through the wood, the ram blade). The other five added on
-/// 2026-11-02 are on the trees (<see cref="QuickSquad"/>) only.
+/// the 3-6 bracket, through the wood, the ram blade, the forced engine, the
+/// push of two). The smoke round, the wide sector and the shot on the move are
+/// on the trees (<see cref="QuickSquad"/>) only.
 /// </summary>
 [Flags]
 public enum Kit
@@ -63,6 +64,13 @@ public enum Kit
     /// <summary>Таранный отвал: a hull it rams loses its move in its next
     /// activation (<see cref="BattleUnit.Pinned"/>).</summary>
     RamBlade = 1 << 16,
+    /// <summary>Форсированный двигатель: a bonus act said before the move -
+    /// the enemy's ambushes then fire only at the hull stopped on their axes
+    /// (<see cref="Battle.Overdrive"/>).</summary>
+    Overdrive = 1 << 17,
+    /// <summary>Толчок на два гекса: the ram throws its target two hexes, hex
+    /// by hex (<see cref="Ramming.Of"/>, <c>two</c>).</summary>
+    PushTwo = 1 << 18,
 }
 
 public static class Kits
@@ -88,6 +96,8 @@ public static class Kits
         (Kit.Bracket, "bracket", L.T("kit.bracket")),
         (Kit.ThroughWood, "through_wood", L.T("kit.through_wood")),
         (Kit.RamBlade, "ram_blade", L.T("kit.ram_blade")),
+        (Kit.Overdrive, "overdrive", L.T("kit.overdrive")),
+        (Kit.PushTwo, "push_two", L.T("kit.push_two")),
     };
 
     /// <summary>

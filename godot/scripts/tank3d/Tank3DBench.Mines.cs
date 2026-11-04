@@ -145,6 +145,8 @@ public sealed partial class Tank3DBench
                      && UnderHull(mine.At, o.Rig.Position, o.Ahead, o.Foot, out float alongOther))
             {
                 Blow(mine);
+                // a mine ends the push of two on its hex (Battle.Ram)
+                _pushHalt = true;
                 // shoved on to it, the mine guard holds as it does driven (Battle.Arrive)
                 if (Match && o.Unit && o.Fate == Fate.Alive && (KitOf(o.Id) & Kit.MineGuard) != 0)
                 {

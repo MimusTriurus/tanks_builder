@@ -108,9 +108,9 @@ public static class QuickSquad
             {
                 new Branch("ram", L.T("squad.branch.ram.name"), L.T("squad.branch.ram.tag"), new[]
                 {
-                    U("overdrive", L.T("squad.up.boost.name"), "squad.kind.ability_premove", L.T("squad.up.boost.text")),
+                    U("overdrive", L.T("squad.up.boost.name"), "squad.kind.ability_premove", L.T("squad.up.boost.text"), Kit.Overdrive),
                     U("dozer_blade", L.T("squad.up.ram_blade.name"), "squad.kind.passive", L.T("squad.up.ram_blade.text"), Kit.RamBlade),
-                    U("push_two", L.T("squad.up.double_push.name"), "squad.kind.passive_class", L.T("squad.up.double_push.text")),
+                    U("push_two", L.T("squad.up.double_push.name"), "squad.kind.passive_class", L.T("squad.up.double_push.text"), Kit.PushTwo),
                 }),
                 new Branch("storm", L.T("squad.branch.storm.name"), L.T("squad.branch.storm.tag"), new[] { SpallLiner, MineGuard, Extinguisher }),
             }),

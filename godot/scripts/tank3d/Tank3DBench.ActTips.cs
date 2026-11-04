@@ -70,6 +70,7 @@ public sealed partial class Tank3DBench
         ["winch"] = L.T("acttips.text_winch", Battle.WinchReach),
         ["douse"] = L.T("acttips.text_douse"),
         ["double_turn"] = L.T("acttips.text_pivot"),
+        ["overdrive"] = L.T("acttips.text_overdrive"),
         // the corner's buttons (TurnTipHook)
         ["endturn"] = L.T("acttips.text_endturn"),
         ["ready"] = L.T("acttips.text_ready"),

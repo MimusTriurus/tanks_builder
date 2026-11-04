@@ -76,9 +76,11 @@ public static class Ramming
     ///
     /// One hex normally, two when the first is a ramp taken from above - the
     /// slide of T11, which is not a second event but the same throw continuing
-    /// down the slope it landed on.
+    /// down the slope it landed on. <paramref name="Two"/>: two hexes thrown
+    /// by the push of two (upgrades.md, «Толчок на два гекса») - each one
+    /// entered in turn, its effects had, the throw stopping where one ends it.
     /// </summary>
-    public readonly record struct Shove(IReadOnlyList<Vector2I> Legs, Bar Why)
+    public readonly record struct Shove(IReadOnlyList<Vector2I> Legs, Bar Why, bool Two = false)
     {
         public bool Allowed => Why == Bar.None;
     }
@@ -131,6 +133,27 @@ public static class Ramming
     /// beside the methods that call them. A rule nobody can put a board in front
     /// of is a rule that gets read rather than checked.
     /// </summary>
+    public static Shove Of(IHexBoard field, Func<Vector2I, bool> occupied,
+                           MovementProfile rammer, MovementProfile victim,
+                           Vector2I from, int heading, bool two)
+    {
+        Shove one = Of(field, occupied, rammer, victim, from, heading);
+        // the push of two (upgrades.md, «Толчок на два гекса»): the second hex
+        // asked as a path's next one - refused, the throw stops on the first. A
+        // ramp's slide is its own second hex already; a ramp on the second is
+        // no landing for a throw that is still going.
+        if (!two || !one.Allowed || one.Legs.Count != 1)
+            return one;
+        Vector2I onto = one.Legs[0];
+        Vector2I next = HexField.Step(onto, heading);
+        if (next == onto || Takes(field, occupied, next, onto) != Bar.None || field.RampHeading(next) >= 0
+            || (!rammer.Bulldozes && field.SidesAt(next) != 0))
+            return one;
+        return new Shove(new List<Vector2I> { onto, next }, Bar.None, Two: true);
+    }
+
+    /// <summary>The one-hex throw - <see cref="Of(IHexBoard, Func{Vector2I, bool}, MovementProfile, MovementProfile, Vector2I, int, bool)"/>
+    /// without the push of two.</summary>
     public static Shove Of(IHexBoard field, Func<Vector2I, bool> occupied,
                            MovementProfile rammer, MovementProfile victim,
                            Vector2I from, int heading)

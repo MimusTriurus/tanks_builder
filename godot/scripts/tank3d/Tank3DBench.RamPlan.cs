@@ -158,7 +158,8 @@ public sealed partial class Tank3DBench
         (int, int, int, int) bestRank = (int.MaxValue, 0, 0, 0);
         void Offer(Vector2I from, int side, int way, int steps, bool risky)
         {
-            Ramming.Shove push = Ramming.Of(_field!, c => ParkedCells.Contains(c), _profile, o.Profile, target, side);
+            Ramming.Shove push = Ramming.Of(_field!, c => ParkedCells.Contains(c), _profile, o.Profile, target, side,
+                                            two: Match && RigHas(Kit.PushTwo));
             var rank = (push.Allowed ? 0 : 1, risky ? 1 : 0, steps, way);
             if (best is not null && rank.CompareTo(bestRank) >= 0)
                 return;

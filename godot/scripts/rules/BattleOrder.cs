@@ -4,7 +4,7 @@ using Godot;
 
 namespace TankSpriteTest;
 
-public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot }
+public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive }
 
 /// <summary>
 /// An order to the core (docs/battle-core-plan.md, Д10): the bench's command
@@ -12,7 +12,7 @@ public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke,
 /// the same words as <c>--commands</c> - <c>take:ID</c>, <c>go:Q,R[:SIDE]</c>,
 /// <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
 /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>,
-/// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>,
+/// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>, <c>overdrive</c>,
 /// <c>pass</c>, <c>undo</c>, <c>place:ID:Q,R[:SIDE]</c>, <c>ready</c>. What a
 /// script gives <see cref="BattleRun"/> and, next, what the AI gives.
 /// </summary>
@@ -68,6 +68,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
                 "winch" => new Order(OrderKind.Winch, Cell(parts[1])),
                 "douse" => new Order(OrderKind.Douse),
                 "pivot" => new Order(OrderKind.Pivot, Side: int.Parse(parts[1])),
+                "overdrive" => new Order(OrderKind.Overdrive),
                 "pass" => new Order(OrderKind.Pass),
                 "undo" => new Order(OrderKind.Undo),
                 "place" => new Order(OrderKind.Place, Cell(parts[2]), Arg(3), int.Parse(parts[1])),
@@ -135,6 +136,7 @@ public static partial class Battle
         OrderKind.Winch => Winch(s, o.Cell),
         OrderKind.Douse => Douse(s),
         OrderKind.Pivot => Pivot(s, o.Side),
+        OrderKind.Overdrive => Overdrive(s),
         OrderKind.Pass => s.Over ? "the match is over" : PassNow(s),
         OrderKind.Undo => "the core keeps no undo",
         _ => "the placement is before the first turn",
@@ -161,7 +163,7 @@ public static partial class Battle
         if (s.At(target) is not { } victim || victim.Id == u.Id)
             return "nobody to ram";
         Steps.Mover mover = MoverOf(s, u);
-        bool mayMove = !s.Drove && !u.Pinned && (!(s.Fired || s.Bonus) || u.Class.FreeOrder);
+        bool mayMove = !s.Drove && !u.Pinned && (!(s.Fired || (s.Bonus && !s.Overdrive)) || u.Class.FreeOrder);
         Steps.Reach? reach = mayMove ? Steps.Plan(s.Board, new Steps.Pose(u.Cell, u.Heading), mover) : null;
         Steps.Route? bestRoute = null;
         int bestSide = -1;

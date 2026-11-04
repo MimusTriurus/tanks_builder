@@ -94,6 +94,8 @@ public sealed partial class Tank3DBench
         /// attack (the shot) and the bonus act (the ram, putting a fire out) -
         /// match.md «Структура хода», п. 5а and 5б, one of each (U-22).</summary>
         public bool Drove, Fired, Bonus;
+        /// <summary>The forced engine said this turn (<see cref="BattleState.Overdrive"/>).</summary>
+        public bool Overdrive;
         /// <summary>The round of the last shot at a tank, nought for none -
         /// the stalemate's clock (Tank3DBench.Rules, Д6).</summary>
         public int LastStrike;
@@ -344,7 +346,8 @@ public sealed partial class Tank3DBench
             return L.T("match.already_moved", _modelTag);
         if (RigPinned)
             return L.T("match.pinned_no_move", _modelTag);
-        if ((_mt.Fired || _mt.Bonus) && !_profile.FreeOrder)
+        // the forced engine is said before the move (Battle.Overdrive)
+        if ((_mt.Fired || (_mt.Bonus && !_mt.Overdrive)) && !_profile.FreeOrder)
             return L.T("match.no_move_after_act");
         return "";
     }
@@ -534,7 +537,7 @@ public sealed partial class Tank3DBench
         _matchNote = "";
         CancelOrder();
         DropTarget();
-        _mt.Drove = _mt.Fired = _mt.Bonus = false;
+        _mt.Drove = _mt.Fired = _mt.Bonus = _mt.Overdrive = false;
         _moveSnap = null;
         for (int tries = 0; tries < 2; tries++)
         {

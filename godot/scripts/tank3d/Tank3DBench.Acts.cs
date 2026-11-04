@@ -48,7 +48,7 @@ public sealed partial class Tank3DBench
 {
     private HBoxContainer? _acts;
     private PanelContainer? _groupMove, _groupAttack, _groupBonus;
-    private Button? _actMove, _actAttack, _actRam, _actDouse;
+    private Button? _actMove, _actAttack, _actRam, _actDouse, _actOverdrive;
     /// <summary>«Атака» on: the left button on a tank fires, and ours may be fired on.</summary>
     private bool _attackMode;
     /// <summary>The bonus group's buttons in their order, and what each does
@@ -129,6 +129,9 @@ public sealed partial class Tank3DBench
         _actRepair = BonusButton(bonus, "repair", L.T("acts.repair"), toggle: true, () => GearToggle(Gear.Repair));
         _actWinch = BonusButton(bonus, "winch", L.T("acts.winch"), toggle: true, () => GearToggle(Gear.Winch));
         _actPivot = BonusButton(bonus, "double_turn", L.T("acts.pivot"), toggle: true, () => GearToggle(Gear.Pivot));
+        // the forced engine (upgrades.md, 2026-11-04): said at once, before the move
+        _actOverdrive = BonusButton(bonus, "overdrive", L.T("acts.overdrive"), toggle: false,
+                                    () => Execute(new Command(CommandKind.Overdrive)));
         _actDouse = BonusButton(bonus, "douse", L.T("acts.douse"), toggle: false, () => Execute(new Command(CommandKind.Douse)));
         layer.AddChild(_acts);
         BuildActTip(layer);
@@ -677,7 +680,7 @@ public sealed partial class Tank3DBench
         ActOn(_actAmbush!, attack);
         ActOn(_actFiery!, attack);
         for (int i = 0; i < _bonusActs.Count; i++)
-            ActOn(_bonusActs[i].Button, bonus);
+            ActOn(_bonusActs[i].Button, bonus && !(_mt.Drove && _bonusActs[i].Button == _actOverdrive));
         _actAttack!.SetPressedNoSignal(attack && _attackMode);
         _actAmbush!.SetPressedNoSignal(attack && _ambushMode);
         _actFiery!.Visible = RigBurns;
@@ -692,6 +695,7 @@ public sealed partial class Tank3DBench
         _actWinch!.Visible = RigHas(Kit.Winch);
         _actWinch.SetPressedNoSignal(bonus && _gearMode == Gear.Winch);
         _actPivot!.Visible = RigHas(Kit.DoubleTurn);
+        _actOverdrive!.Visible = RigHas(Kit.Overdrive);
         _actPivot.SetPressedNoSignal(bonus && _gearMode == Gear.Pivot);
         _actDouse!.Visible = Burning(_unitId);
         // each cap with its button: gone with it, grey with it

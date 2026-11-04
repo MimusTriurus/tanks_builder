@@ -31,7 +31,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -106,6 +106,8 @@ public sealed partial class Tank3DBench
                 return GearWhy(GearOf(c.Kind), c.Cell);
             case CommandKind.Pivot:
                 return _fate != Fate.Alive ? L.T("commands.why_out", _modelTag) : PivotWhy(c.Side);
+            case CommandKind.Overdrive:
+                return OverdriveWhy();
             case CommandKind.Douse:
                 return !Burning(_unitId) ? L.T("commands.why_not_burning", _modelTag)
                     : _side != _mt.Turn ? L.T("commands.why_turn", SideName(_mt.Turn))
@@ -189,6 +191,9 @@ public sealed partial class Tank3DBench
                 break;
             case CommandKind.Pivot:
                 PivotTo(c.Side);
+                break;
+            case CommandKind.Overdrive:
+                OverdriveGo();
                 break;
             case CommandKind.Douse:
                 Douse();
@@ -322,6 +327,7 @@ public sealed partial class Tank3DBench
                                         Side2: parts.Length > 2 ? int.Parse(parts[2]) : -1),
                 "douse" => new Command(CommandKind.Douse),
                 "pivot" => new Command(CommandKind.Pivot, Side: int.Parse(parts[1])),
+                "overdrive" => new Command(CommandKind.Overdrive),
                 "pass" => new Command(CommandKind.Pass),
                 "undo" => new Command(CommandKind.Undo),
                 // the placement before the first turn (Tank3DBench.Deploy)

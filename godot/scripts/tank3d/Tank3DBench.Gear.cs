@@ -438,6 +438,48 @@ public sealed partial class Tank3DBench
         _ => Gear.Winch,
     };
 
+    /// <summary>Why the forced engine may not be said now, or empty: the turn's
+    /// gates, then the core's own (<see cref="Battle.Overdrive"/>).</summary>
+    private string OverdriveWhy()
+    {
+        if (_field is null || _lineup.Count == 0)
+            return L.T("gear.why_no_match");
+        if (_fate != Fate.Alive)
+            return L.T("gear.why_out", _modelTag);
+        if (_side != _mt.Turn)
+            return L.T("gear.why_turn", SideName(_mt.Turn));
+        if (!RigHas(Kit.Overdrive))
+            return L.T("gear.why_no_kit", _modelTag, L.T("gear.kit_overdrive"));
+        if (MatchBonusSpent)
+            return BonusGoneSay("gear.why_bonus_spent");
+        if (_mt.Drove)
+            return L.T("gear.why_overdrive_moved");
+        if (MatchBusy)
+            return L.T("blast.busy");
+        return Battle.Overdrive(ShadowOfBench()) is { } no
+            ? no == "pinned by a ram blade" ? L.T("match.pinned_no_move", _modelTag) : no
+            : "";
+    }
+
+    /// <summary>The forced engine said (the command's executor): the bonus act
+    /// spent, the move still to make - its ambushes timed by the core, which
+    /// fires them only where it stops (<see cref="ShadowMove"/>).</summary>
+    private void OverdriveGo()
+    {
+        if (OverdriveWhy() is { Length: > 0 } no)
+        {
+            _orderNote = no;
+            return;
+        }
+        ShadowAct("overdrive", s => Battle.Overdrive(s));
+        _mt.Bonus = true;
+        _mt.Overdrive = true;
+        _gearMode = Gear.None;
+        _ramMode = _smokeMode = false;
+        _orderNote = L.T("gear.overdrive_on");
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} says the forced engine - ambushes fire only where it stops");
+    }
+
     /// <summary>Why the double turn to <paramref name="side"/> may not be had
     /// now, or empty: the gates of a kit act, then the core's own.</summary>
     private string PivotWhy(int side) =>

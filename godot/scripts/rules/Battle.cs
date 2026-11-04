@@ -74,6 +74,8 @@ public enum BattleEventKind
     BonusOwed,
     /// <summary>A hull rammed by the ram blade: no move in its next activation.</summary>
     Pinned,
+    /// <summary>The forced engine said: the move to come is fired on only where it stops.</summary>
+    Overdrive,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench
@@ -109,6 +111,10 @@ public sealed class BattleState
     /// <summary>The unit this turn belongs to, once it has been taken.</summary>
     public int? Active;
     public bool Drove, Fired, Bonus;
+    /// <summary>The forced engine said this turn (upgrades.md, «Форсированный
+    /// двигатель»): the move's crossings of ambush axes draw no fire, only
+    /// where it stops (<see cref="Battle.Overdrive"/>).</summary>
+    public bool Overdrive;
     /// <summary>The round of the last shot at a tank, nought for none yet
     /// (match.md, «Пат — ничья»).</summary>
     public int LastStrike;
