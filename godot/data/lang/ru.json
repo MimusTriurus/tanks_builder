@@ -428,8 +428,6 @@
   "peek.front": "лоб",
   "peek.side": "борт",
   "peek.rear": "корма",
-  "peek.roof": "крыша",
-  "peek.turret": "башня",
   "glance.off_edge": "уйдёт за край",
   "glance.into_wall": "в стену {0}",
   "glance.into_smoke": "в дым {0}",

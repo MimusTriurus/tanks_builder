@@ -426,8 +426,6 @@
   "peek.front": "front",
   "peek.side": "side",
   "peek.rear": "rear",
-  "peek.roof": "roof",
-  "peek.turret": "turret",
   "glance.off_edge": "goes off the edge",
   "glance.into_wall": "into the wall {0}",
   "glance.into_smoke": "into smoke {0}",

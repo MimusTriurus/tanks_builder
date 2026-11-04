@@ -626,6 +626,11 @@ public sealed partial class Tank3DBench
         return pad;
     }
 
+    /// <summary>One of the equal gaps the machine's description is spread down its panel
+    /// by: what height the tree leaves, shared out.</summary>
+    private static Control QuickHangarGap() =>
+        new() { CustomMinimumSize = new Vector2(0, 6), SizeFlagsVertical = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore };
+
     /// <summary>A ready squad's tip: its three as the class in full and the branch, the
     /// level in rank chevrons as over the podium (author 2026-11-04), its play in the
     /// tip's ink.</summary>
@@ -773,7 +778,11 @@ public sealed partial class Tank3DBench
         }
         // the machine under its tree: what it is, its numbers, what it carries
         col.AddChild(new ColorRect { Color = Ui.Line, CustomMinimumSize = new Vector2(0, 1) });
-        QuickHangarUnit(col, s);
+        // its own column, no separation: its gaps share out the height the tree leaves
+        var unit = new VBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        unit.AddThemeConstantOverride("separation", 0);
+        col.AddChild(unit);
+        QuickHangarUnit(unit, s);
         var box = Ui.Box(col, Ui.Panel, 14);
         // the tips stand beside the panel, the tree stays open
         box.SetMeta(UiTip.Beside, true);
@@ -810,27 +819,31 @@ public sealed partial class Tank3DBench
         duty.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
         duty.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         name.AddChild(duty);
+        col.AddChild(QuickHangarGap());
         col.AddChild(name);
         // its role is the class tab's tip: in the type scale the column has no room for it.
         // The figures as the battle's card draws them (author 2026-11-04), in two columns
-        // level row for row under their captions, then the trait set off as a callout
+        // level row for row under their captions, then the trait set off as a callout - the
+        // three spread down the panel by equal gaps (author 2026-11-04), not packed at its top
+        col.AddChild(QuickHangarGap());
         col.AddChild(QuickHangarFigures(c.Profile));
+        col.AddChild(QuickHangarGap());
         col.AddChild(QuickHangarTrait(c.Trait));
+        col.AddChild(QuickHangarGap());
         // what it carries is the tree's open nodes: nothing said again (as on the old build)
     }
 
     /// <summary>The machine's figures in the battle card's marks (<c>Tank3DBench.Peek</c>),
-    /// <see cref="QhRowsK"/> times their size there: the class's might, steps, mass and
-    /// turret on the left, its four plates on the right - four rows each, level, under
-    /// their captions (author 2026-11-04: the card's armour heading made a step). The
-    /// turret is a yes or a no, one slot; the roof the card leaves out is here.</summary>
+    /// <see cref="QhRowsK"/> times their size there: the class's might, steps and mass on
+    /// the left, its three plates on the right - three rows each, level, under their
+    /// captions (author 2026-11-04: the card's armour heading made a step). The turret
+    /// and the roof the card leaves out are left out here too (author 2026-11-04).</summary>
     private Control QuickHangarFigures(MovementProfile p)
     {
         Font font = ThemeDB.FallbackFont;
         const float k = QhRowsK;
         int size = Mathf.RoundToInt(Ui.Caption * k);
-        // rows a little closer than the card's: the page has no height to spare
-        float step = 22.0f * k, high = step * 4.0f;
+        float step = PeekRowStep * k, high = step * 3.0f;
         // a column's slots past its longest label
         float SlotsAt(params string[] keys)
         {
@@ -839,8 +852,8 @@ public sealed partial class Tank3DBench
                 w = Mathf.Max(w, font.GetStringSize(L.T(key), HorizontalAlignment.Left, -1, size).X);
             return Mathf.Ceil(w + 14.0f * k);
         }
-        float leftAt = SlotsAt("peek.fire", "peek.move", "peek.mass", "peek.turret");
-        float rightAt = SlotsAt("peek.front", "peek.side", "peek.rear", "peek.roof");
+        float leftAt = SlotsAt("peek.fire", "peek.move", "peek.mass");
+        float rightAt = SlotsAt("peek.front", "peek.side", "peek.rear");
         Control Column(string head, float wide, Action<Control, float> draw)
         {
             var box = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -858,14 +871,12 @@ public sealed partial class Tank3DBench
             PeekRow(c, font, 0, leftAt, y, L.T("peek.fire"), p.Might, PeekMight, PeekMark.Dot, Ui.Attack, k);
             PeekRow(c, font, 0, leftAt, y + step, L.T("peek.move"), p.Steps, PeekSteps, PeekMark.Dot, Ui.Ink, k);
             PeekRow(c, font, 0, leftAt, y + step * 2, L.T("peek.mass"), p.Mass, PeekMass, PeekMark.Square, Ui.Ink, k);
-            PeekRow(c, font, 0, leftAt, y + step * 3, L.T("peek.turret"), p.Turreted ? 1 : 0, 1, PeekMark.Square, Ui.Ink, k);
         }));
         two.AddChild(Column(L.T("peek.armor"), rightAt + PeekSlotGap * k * PeekArmour, (c, y) =>
         {
             PeekPlate(c, font, p, 0, rightAt, y, L.T("peek.front"), Gunnery.Plate.Front, k);
             PeekPlate(c, font, p, 0, rightAt, y + step, L.T("peek.side"), Gunnery.Plate.Side, k);
             PeekPlate(c, font, p, 0, rightAt, y + step * 2, L.T("peek.rear"), Gunnery.Plate.Rear, k);
-            PeekPlate(c, font, p, 0, rightAt, y + step * 3, L.T("peek.roof"), Gunnery.Plate.Roof, k);
         }));
         return two;
     }
