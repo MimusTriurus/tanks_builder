@@ -217,6 +217,11 @@ public sealed partial class Tank3DBench
         return top;
     }
 
+    /// <summary>A side panel's caption, the lobby's eyebrow (<see cref="QEyebrow"/>) a
+    /// size up for the hangar's larger type: it names the panel and is not read as
+    /// one more of its rows, which a bold 17 in ink was (author 2026-11-04).</summary>
+    private static Label QuickHangarHead(string text) => Ui.Text(text.ToUpperInvariant(), 13, Ui.Muted, bold: true);
+
     /// <summary>A pad's insides deaf to the pointer: the pad takes the click and the hover.</summary>
     private static void QuickHangarDeaf(Control c)
     {
@@ -238,7 +243,7 @@ public sealed partial class Tank3DBench
         side.AddThemeConstantOverride("separation", 12);
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 8);
-        col.AddChild(Ui.Text(L.T("hangar.presets"), 17, Ui.Ink, bold: true));
+        col.AddChild(QuickHangarHead(L.T("hangar.presets")));
         foreach (QuickSquad.Company c in QuickSquad.Companies)
             col.AddChild(QuickHangarCompany(c, start));
         PanelContainer presets = Ui.Box(col, Ui.Panel, 14);
@@ -257,11 +262,17 @@ public sealed partial class Tank3DBench
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 8);
         // short lines, unwrapped: a wrapped label measures itself a word a line first
-        col.AddChild(Ui.Text(QuickMode(q.Map), 17, Ui.Ink, bold: true));
+        // the panel's caption, then the mode as its value, centred on the map's axis
+        col.AddChild(QuickHangarHead(L.T("quick.mode")));
+        Label mode = Ui.Text(QuickMode(q.Map), 20, Ui.Ink, bold: true);
+        mode.HorizontalAlignment = HorizontalAlignment.Center;
+        col.AddChild(mode);
         var map = QuickMinimap(q.Map, q.Player, 200, labels: true, ground: false);
         map.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
         col.AddChild(map);
-        col.AddChild(Ui.Text(L.T("hangar.params_door"), 12, Ui.Accent));
+        Label link = Ui.Text(L.T("hangar.params_door"), 12, Ui.Accent);
+        link.HorizontalAlignment = HorizontalAlignment.Center;
+        col.AddChild(link);
         QuickHangarDeaf(col);
         // a box the layout sizes; a click on it opens the parameters
         PanelContainer door = Ui.Box(col, Ui.Panel, 14);
@@ -645,7 +656,8 @@ public sealed partial class Tank3DBench
         var col = new VBoxContainer { CustomMinimumSize = new Vector2(400, 0) };
         col.AddThemeConstantOverride("separation", 10);
         var head = new HBoxContainer();
-        var h = Ui.Text(L.T("hangar.upgrades"), 17, Ui.Ink, bold: true);
+        Label h = QuickHangarHead(L.T("hangar.upgrades"));
+        h.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
         h.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         head.AddChild(h);
         // the budget by the tree that spends it, the squad's whole: spent olive, free dark
