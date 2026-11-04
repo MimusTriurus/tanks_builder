@@ -271,9 +271,15 @@ public sealed partial class Tank3DBench
         float rule = top + PeekPad + font.GetHeight(Ui.Heading) + 6.0f;
         c.DrawRect(new Rect2(left + 12.0f, rule, box.Size.X - 24.0f, Ui.RimLayout(c, 1)), Ui.Line);
 
-        // the figures: a label, then the slots, the labels' column as wide as the longest
+        UnitRows(c, font, left, rule + 22.0f, profile, turn);
+    }
+
+    /// <summary>The panel's figures from <paramref name="left"/>, the first row's middle at
+    /// <paramref name="y"/>: a label, then the slots, the labels' column as wide as the
+    /// longest. The hangar lays its own out of the same rows (<c>QuickHangarFigures</c>).</summary>
+    private void UnitRows(Control c, Font font, float left, float y, MovementProfile profile, bool turn)
+    {
         float x = left + PeekPad, slots = left + PeekSlotsAt(font);
-        float y = rule + 22.0f;
         PeekRow(c, font, x, slots, y, L.T("peek.fire"), profile.Might, PeekMight, PeekMark.Dot, Ui.Attack);
         y += PeekRowStep;
         if (turn)
@@ -350,40 +356,41 @@ public sealed partial class Tank3DBench
     private enum PeekMark { Dot, Square }
 
     private static void PeekRow(Control c, Font font, float x, float slots, float y, string label,
-                                int value, int max, PeekMark mark, Color ink)
+                                int value, int max, PeekMark mark, Color ink, float k = 1.0f)
     {
-        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), label, HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
-        PeekSlots(c, slots, y, value, max, mark, ink, Ui.Muted);
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop * k), label, HorizontalAlignment.Left, -1, Mathf.RoundToInt(Ui.Caption * k), Ui.Muted);
+        PeekSlots(c, slots, y, value, max, mark, ink, Ui.Muted, k);
     }
 
     /// <summary>One plate's row: its name, then squares in the plate's colour
     /// (red to deep green, as on the chosen one's hex); a bare plate is its
     /// empty slots ringed in red.</summary>
     private static void PeekPlate(Control c, Font font, MovementProfile profile, float x, float slots, float y,
-                                  string label, Gunnery.Plate plate)
+                                  string label, Gunnery.Plate plate, float k = 1.0f)
     {
         int value = Gunnery.ArmourAt(profile, plate);
         Color ink = PlateInk[Math.Clamp(value, 0, 3)];
-        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), label, HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
-        PeekSlots(c, slots, y, value, PeekArmour, PeekMark.Square, ink, value == 0 ? PlateInk[0] : Ui.Muted);
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop * k), label, HorizontalAlignment.Left, -1, Mathf.RoundToInt(Ui.Caption * k), Ui.Muted);
+        PeekSlots(c, slots, y, value, PeekArmour, PeekMark.Square, ink, value == 0 ? PlateInk[0] : Ui.Muted, k);
     }
 
     /// <summary>A slot's step along its row, px: the marks a size up with the type.</summary>
     private const float PeekSlotGap = 17.0f;
 
-    private static void PeekSlots(Control c, float x, float y, int value, int max, PeekMark mark, Color fill, Color empty)
+    private static void PeekSlots(Control c, float x, float y, int value, int max, PeekMark mark, Color fill, Color empty,
+                                  float k = 1.0f)
     {
-        const float r = 5.0f;
+        float r = 5.0f * k;
         for (int i = 0; i < max; i++)
         {
-            var p = new Vector2(x + i * PeekSlotGap, y);
+            var p = new Vector2(x + i * PeekSlotGap * k, y);
             bool full = i < value;
             if (mark == PeekMark.Dot)
             {
                 if (full)
                     c.DrawCircle(p, r, fill);
                 else
-                    c.DrawArc(p, r - 0.75f, 0.0f, Mathf.Tau, 16, empty, 1.5f, true);
+                    c.DrawArc(p, r - 0.75f * k, 0.0f, Mathf.Tau, 16, empty, 1.5f * k, true);
             }
             else
             {
@@ -391,7 +398,7 @@ public sealed partial class Tank3DBench
                 if (full)
                     c.DrawRect(sq, fill);
                 else
-                    c.DrawRect(sq.Grow(-0.75f), empty, false, 1.5f);
+                    c.DrawRect(sq.Grow(-0.75f * k), empty, false, 1.5f * k);
             }
         }
     }

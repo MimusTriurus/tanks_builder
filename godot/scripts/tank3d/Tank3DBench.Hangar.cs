@@ -217,6 +217,9 @@ public sealed partial class Tank3DBench
         return top;
     }
 
+    /// <summary>The battle card's figure rows in the hangar, times their size there.</summary>
+    private const float QhRowsK = 1.25f;
+
     /// <summary>A side panel's caption, the lobby's eyebrow (<see cref="QEyebrow"/>) a
     /// size up for the hangar's larger type: it names the panel and is not read as
     /// one more of its rows, which a bold 17 in ink was (author 2026-11-04).</summary>
@@ -736,15 +739,91 @@ public sealed partial class Tank3DBench
         duty.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         name.AddChild(duty);
         col.AddChild(name);
-        // its role is the class tab's tip: in the type scale the column has no room for it
-        // the numbers two lines, not a table: the tree over them has the height
-        (string, string)[] n = QuickClassRows(c);
-        col.AddChild(Ui.Text(L.T("hangar.unit_numbers", n[0].Item2, n[1].Item2, n[3].Item2, n[4].Item2), 13, Ui.Ink, wrap: true));
-        col.AddChild(Ui.Text(L.T("hangar.unit_armour", n[2].Item2.Replace(" / ", " / ")), 13, Ui.Ink, wrap: true));
-        col.AddChild(Ui.Text(L.T("quick.trait", c.Trait), 13, Ui.Ink, wrap: true));
+        // its role is the class tab's tip: in the type scale the column has no room for it.
+        // The figures as the battle's card draws them (author 2026-11-04), in two columns
+        // level row for row under their captions, then the trait set off as a callout
+        col.AddChild(QuickHangarFigures(c.Profile));
+        col.AddChild(QuickHangarTrait(c.Trait));
         // what it carries is the tree's open nodes: nothing said again (as on the old build)
     }
 
+    /// <summary>The machine's figures in the battle card's marks (<c>Tank3DBench.Peek</c>),
+    /// <see cref="QhRowsK"/> times their size there: the class's might, steps, mass and
+    /// turret on the left, its four plates on the right - four rows each, level, under
+    /// their captions (author 2026-11-04: the card's armour heading made a step). The
+    /// turret is a yes or a no, one slot; the roof the card leaves out is here.</summary>
+    private Control QuickHangarFigures(MovementProfile p)
+    {
+        Font font = ThemeDB.FallbackFont;
+        const float k = QhRowsK;
+        int size = Mathf.RoundToInt(Ui.Caption * k);
+        // rows a little closer than the card's: the page has no height to spare
+        float step = 22.0f * k, high = step * 4.0f;
+        // a column's slots past its longest label
+        float SlotsAt(params string[] keys)
+        {
+            float w = 0.0f;
+            foreach (string key in keys)
+                w = Mathf.Max(w, font.GetStringSize(L.T(key), HorizontalAlignment.Left, -1, size).X);
+            return Mathf.Ceil(w + 14.0f * k);
+        }
+        float leftAt = SlotsAt("peek.fire", "peek.move", "peek.mass", "peek.turret");
+        float rightAt = SlotsAt("peek.front", "peek.side", "peek.rear", "peek.roof");
+        Control Column(string head, float wide, Action<Control, float> draw)
+        {
+            var box = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+            box.AddThemeConstantOverride("separation", 2);
+            box.AddChild(QuickHangarHead(head));
+            var rows = new Control { CustomMinimumSize = new Vector2(wide, high), MouseFilter = Control.MouseFilterEnum.Ignore };
+            rows.Draw += () => draw(rows, step * 0.5f);
+            box.AddChild(rows);
+            return box;
+        }
+        var two = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        two.AddThemeConstantOverride("separation", 28);
+        two.AddChild(Column(L.T("hangar.figures"), leftAt + PeekSlotGap * k * PeekSteps, (c, y) =>
+        {
+            PeekRow(c, font, 0, leftAt, y, L.T("peek.fire"), p.Might, PeekMight, PeekMark.Dot, Ui.Attack, k);
+            PeekRow(c, font, 0, leftAt, y + step, L.T("peek.move"), p.Steps, PeekSteps, PeekMark.Dot, Ui.Ink, k);
+            PeekRow(c, font, 0, leftAt, y + step * 2, L.T("peek.mass"), p.Mass, PeekMass, PeekMark.Square, Ui.Ink, k);
+            PeekRow(c, font, 0, leftAt, y + step * 3, L.T("peek.turret"), p.Turreted ? 1 : 0, 1, PeekMark.Square, Ui.Ink, k);
+        }));
+        two.AddChild(Column(L.T("peek.armor"), rightAt + PeekSlotGap * k * PeekArmour, (c, y) =>
+        {
+            PeekPlate(c, font, p, 0, rightAt, y, L.T("peek.front"), Gunnery.Plate.Front, k);
+            PeekPlate(c, font, p, 0, rightAt, y + step, L.T("peek.side"), Gunnery.Plate.Side, k);
+            PeekPlate(c, font, p, 0, rightAt, y + step * 2, L.T("peek.rear"), Gunnery.Plate.Rear, k);
+            PeekPlate(c, font, p, 0, rightAt, y + step * 3, L.T("peek.roof"), Gunnery.Plate.Roof, k);
+        }));
+        return two;
+    }
+
+    /// <summary>The class's trait as a callout (author 2026-11-04): an olive bar down its
+    /// left, its caption in olive, and its name - the words before a colon, where it has
+    /// one - a line of its own over what it does.</summary>
+    private static Control QuickHangarTrait(string trait)
+    {
+        var text = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore };
+        text.AddThemeConstantOverride("separation", 2);
+        Label head = QuickHangarHead(L.T("hangar.trait"));
+        head.AddThemeColorOverride("font_color", Ui.Accent);
+        text.AddChild(head);
+        int colon = trait.IndexOf(':');
+        string body = trait;
+        if (colon > 0 && colon < 32)
+        {
+            text.AddChild(Ui.Text(trait[..colon], 14, Ui.Ink, bold: true));
+            body = trait[(colon + 1)..].Trim();
+            if (body.Length > 0)
+                body = char.ToUpper(body[0]) + body[1..];
+        }
+        text.AddChild(Ui.Text(body, 13, Ui.Ink, wrap: true));
+        var callout = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        callout.AddThemeConstantOverride("separation", 10);
+        callout.AddChild(new ColorRect { Color = Ui.Accent, CustomMinimumSize = new Vector2(3, 0), MouseFilter = Control.MouseFilterEnum.Ignore });
+        callout.AddChild(text);
+        return callout;
+    }
     /// <summary>The caption over a machine on the ring (author 2026-11-03): its class
     /// in full, under it its branch, and its level as rank chevrons beside both
     /// lines, a sleeve's patch; the price is the head's and the tree's, not said
