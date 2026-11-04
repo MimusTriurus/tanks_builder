@@ -185,7 +185,7 @@ public sealed partial class Tank3DBench
     private Control QuickHangarTop()
     {
         QuickSetup q = _qs;
-        int used = QuickSquad.Spent(q.Squad), left = q.Budget - used, missing = q.Squad.Count(s => s.Empty);
+        int missing = q.Squad.Count(s => s.Empty);
         var top = new HBoxContainer();
         top.AddThemeConstantOverride("separation", 12);
 
@@ -203,11 +203,13 @@ public sealed partial class Tank3DBench
         button.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
         button.Disabled = missing > 0;
         go.AddChild(button);
-        var sub = Ui.Text(missing > 0 ? L.T("hangar.in_squad", QuickSquad.Size - missing, QuickSquad.Size)
-                        : left > 0 ? L.T("hangar.left_then_deploy", Pts(left)) : L.T("hangar.then_deploy"),
-                        12, missing > 0 ? Ui.Danger : Ui.Muted);
-        sub.HorizontalAlignment = HorizontalAlignment.Center;
-        go.AddChild(sub);
+        // no line under it (author 2026-11-04) but the one that says why it is shut
+        if (missing > 0)
+        {
+            Label sub = Ui.Text(L.T("hangar.in_squad", QuickSquad.Size - missing, QuickSquad.Size), 12, Ui.Danger);
+            sub.HorizontalAlignment = HorizontalAlignment.Center;
+            go.AddChild(sub);
+        }
         top.AddChild(go);
 
         // the budget is the tree's, where it is spent (QuickHangarTree)

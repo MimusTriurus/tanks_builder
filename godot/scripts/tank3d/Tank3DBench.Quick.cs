@@ -1582,11 +1582,14 @@ public sealed partial class Tank3DBench
         var b = new QuickPad
         {
             Text = text, FontSize = Ui.Size(primary ? 16 : small ? 13 : 14), Bold = primary,
-            Rim = primary ? Ui.Accent : picked ? Ui.Accent : Ui.Line,
+            // the primary one framed by a light rim and lit plainly under the pointer: an
+            // olive rim on an olive face showed no edge, and 8% lighter showed no hover
+            Rim = primary ? Ui.Ink.Darkened(0.25f) : picked ? Ui.Accent : Ui.Line,
             Fill = primary ? Ui.Accent : picked ? Ui.AccentFill : Ui.Inset,
             Ink = primary ? Ui.OnAccent : Ui.Ink,
-            HoverRim = Ui.Accent,
-            HoverFill = primary ? Ui.Accent.Lightened(0.08f) : null,
+            HoverRim = primary ? Colors.White : Ui.Accent,
+            HoverFill = primary ? Ui.Accent.Lightened(0.25f) : null,
+            RimWidth = primary ? 2.0f : 1.0f,
         };
         b.Fit(primary ? new Vector2(22, 11) : small ? new Vector2(10, 5) : new Vector2(14, 8));
         b.Clicked += clicked;

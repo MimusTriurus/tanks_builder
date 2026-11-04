@@ -152,8 +152,6 @@
   "quick.neutral": "нейтральная",
   "hangar.go": "В БОЙ",
   "hangar.in_squad": "в отряде {0} из {1}",
-  "hangar.left_then_deploy": "осталось {0} · дальше расстановка",
-  "hangar.then_deploy": "дальше расстановка",
   "hangar.presets": "Готовые отряды",
   "hangar.params_door": "Параметры и карта ✎",
   "hangar.slot_empty_front": "Слот {0} пуст.\nВыберите класс\nтегами под подиумом",

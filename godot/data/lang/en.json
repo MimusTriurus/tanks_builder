@@ -150,8 +150,6 @@
   "quick.neutral": "neutral",
   "hangar.go": "TO BATTLE",
   "hangar.in_squad": "{0} of {1} in squad",
-  "hangar.left_then_deploy": "{0} left · deployment next",
-  "hangar.then_deploy": "deployment next",
   "hangar.presets": "Preset squads",
   "hangar.params_door": "Settings and map ✎",
   "hangar.slot_empty_front": "Slot {0} is empty.\nPick a class\nwith the tags below",
