@@ -161,7 +161,7 @@ public static partial class Battle
         if (s.At(target) is not { } victim || victim.Id == u.Id)
             return "nobody to ram";
         Steps.Mover mover = MoverOf(s, u);
-        bool mayMove = !s.Drove && (!(s.Fired || s.Bonus) || u.Class.FreeOrder);
+        bool mayMove = !s.Drove && !u.Pinned && (!(s.Fired || s.Bonus) || u.Class.FreeOrder);
         Steps.Reach? reach = mayMove ? Steps.Plan(s.Board, new Steps.Pose(u.Cell, u.Heading), mover) : null;
         Steps.Route? bestRoute = null;
         int bestSide = -1;
@@ -226,7 +226,7 @@ public static partial class Battle
             return false;
         if (u.Fate != UnitFate.Alive)
             return true;
-        if (!s.Fired || !(s.Drove || !u.Class.FreeOrder))
+        if (!s.Fired || !(s.Drove || u.Pinned || !u.Class.FreeOrder))
             return false;
         if (!BonusLeft(s, u))
             return true;

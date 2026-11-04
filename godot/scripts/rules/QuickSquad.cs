@@ -109,7 +109,7 @@ public static class QuickSquad
                 new Branch("ram", L.T("squad.branch.ram.name"), L.T("squad.branch.ram.tag"), new[]
                 {
                     U("overdrive", L.T("squad.up.boost.name"), "squad.kind.ability_premove", L.T("squad.up.boost.text")),
-                    U("dozer_blade", L.T("squad.up.ram_blade.name"), "squad.kind.passive", L.T("squad.up.ram_blade.text")),
+                    U("dozer_blade", L.T("squad.up.ram_blade.name"), "squad.kind.passive", L.T("squad.up.ram_blade.text"), Kit.RamBlade),
                     U("push_two", L.T("squad.up.double_push.name"), "squad.kind.passive_class", L.T("squad.up.double_push.text")),
                 }),
                 new Branch("storm", L.T("squad.branch.storm.name"), L.T("squad.branch.storm.tag"), new[] { SpallLiner, MineGuard, Extinguisher }),
@@ -120,7 +120,7 @@ public static class QuickSquad
             new[]
             {
                 new Branch("aim", L.T("squad.branch.aim.name"), L.T("squad.branch.aim.tag"), new[] { DoubleTurn, Reverse,
-                    U("through_wood", L.T("squad.up.through_forest.name"), "squad.kind.passive_class", L.T("squad.up.through_forest.text")) }),
+                    U("through_wood", L.T("squad.up.through_forest.name"), "squad.kind.passive_class", L.T("squad.up.through_forest.text"), Kit.ThroughWood) }),
                 new Branch("ambush", L.T("squad.branch.ambush.name"), L.T("squad.branch.ambush.tag"), new[] { Thermal, Stabilizer, SmokePot }),
             }),
         new("HMP", "HM", L.T("squad.class.HMP.name"), L.T("squad.class.HMP.duty"),
@@ -132,7 +132,7 @@ public static class QuickSquad
                 {
                     U("smoke_shell", L.T("squad.up.smoke_round.name"), "squad.kind.ability_attack", L.T("squad.up.smoke_round.text")),
                     Incendiary,
-                    U("fork_36", L.T("squad.up.bracket.name"), "squad.kind.passive_class", L.T("squad.up.bracket.text")),
+                    U("fork_36", L.T("squad.up.bracket.name"), "squad.kind.passive_class", L.T("squad.up.bracket.text"), Kit.Bracket),
                 }),
                 new Branch("guard", L.T("squad.branch.guard.name"), L.T("squad.branch.guard.tag"), new[] { SmokePot, Reverse, DoubleTurn }),
             }),

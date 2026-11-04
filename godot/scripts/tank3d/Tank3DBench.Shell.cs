@@ -115,6 +115,8 @@ public sealed partial class Tank3DBench
         // a destroyer's round laid past a hull goes through it (HullPass)
         Leg? holes = !_profile.Lobs && _shadowAim is Vector2I laid && HullPass(CellHere, laid) is { } hull
             ? HoledLeg(CellHere, AxisTo(CellHere, laid).Axis, hull) : null;
+        // or through a wood on the way (upgrades.md, «Сквозь лес»): on at one less
+        bool wood = !_profile.Lobs && !fiery && _shadowAim is Vector2I past && WoodPass(CellHere, past);
         _shadowAim = null;
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
@@ -124,7 +126,7 @@ public sealed partial class Tank3DBench
         if (_profile.Lobs && _chargeFor is Vector3 to && Charge(muzzle, bore, to, fall) is float v)
             speed = v;
         _chargeFor = null;
-        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, true, _profile.Lobs, holes);
+        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, true, _profile.Lobs, holes, wood);
     }
 
     /// <summary>Where the bomb being fired was laid on, for its charge.</summary>
@@ -225,9 +227,11 @@ public sealed partial class Tank3DBench
     /// the board, with its shadow. <paramref name="holes"/>: a destroyer's
     /// pass on a standing hull short of the target (<see cref="HoledLeg"/>) -
     /// struck as the round gets to it, the round on with one less.
+    /// <paramref name="woodPassed"/>: the pass is a wood's on the way
+    /// (<see cref="WoodPass"/>) - spent, the round one less from the muzzle.
     /// </summary>
     private CelShell.Round Throw(Vector3 from, Vector3 v, float fall, float longest, bool strikes, bool lob,
-                                 Leg? holes = null)
+                                 Leg? holes = null, bool woodPassed = false)
     {
         var path = new List<Vector3> { from };
         var g = new Vector3(0.0f, -fall, 0.0f);
@@ -240,10 +244,10 @@ public sealed partial class Tank3DBench
         // it went through on the way, struck as the round gets to them.
         Vector2I? origin = _field is null ? null
             : _field.FlatCellAt(Board(strikes ? _rig.Position : from));
-        int passes = strikes && ShootsThrough ? 1 : 0;
+        int passes = strikes && ShootsThrough && !woodPassed ? 1 : 0;
         // What the round has left: the gun's, one less after the pass (GDD
-        // classes.md, "после прохода огневая мощь снаряда −1").
-        int might = _profile.Might;
+        // classes.md, "после прохода огневая мощь снаряда −1") - a wood's too.
+        int might = woodPassed ? Gunnery.PassedMight(_profile) : _profile.Might;
         var through = new List<(float Along, System.Action Hit)>();
         float run = 0.0f;
         // A tank in a ring whose muzzle is out past its own leaf: the round
@@ -755,10 +759,10 @@ public sealed partial class Tank3DBench
         if (axis < 0)
             return L.T("shell.off_axis");
         // the distance's gates are the rules' (Gunnery.MayTarget, Д2)
-        switch (Gunnery.MayTarget(_profile.Lobs, cells, tank))
+        switch (Gunnery.MayTarget(_profile.Lobs, cells, tank, LobReachHere))
         {
             case Gunnery.Distance.MortarBand:
-                return L.T("shell.mortar_band", Gunnery.LobShortest, Gunnery.LobReach, cells);
+                return L.T("shell.mortar_band", Gunnery.LobShortest, LobReachHere, cells);
             case Gunnery.Distance.PointBlank:
                 return L.T("shell.point_blank");
         }
@@ -766,6 +770,10 @@ public sealed partial class Tank3DBench
         // a hull on the lane (Tank3DBench.Orders, LaneShut).
         return _rules ? LaneShut(own, cell, out stop) : "";
     }
+
+    /// <summary>The mortar's reach on the rig: 5, or 6 with the bracket
+    /// (upgrades.md, «Вилка 3–6»).</summary>
+    private int LobReachHere => Gunnery.LobReachOf(KitOf(_unitId));
 
     /// <summary>A gun's nearest tank target, cells (<see cref="Gunnery.DirectNearest"/>).</summary>
     private const int DirectNearest = Gunnery.DirectNearest;

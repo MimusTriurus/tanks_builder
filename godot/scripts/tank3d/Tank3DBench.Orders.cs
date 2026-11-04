@@ -179,6 +179,12 @@ public sealed partial class Tank3DBench
             // the rammer comes on to the hex in one pose: asked as it enters (AmbushWatch)
             _movePlanned = false;
             ShadowAct($"ram {MapAt(cells[^1])}", s => Battle.Ram(s, cells[^1]));
+            // the ram blade (upgrades.md, «Таранный отвал»): no move in its next activation
+            if (_other is { Unit: true, Fate: Fate.Alive } pinned && RigHas(Kit.RamBlade) && _pinned.Add(pinned.Id))
+            {
+                _matchNote = L.T("match.pinned", pinned.Tag);
+                Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId}'s ram blade pins {pinned.Tag}#{pinned.Id}: no move in its next activation");
+            }
         }
         else
             ShadowMove($"move to {MapAt(cells[^1])} facing {face}{(back ? " astern" : "")}", s => Battle.Move(s, cells, face, back));
@@ -496,7 +502,9 @@ public sealed partial class Tank3DBench
                       standing: c => StandingLevel(c, own),
                       // the thermal imager sees through smoke (Д8)
                       thermal: (KitOf(_unitId) & Kit.Thermal) != 0,
-                      passes: passes, passable: c => Holes(own, c));
+                      passes: passes, passable: c => Holes(own, c),
+                      // through the wood (upgrades.md): a wood may be the pass
+                      woodPass: (KitOf(_unitId) & Kit.ThroughWood) != 0);
 
     /// <summary>
     /// Whether a destroyer's round from <paramref name="own"/> goes through the
@@ -532,7 +540,14 @@ public sealed partial class Tank3DBench
 
     /// <summary>The destroyer's pass is still in hand for a brick wall on the
     /// way to <paramref name="cell"/>: no hull short of it took it.</summary>
-    private bool WallPass(Vector2I own, Vector2I cell) => ShootsThrough && HullPass(own, cell) is null;
+    private bool WallPass(Vector2I own, Vector2I cell) =>
+        ShootsThrough && (!_rules || _field is null || own == cell || LaneSolve(own, cell, 1).Passed is null);
+
+    /// <summary>The destroyer's pass at <paramref name="cell"/> is spent on a
+    /// wood (upgrades.md, «Сквозь лес»): the round flies on at one less.</summary>
+    private bool WoodPass(Vector2I own, Vector2I cell) =>
+        _rules && ShootsThrough && _field is not null && own != cell
+        && LaneSolve(own, cell, 1).Passed is Vector2I at && UnitStanding(at) is null && _field.CoverAt(at) == Cover.Forest;
 
     /// <summary>
     /// The level a hull on <paramref name="cell"/> fires from and is shot at:

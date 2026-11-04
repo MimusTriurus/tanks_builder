@@ -39,6 +39,10 @@ public sealed class BattleUnit
     /// «Автоматическое тушение»): its next activation goes without the bonus
     /// act, and that pays it.</summary>
     public bool OwesBonus;
+    /// <summary>Rammed by a hull with the ram blade (upgrades.md, «Таранный
+    /// отвал»): its next activation has no move - no drive, no turn of the
+    /// hull; a second ram before it adds nothing.</summary>
+    public bool Pinned;
 
     public bool Out => Fate is UnitFate.Knocked or UnitFate.Drowned;
     public bool Standing => Fate != UnitFate.Destroyed;
@@ -52,7 +56,8 @@ public sealed class BattleUnit
     /// the map's cell on a board in a sea (<see cref="BattleState.Shift"/>).</summary>
     public string Say(Vector2I shift) => $"{Side} {Tag}#{Id} ({Cell.X - shift.X},{Cell.Y - shift.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
                                          + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "")
-                                         + (OwesBonus ? " owes the bonus act" : "");
+                                         + (OwesBonus ? " owes the bonus act" : "")
+                                         + (Pinned ? " pinned" : "");
 }
 
 public enum BattleEventKind
@@ -67,6 +72,8 @@ public enum BattleEventKind
     /// <summary>The auto-extinguisher's price: Value 1 - paid with this turn's
     /// bonus act, 0 - owed to the unit's next activation; Note says which.</summary>
     BonusOwed,
+    /// <summary>A hull rammed by the ram blade: no move in its next activation.</summary>
+    Pinned,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench

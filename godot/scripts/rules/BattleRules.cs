@@ -82,6 +82,8 @@ public static partial class Battle
             return why;
         if (s.Drove)
             return "already moved";
+        if (u.Pinned)
+            return "pinned by a ram blade";
         if ((s.Fired || s.Bonus) && !u.Class.FreeOrder)
             return "only LT moves after acting";
         s.Drove = true;
@@ -386,10 +388,11 @@ public static partial class Battle
         if (!u.Class.Turreted && heading != u.Heading)
             return "a casemate fires along its hull";
         BattleUnit? there = s.At(aim);
-        switch (Gunnery.MayTarget(u.Class.Lobs, range, there is not null))
+        int reach = Gunnery.LobReachOf(u.Kit);
+        switch (Gunnery.MayTarget(u.Class.Lobs, range, there is not null, reach))
         {
             case Gunnery.Distance.Own: return "its own hex";
-            case Gunnery.Distance.MortarBand: return $"the mortar throws 3 to 5, this is {range}";
+            case Gunnery.Distance.MortarBand: return $"the mortar throws {Gunnery.LobShortest} to {reach}, this is {range}";
             case Gunnery.Distance.PointBlank: return "a tank point-blank";
         }
         s.Fired = true;
@@ -398,7 +401,8 @@ public static partial class Battle
             Lob(s, aim, incendiary);
         else
             Fly(s, u.Cell, heading, u.Class.Might, Level(s, u), passes: u.Class.Might >= 4 && !u.Class.Turreted ? 1 : 0,
-                glance: true, aim: aim, fiery: incendiary, thermal: (u.Kit & Kit.Thermal) != 0);
+                glance: true, aim: aim, fiery: incendiary, thermal: (u.Kit & Kit.Thermal) != 0,
+                woodPass: (u.Kit & Kit.ThroughWood) != 0);
         return null;
     }
 
@@ -419,7 +423,8 @@ public static partial class Battle
     /// pierce: a hull, a living wood - on every leg, the ricochet's too.
     /// </summary>
     private static void Fly(BattleState s, Vector2I from, int heading, int might, int fromLevel,
-                            int passes, bool glance, Vector2I? aim, bool fiery = false, bool thermal = false)
+                            int passes, bool glance, Vector2I? aim, bool fiery = false, bool thermal = false,
+                            bool woodPass = false)
     {
         int ontoLevel = aim is Vector2I a && s.Board.InBounds(a)
             ? (s.At(a) is { } t ? Level(s, t) : s.Board.LevelAt(a)) : fromLevel;
@@ -468,6 +473,16 @@ public static partial class Battle
             // a wood screens its hex; masonry its edges (above, BoardRules.Screened)
             if (s.Board.LevelAt(c) >= floor && BoardRules.Screened(s.Board, c, thermal))
             {
+                // through the wood (upgrades.md, «Сквозь лес»): the destroyer's
+                // one pass on a wood in any state, the round on at one less, the
+                // wood untouched. Not an incendiary round: what it meets burns.
+                if (woodPass && passes > 0 && !fiery && s.Board.CoverAt(c) == Cover.Forest)
+                {
+                    passes--;
+                    might--;
+                    s.Events.Add(new BattleEvent(BattleEventKind.Passed, -1, c, might, "wood"));
+                    continue;
+                }
                 s.Events.Add(new BattleEvent(BattleEventKind.Spent, -1, c, heading, "wood"));
                 // the one way to set a wood alight with a shot (upgrades.md)
                 if (fiery)
@@ -604,6 +619,12 @@ public static partial class Battle
         s.Events.Add(new BattleEvent(BattleEventKind.Shoved, victim.Id, landing, way));
         u.Cell = target;
         s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, target, way));
+        // the ram blade (upgrades.md, «Таранный отвал»): no move in its next activation
+        if ((u.Kit & Kit.RamBlade) != 0 && victim.Fate == UnitFate.Alive && !victim.Pinned)
+        {
+            victim.Pinned = true;
+            s.Events.Add(new BattleEvent(BattleEventKind.Pinned, victim.Id, landing, u.Id));
+        }
         if (victim.Fate == UnitFate.Alive)
             Entered(s, victim, way, forward: way == victim.Heading);
         else
@@ -692,6 +713,8 @@ public static partial class Battle
             return "no double turn";
         if (BonusGone(s, u) is { } spent)
             return spent;
+        if (u.Pinned)
+            return "pinned by a ram blade";
         if (Array.IndexOf(HexField.EdgeHeadings, face) < 0)
             return $"{face} is not a side";
         if (Steps.Turning(u.Heading, face) != 1)
@@ -1041,6 +1064,9 @@ public static partial class Battle
             s.Events.Add(new BattleEvent(BattleEventKind.WoodCleared, u.Id, u.Cell));
         }
         int activated = s.Active is int a && (s.Drove || s.Fired || s.Bonus) ? a : -1;
+        // the activation it was pinned for has gone without its move
+        if (s.Unit(activated) is { Pinned: true } freed)
+            freed.Pinned = false;
         // the activation the debt was owed to has gone without its bonus act
         bool owed = false;
         if (s.Unit(activated) is { OwesBonus: true } payer)

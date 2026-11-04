@@ -100,6 +100,7 @@ public sealed partial class Tank3DBench
                 Watch2 = _ambush.TryGetValue(id, out var w2) ? w2.B : -1,
                 WatchShots = _ambush.TryGetValue(id, out var w3) ? w3.Shots : 0,
                 OwesBonus = _owesBonus.Contains(id),
+                Pinned = _pinned.Contains(id),
             });
         }
         Add(_unitId, _modelTag, _profile, _side, CellHere, HullSide(), _fate);

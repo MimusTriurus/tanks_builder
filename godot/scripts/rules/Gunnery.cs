@@ -220,12 +220,14 @@ public static class Gunnery
     /// in its way and is spent on the second): the first hull on the lane that
     /// <paramref name="passable"/> lets through - any without it - is gone
     /// through (<see cref="Shot.Passed"/>) and the second one stops it. A wood
-    /// or smoke is never a pass; the walls are the caller's, as above.
+    /// or smoke is never a pass - but with <paramref name="woodPass"/> (upgrades.md,
+    /// «Сквозь лес») a wood in any state is, the first thing met being the one
+    /// passed; the walls are the caller's, as above.
     /// </summary>
     public static Shot Solve(IHexBoard field, Vector2I from, Vector2I onto, bool lobs,
                              Func<Vector2I, bool> occupied, bool masonry = true,
                              Func<Vector2I, int>? standing = null, bool thermal = false,
-                             int passes = 0, Func<Vector2I, bool>? passable = null)
+                             int passes = 0, Func<Vector2I, bool>? passable = null, bool woodPass = false)
     {
         if (onto == from)
             return None;
@@ -310,6 +312,12 @@ public static class Gunnery
             // the thermal imager sees its line of fire through smoke (upgrades.md)
             if (!tank && !BoardRules.Screened(field, lane[i], thermal))
                 continue;
+            // through the wood (upgrades.md): the pass spent on it, the round on
+            if (!tank && woodPass && passes > 0 && passed is null && field.CoverAt(lane[i]) == Cover.Forest)
+            {
+                passed = lane[i];
+                continue;
+            }
             // the destroyer's pass: through the hull, on to the next thing
             if (tank && passes > 0 && passed is null && (passable?.Invoke(lane[i]) ?? true))
             {
@@ -752,6 +760,13 @@ public static class Gunnery
     /// </summary>
     public const int LobReach = 5;
 
+    /// <summary>The mortar's reach with the 3-6 bracket (upgrades.md, «Вилка
+    /// 3–6»): one more, the shortest the same.</summary>
+    public const int BracketReach = 6;
+
+    /// <summary>How far a mortar with <paramref name="kit"/> throws.</summary>
+    public static int LobReachOf(Kit kit) => (kit & Kit.Bracket) != 0 ? BracketReach : LobReach;
+
     /// <summary>The shortest throw, and the steepest - see <see cref="LobTable"/>.
     /// </summary>
     public const int LobShortest = 3;
@@ -772,9 +787,9 @@ public static class Gunnery
     /// <see cref="DirectNearest"/>. <paramref name="tank"/> - a tank stands on
     /// the hex aimed at.
     /// </summary>
-    public static Distance MayTarget(bool lobs, int cells, bool tank) =>
+    public static Distance MayTarget(bool lobs, int cells, bool tank, int reach = LobReach) =>
         cells <= 0 ? Distance.Own
-        : lobs && (cells < LobShortest || cells > LobReach) ? Distance.MortarBand
+        : lobs && (cells < LobShortest || cells > reach) ? Distance.MortarBand
         : !lobs && tank && cells < DirectNearest ? Distance.PointBlank
         : Distance.Fits;
 

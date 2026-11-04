@@ -535,7 +535,7 @@ public sealed partial class Tank3DBench
                 string shut = LaneShut(here, next, out Vector2I? stop);
                 if (shut.Length > 0 && stop != next)
                     break;
-                if (shut.Length == 0 && Gunnery.MayTarget(_profile.Lobs, k, tank) == Gunnery.Distance.Fits)
+                if (shut.Length == 0 && Gunnery.MayTarget(_profile.Lobs, k, tank, LobReachHere) == Gunnery.Distance.Fits)
                     _attackCells.Add(next);
                 at = next;
             }

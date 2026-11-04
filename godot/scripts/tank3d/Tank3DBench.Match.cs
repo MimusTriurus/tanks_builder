@@ -342,6 +342,8 @@ public sealed partial class Tank3DBench
             return L.T("match.passing");
         if (_mt.Drove)
             return L.T("match.already_moved", _modelTag);
+        if (RigPinned)
+            return L.T("match.pinned_no_move", _modelTag);
         if ((_mt.Fired || _mt.Bonus) && !_profile.FreeOrder)
             return L.T("match.no_move_after_act");
         return "";
@@ -358,6 +360,13 @@ public sealed partial class Tank3DBench
     private static string BonusWaits => L.T("match.bonus_waits");
 
     private bool MatchBonusSpent => Match && (_mt.Bonus || RigOwes || _passIn is not null || MatchOver || Deploying);
+
+    /// <summary>Units rammed by a ram blade (upgrades.md, «Таранный отвал»):
+    /// no move in their next activation (<see cref="BattleUnit.Pinned"/>).</summary>
+    private readonly HashSet<int> _pinned = new();
+
+    /// <summary>The unit on the rig is pinned: its move is not to be had.</summary>
+    private bool RigPinned => Match && _pinned.Contains(_unitId);
 
     /// <summary>Whether a bonus act is still to be had once the move is over:
     /// a fire to put out, a unit beside to ram - the move being spent, the
@@ -503,6 +512,9 @@ public sealed partial class Tank3DBench
         // spent, for the auto-extinguisher's price (upgrades.md, 2026-11-02)
         int activated = _side == ending && (_mt.Drove || _mt.Fired || _mt.Bonus) ? _unitId : -1;
         bool bonusSpent = _mt.Bonus;
+        // the activation the ram blade pinned it for is over (Battle.EndTurn)
+        if (activated >= 0 && _pinned.Remove(activated))
+            Log.Print($"tank3d: match: #{activated} went this activation without its move - the ram blade lets it go");
         HandOver();
         if (!MatchOver)
             BurnOut(ending, turn, activated, bonusSpent);
@@ -670,7 +682,7 @@ public sealed partial class Tank3DBench
         // the turn goes by itself once there is nothing left in it: the shot
         // fired, the move done (or barred), and no bonus act to be had - one
         // still open waits for it or for the end of the turn (U-22)
-        if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || !_profile.FreeOrder) && !BonusLeft())
+        if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || RigPinned || !_profile.FreeOrder) && !BonusLeft())
         {
             _passIn = PassDelay;
             _matchNote = L.T("match.turn_done");

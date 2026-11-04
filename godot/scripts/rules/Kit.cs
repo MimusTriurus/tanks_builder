@@ -10,10 +10,11 @@ namespace TankSpriteTest;
 /// board (<c>Tank3DBench._amphibious</c>) until the match gave each unit its
 /// kit (docs/battle-core-plan.md, Д1).
 ///
-/// <b>Fourteen of upgrades.md's twenty-two have a flag here, each read by the
+/// <b>Seventeen of upgrades.md's twenty-two have a flag here, each read by the
 /// rules</b> (Д1, Д8; the 2026-11-02 revision: the trawl became the mine guard,
-/// the auto-extinguisher and the double turn pay with the bonus act). The
-/// eight added on 2026-11-02 are on the trees (<see cref="QuickSquad"/>) only.
+/// the auto-extinguisher and the double turn pay with the bonus act; 2026-11-04:
+/// the 3-6 bracket, through the wood, the ram blade). The other five added on
+/// 2026-11-02 are on the trees (<see cref="QuickSquad"/>) only.
 /// </summary>
 [Flags]
 public enum Kit
@@ -52,6 +53,16 @@ public enum Kit
     DoubleTurn = 1 << 12,
     /// <summary>Стабилизатор засады: the ambush outlives a ram and its first round.</summary>
     AmbushStabilizer = 1 << 13,
+    /// <summary>Вилка 3–6: the mortar throws 3 to 6, not 5 - every bomb
+    /// (<see cref="Gunnery.LobReachOf"/>).</summary>
+    Bracket = 1 << 14,
+    /// <summary>Сквозь лес: the destroyer's one pass may be a hex of wood, the
+    /// round on at one less, the wood untouched; its ambush's axis is cut by a
+    /// wood as anyone's.</summary>
+    ThroughWood = 1 << 15,
+    /// <summary>Таранный отвал: a hull it rams loses its move in its next
+    /// activation (<see cref="BattleUnit.Pinned"/>).</summary>
+    RamBlade = 1 << 16,
 }
 
 public static class Kits
@@ -74,6 +85,9 @@ public static class Kits
         (Kit.RepairKit, "repair_kit", L.T("kit.repair_kit")),
         (Kit.DoubleTurn, "double_turn", L.T("kit.double_turn")),
         (Kit.AmbushStabilizer, "ambush_stabilizer", L.T("kit.ambush_stabilizer")),
+        (Kit.Bracket, "bracket", L.T("kit.bracket")),
+        (Kit.ThroughWood, "through_wood", L.T("kit.through_wood")),
+        (Kit.RamBlade, "ram_blade", L.T("kit.ram_blade")),
     };
 
     /// <summary>

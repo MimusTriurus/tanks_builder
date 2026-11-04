@@ -541,6 +541,73 @@ public static partial class SelfTest
                   $"120°: {wide}; pivot {pivot ?? "ok"} to h{heading}; again {again}; move after {after}; without the kit {bare}; {Said(s)}");
         }
 
+        // upgrades.md «Вилка 3–6» (2026-11-04): the mortar at (4,8) on a light
+        // six up the column - out of its band without the bracket, a hit with it.
+        {
+            string? plain = null, bracket = null;
+            BattleState far = Probe(9, 10);
+            Put(far, 0, "HMR", Camp.Green, 4, 8, 90);
+            Put(far, 1, "LTR", Camp.Brown, 4, 2, 90);
+            Act(far, 0, st => plain = Battle.Fire(st, new Vector2I(4, 2)));
+            BattleState forked = Probe(9, 10);
+            Put(forked, 0, "HMR", Camp.Green, 4, 8, 90, kit: Kit.Bracket);
+            Put(forked, 1, "LTR", Camp.Brown, 4, 2, 90);
+            Act(forked, 0, st => bracket = Battle.Fire(st, new Vector2I(4, 2)));
+            string? near = null;
+            BattleState close = Probe(9, 10);
+            Put(close, 0, "HMR", Camp.Green, 4, 8, 90, kit: Kit.Bracket);
+            Put(close, 1, "LTR", Camp.Brown, 4, 6, 90);
+            Act(close, 0, st => near = Battle.Fire(st, new Vector2I(4, 6)));
+            check("the 3-6 bracket: the mortar throws six with it, not without; two is still too near",
+                  plain is not null && bracket is null && forked.Unit(1)!.Fate == UnitFate.Knocked && near is not null,
+                  $"without {plain}; with {bracket ?? "ok"}: {Said(forked)}; at two {near}");
+        }
+
+        // upgrades.md «Сквозь лес» (2026-11-04): the destroyer at (4,8) on a
+        // light at (4,4) behind a wood at (4,6) - spent in the wood without it;
+        // with it through, the wood whole; two woods in a row stop it.
+        {
+            var wood = new Vector2I(4, 6);
+            BattleState Shot(Kit kit, params Vector2I[] woods)
+            {
+                BattleState t = Probe(9, 10, woods: woods);
+                Put(t, 0, "TDR", Camp.Green, 4, 8, 90, kit: kit);
+                Put(t, 1, "LTR", Camp.Brown, 4, 4, 90);
+                Act(t, 0, st => Battle.Fire(st, new Vector2I(4, 4)));
+                return t;
+            }
+            BattleState bare = Shot(Kit.None, wood), through = Shot(Kit.ThroughWood, wood),
+                        twice = Shot(Kit.ThroughWood, wood, new Vector2I(4, 5));
+            check("through the wood: the destroyer's pass on a wood, the wood whole, the round on; a second wood stops it",
+                  bare.Unit(1)!.Fate == UnitFate.Alive
+                  && through.Unit(1)!.Fate == UnitFate.Knocked && through.Board.CoverStateAt(wood) == CoverState.Intact
+                  && through.Events.Any(e => e.Kind == BattleEventKind.Passed && e.Note == "wood")
+                  && twice.Unit(1)!.Fate == UnitFate.Alive,
+                  $"bare: {Said(bare)}; through: {Said(through)}; two woods: {Said(twice)}");
+        }
+
+        // upgrades.md «Таранный отвал» (2026-11-04): a green heavy with it rams
+        // a brown medium - in brown's next turn the medium may not move, but
+        // fires; its activation over, it moves again.
+        {
+            BattleState s = Probe(9, 10);
+            Put(s, 0, "HTR", Camp.Green, 4, 8, 90, kit: Kit.RamBlade);
+            Put(s, 1, "MTR", Camp.Brown, 4, 7, 270);
+            Act(s, 0, st => Battle.Ram(st, new Vector2I(4, 7)));
+            bool pinned = s.Unit(1)!.Pinned && s.Events.Any(e => e.Kind == BattleEventKind.Pinned);
+            Battle.EndTurn(s);
+            string? stuck = null, fired = null, later = null;
+            Act(s, 1, st => stuck = Battle.Go(st, new Vector2I(4, 5)));
+            Act(s, 1, st => fired = Battle.Fire(st, new Vector2I(4, 3)));
+            Battle.EndTurn(s);
+            bool freed = !s.Unit(1)!.Pinned;
+            Battle.EndTurn(s);
+            Act(s, 1, st => later = Battle.Go(st, new Vector2I(4, 5)));
+            check("the ram blade: the rammed hull has no move in its next activation, fires in it, and moves after",
+                  pinned && stuck is not null && stuck.Contains("pinned") && fired is null && freed && later is null,
+                  $"pinned {pinned}; move {stuck}; fire {fired ?? "ok"}; freed {freed}; later {later ?? "ok"}; {Said(s)}");
+        }
+
         // Д8, upgrades.md «Противоосколочный подбой»: the mortar's bomb sets off
         // a knocked medium at (4,5); of the two lights beside it the lined one
         // does not catch.
