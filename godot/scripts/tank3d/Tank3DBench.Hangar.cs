@@ -463,6 +463,14 @@ public sealed partial class Tank3DBench
         Vector2 size = stage.Size;
         float room = size.Y - QhHeadHigh - QhStripHigh;
         float k = Mathf.Min((size.X - 120) / QhView.X, room / QhView.Y);
+        // the light under the machine in front, where it stands, not low under it
+        // (author 2026-11-04); the front's middle is the ring's at near = 1, below
+        var glowAt = new Vector2(0.5f, size.Y > 0 ? (QhHeadHigh + room * 0.5f) / size.Y : 0.72f);
+        if (stage is QuickPad pad && pad.GlowAt != glowAt)
+        {
+            pad.GlowAt = glowAt;
+            pad.QueueRedraw();
+        }
         int n = QuickSquad.Size;
         for (int i = 0; i < n; i++)
         {

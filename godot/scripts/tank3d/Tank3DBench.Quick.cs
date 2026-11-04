@@ -263,11 +263,26 @@ public sealed partial class Tank3DBench
                 _qTurnBy = 0.0f;
             }
         }
-        float yaw = RosterArtYaw + _qTurnBy + (float)((Time.GetTicksMsec() - _qTurnFrom) / 1000.0 % QTurnSeconds / QTurnSeconds * 360.0);
+        // a release the stage never heard - its view rebuilt or gone under the press -
+        // must not stop the clock for good
+        if (_qTurnHeld && !Input.IsMouseButtonPressed(MouseButton.Left))
+        {
+            _qTurnHeld = false;
+            _qTurnFrom = Time.GetTicksMsec();
+        }
+        float yaw = RosterArtYaw + _qTurnBy + (_qTurnHeld ? 0.0f : QuickClockTurn());
         foreach (var stage in _qStage)
             if (IsInstanceValid(stage.Value.Rig))
                 stage.Value.Rig.RotationDegrees = new Vector3(0.0f, _qHangar && stage.Key != _qhAt ? RosterArtYaw : yaw, 0.0f);
     }
+
+    /// <summary>The left button is down on a stage: the models turn by the mouse alone,
+    /// the clock stopped (author 2026-11-04), and go on from there once it is up.</summary>
+    private bool _qTurnHeld;
+
+    /// <summary>Degrees the clock has turned the stages since <see cref="_qTurnFrom"/>.</summary>
+    private float QuickClockTurn() =>
+        (float)((Time.GetTicksMsec() - _qTurnFrom) / 1000.0 % QTurnSeconds / QTurnSeconds * 360.0);
 
     /// <summary>Slot <paramref name="at"/>'s model turning on its stage, the
     /// roster's own scene live (<see cref="RosterScene"/>): it spins slowly, a
@@ -320,7 +335,17 @@ public sealed partial class Tank3DBench
         // a drag turns every model at once: they keep one heading (QuickStageTurn)
         box.GuiInput += e =>
         {
-            if (e is InputEventMouseMotion m && m.ButtonMask.HasFlag(MouseButtonMask.Left))
+            if (e is InputEventMouseButton { ButtonIndex: MouseButton.Left } b && b.Pressed != _qTurnHeld)
+            {
+                // the clock's share folded into the drags' on the press, restarted on the
+                // release: the model neither jumps nor turns while held
+                if (b.Pressed)
+                    _qTurnBy += QuickClockTurn();
+                else
+                    _qTurnFrom = Time.GetTicksMsec();
+                _qTurnHeld = b.Pressed;
+            }
+            else if (e is InputEventMouseMotion m && m.ButtonMask.HasFlag(MouseButtonMask.Left))
                 _qTurnBy += m.Relative.X / px * 0.7f;
         };
         _qLayer.RemoveChild(box);

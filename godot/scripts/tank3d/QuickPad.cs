@@ -39,6 +39,9 @@ public partial class QuickPad : Control
     public float PictureAlpha = 1.0f;
     /// <summary>A soft oval under the picture, the prototype's stage light.</summary>
     public Color? Glow;
+    /// <summary>The oval's centre, as shares of the pad's size: the prototype's 50% 72%;
+    /// the hangar's podium sets it under its machine in front.</summary>
+    public Vector2 GlowAt = new(0.5f, 0.72f);
     public HorizontalAlignment Align = HorizontalAlignment.Center;
     /// <summary>A word in a disc on the box's right edge: a node's price.</summary>
     public string Badge = "";
@@ -187,7 +190,7 @@ public partial class QuickPad : Control
             // the prototype's radial-gradient(ellipse 55% 42% at 50% 72%): an
             // oval of light low in the box, gone at 72% of its reach
             var reach = new Vector2(s.X * 0.55f, s.Y * 0.42f);
-            DrawTextureRect(GlowTexture, new Rect2(new Vector2(s.X * 0.5f, s.Y * 0.72f) - reach, reach * 2.0f), false,
+            DrawTextureRect(GlowTexture, new Rect2(s * GlowAt - reach, reach * 2.0f), false,
                             new Color(glow, glow.A * a));
         }
         if (Picture is { } pic)
