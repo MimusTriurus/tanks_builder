@@ -1762,7 +1762,7 @@ public sealed partial class Tank3DBench
     /// <c>mapview</c>, <c>close</c>, <c>map:NAME</c>, <c>swap</c>,
     /// <c>budget:N</c>, <c>ai-budget:N</c>, <c>doctrine:N|random</c>,
     /// <c>company:N</c> (from 1), <c>class:SLOT:TAG</c>,
-    /// <c>level:SLOT:BRANCH:L</c>, <c>tip:SLOT:BRANCH:L</c> (the pointer on a
+    /// <c>level:SLOT:BRANCH:L</c>, <c>tip:SLOT:BRANCH:L</c>, <c>preset-tip:N</c> (the pointer on a
     /// node), <c>shot:PATH</c> (once the pictures are in) and <c>go</c>.
     /// </summary>
     private async void QuickScript()
@@ -1842,6 +1842,18 @@ public sealed partial class Tank3DBench
                     if (_qTips is not null)
                         _qTips.Hold = true;
                     QuickPointAt(Slot(p[1]), p[2], (int)F(p[3], 1));
+                    continue;
+                case "preset-tip" when p.Length > 1:
+                    // the hangar's ready squad N (from 1) under the pointer: its tip
+                    QuickShow();
+                    for (int f = 0; f < 2; f++)
+                        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    if (_qTips is not null)
+                        _qTips.Hold = true;
+                    int want = (int)F(p[1], 1) - 1;
+                    foreach (Node n in _qRoot.FindChildren("*", "", true, false))
+                        if (n is QuickPad && n.HasMeta("q_company") && (int)n.GetMeta("q_company") == want)
+                            n.EmitSignal(Control.SignalName.MouseEntered);
                     continue;
                 case "shot" when p.Length > 1:
                     for (int f = 0; f < 600 && _qArtLeft > 0; f++)

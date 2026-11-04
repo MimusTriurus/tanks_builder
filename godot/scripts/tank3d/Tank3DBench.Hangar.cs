@@ -220,6 +220,17 @@ public sealed partial class Tank3DBench
     /// <summary>The battle card's figure rows in the hangar, times their size there.</summary>
     private const float QhRowsK = 1.25f;
 
+    /// <summary>The left sheet's width and its panels' padding, px: a ready squad's row is
+    /// measured against them (QuickHangarCompany).</summary>
+    private const float QhSheetWide = 380, QhSheetPad = 14;
+
+    /// <summary>A ready squad's class icons, px, the octagon itself (QuickIconTight):
+    /// large enough to tell LT from MT.</summary>
+    private const int QhPresetIcon = 30;
+
+    /// <summary>The battle panel's minimap, px wide.</summary>
+    private const int QhMapWide = 110;
+
     /// <summary>A side panel's caption, the lobby's eyebrow (<see cref="QEyebrow"/>) a
     /// size up for the hangar's larger type: it names the panel and is not read as
     /// one more of its rows, which a bold 17 in ink was (author 2026-11-04).</summary>
@@ -242,14 +253,14 @@ public sealed partial class Tank3DBench
         int start = QuickSquad.Size * QuickSquad.CompanyLevel;
         // two panels, as the right one and the podium are (author 2026-11-03): the ready
         // squads, and under them the battle
-        var side = new VBoxContainer { CustomMinimumSize = new Vector2(350, 0) };
+        var side = new VBoxContainer { CustomMinimumSize = new Vector2(QhSheetWide, 0) };
         side.AddThemeConstantOverride("separation", 12);
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 8);
         col.AddChild(QuickHangarHead(L.T("hangar.presets")));
         foreach (QuickSquad.Company c in QuickSquad.Companies)
             col.AddChild(QuickHangarCompany(c, start));
-        PanelContainer presets = Ui.Box(col, Ui.Panel, 14);
+        PanelContainer presets = Ui.Box(col, Ui.Panel, QhSheetPad);
         presets.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
         side.AddChild(presets);
         side.AddChild(QuickHangarBattle());
@@ -270,7 +281,8 @@ public sealed partial class Tank3DBench
         Label mode = Ui.Text(QuickMode(q.Map), 20, Ui.Ink, bold: true);
         mode.HorizontalAlignment = HorizontalAlignment.Center;
         col.AddChild(mode);
-        var map = QuickMinimap(q.Map, q.Player, 200, labels: true, ground: false);
+        // smaller than it was, its room the ready squads' icons' (author 2026-11-04)
+        var map = QuickMinimap(q.Map, q.Player, QhMapWide, labels: true, ground: false);
         map.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
         col.AddChild(map);
         Label link = Ui.Text(L.T("hangar.params_door"), 12, Ui.Accent);
@@ -555,17 +567,47 @@ public sealed partial class Tank3DBench
         col.OffsetRight = -10;
         col.OffsetTop = 6;
         // its name and its three; its play is the tip's (in the type scale it no longer fits beside the name)
-        col.AddChild(Ui.Text(c.Name, 14, Ui.Ink, bold: true));
-        var three = Ui.Text(string.Join(" · ", c.Slots.Select(x =>
-            $"{QuickSquad.ClassOf(x.Class).Short} {QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name}")), 12, Ui.Muted);
-        three.ClipText = true;
-        three.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        Label title = Ui.Text(c.Name, 14, Ui.Ink, bold: true);
+        // centred over its three columns (author 2026-11-04)
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        col.AddChild(title);
+        // its three as the class's icon and the branch under it (author 2026-11-04: the tags
+        // were letters to learn, and an icon a line high could not be told apart), the
+        // strip's icons under the stage: three equal columns, a name too long for its column
+        // ending in "…". The level only past the first
+        Font font = Ui.FontOf(true);
+        int n = c.Slots.Length;
+        var three = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        three.AddThemeConstantOverride("separation", 6);
+        for (int i = 0; i < n; i++)
+        {
+            QuickSquad.Class cls = QuickSquad.ClassOf(c.Slots[i].Class);
+            var item = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore };
+            item.AddThemeConstantOverride("separation", 0);
+            var face = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, MouseFilter = Control.MouseFilterEnum.Ignore };
+            face.AddThemeConstantOverride("separation", 4);
+            if (QuickIconTight(QuickClassIcon(cls), QhPresetIcon) is { } icon)
+                face.AddChild(new TextureRect
+                {
+                    Texture = icon, CustomMinimumSize = new Vector2(QhPresetIcon, QhPresetIcon), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered, TextureFilter = QIconFilter,
+                });
+            if (QuickSquad.CompanyLevel > 1)
+                face.AddChild(new QuickRank { Level = QuickSquad.CompanyLevel, High = QhPresetIcon * 0.6f, Lit = Ui.Accent,
+                                              Dim = new Color(Ui.Muted, 0.6f), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter });
+            item.AddChild(face);
+            Label branch = Ui.Text(cls.BranchOf(c.Slots[i].Branch)!.Name, 12, Ui.Muted);
+            branch.HorizontalAlignment = HorizontalAlignment.Center;
+            branch.ClipText = true;
+            branch.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+            item.AddChild(branch);
+            three.AddChild(item);
+        }
         col.AddChild(three);
         pad.AddChild(col);
         QuickHangarDeaf(col);
-        // two short lines, unwrapped: a fixed height, a label measures nothing before the layout
-        Font font = Ui.FontOf(true);
-        pad.CustomMinimumSize = new Vector2(0, Mathf.Ceil(font.GetHeight(Ui.Size(14)) + font.GetHeight(Ui.Size(12)) + 14));
+        // a fixed height, a label measures nothing before the layout: the name, the icons, their names
+        pad.CustomMinimumSize = new Vector2(0, Mathf.Ceil(font.GetHeight(Ui.Size(14)) + QhPresetIcon + Ui.FontOf(false).GetHeight(Ui.Size(12)) + 12));
         if (short_)
             col.Modulate = new Color(1, 1, 1, 0.45f);
         // the one the squad was taken from: lit while it is as taken, its rim only once changed
@@ -578,13 +620,41 @@ public sealed partial class Tank3DBench
                 pad.Fill = Ui.AccentFill;
             _qhLinked = pad;
         }
+        pad.SetMeta("q_company", Array.IndexOf(QuickSquad.Companies, c));
         pad.Clicked += () => QuickHangarPick(c);
-        QTip(pad, () => UiTip.Box(L.T("quick.preset_tip", Pts(start)), c.Name,
-            string.Join("\n", c.Slots.Select(x => L.T("quick.preset_slot", QuickSquad.ClassOf(x.Class).Short, QuickSquad.ClassOf(x.Class).BranchOf(x.Branch)!.Name, QuickSquad.CompanyLevel))),
-            null, short_ ? L.T("hangar.preset_short", q.Budget, Pts(start))
-                : L.T("quick.preset_note", $"{char.ToUpper(c.Play[0])}{c.Play[1..]}",
-                  q.Budget > start ? L.T("quick.preset_left", Pts(q.Budget - start)) : L.T("quick.preset_all"))));
+        QTip(pad, () => QuickHangarCompanyTip(c, start, short_));
         return pad;
+    }
+
+    /// <summary>A ready squad's tip: its three as the class in full and the branch, the
+    /// level in rank chevrons as over the podium (author 2026-11-04), its play in the
+    /// tip's ink.</summary>
+    private Control QuickHangarCompanyTip(QuickSquad.Company c, int start, bool short_)
+    {
+        QuickSetup q = _qs;
+        // no kicker, no points and no word on replacing (author 2026-11-04): the tip says what the
+        // squad is; only a squad the budget shuts says why
+        Control tip = UiTip.Box("", c.Name, "",
+            state: short_ ? L.T("hangar.preset_short", q.Budget, Pts(start)) : null,
+            coda: $"{char.ToUpper(c.Play[0])}{c.Play[1..]}.");
+        var rows = new VBoxContainer();
+        rows.AddThemeConstantOverride("separation", 4);
+        Font font = Ui.FontOf(false);
+        float high = font.GetHeight(Ui.Size(13));
+        foreach ((string Class, string Branch) x in c.Slots)
+        {
+            QuickSquad.Class cls = QuickSquad.ClassOf(x.Class);
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 8);
+            row.AddChild(new QuickRank { Level = QuickSquad.CompanyLevel, High = high, Lit = Ui.Accent, Dim = new Color(Ui.TipMuted, 0.6f),
+                                         SizeFlagsVertical = Control.SizeFlags.ShrinkCenter });
+            row.AddChild(Ui.Text(L.T("hangar.preset_slot", cls.Name, cls.BranchOf(x.Branch)!.Name), 13, Ui.TipInk));
+            rows.AddChild(row);
+        }
+        // under the head, over the play: the box has no kicker, its head comes first
+        tip.AddChild(rows);
+        tip.MoveChild(rows, 1);
+        return tip;
     }
 
     /// <summary>A ready squad in place of the squad (author 2026-11-03): asked first only
@@ -640,8 +710,10 @@ public sealed partial class Tank3DBench
                 edit.Text = q.Preset?.Name ?? L.T("hangar.squad_default");
         };
         col.AddChild(edit);
+        // a ready squad as taken says nothing under its name (author 2026-11-04): the sheet's lit
+        // row says it already; taken from one and renamed or changed, it says which
         string note = q.Preset is null ? "" : QuickHangarAsTaken()
-            ? q.Name is null ? L.T("hangar.squad_preset") : L.T("hangar.squad_from", q.Preset.Name)
+            ? q.Name is null ? "" : L.T("hangar.squad_from", q.Preset.Name)
             : L.T("hangar.squad_changed", q.Preset.Name);
         var sub = Ui.Text(note, 12, Ui.Muted);
         sub.HorizontalAlignment = HorizontalAlignment.Center;
@@ -824,6 +896,7 @@ public sealed partial class Tank3DBench
         callout.AddChild(text);
         return callout;
     }
+
     /// <summary>The caption over a machine on the ring (author 2026-11-03): its class
     /// in full, under it its branch, and its level as rank chevrons beside both
     /// lines, a sleeve's patch; the price is the head's and the tree's, not said
@@ -865,6 +938,23 @@ public sealed partial class Tank3DBench
         row.AddChild(box);
         return row;
     }
+
+    /// <summary>An icon cut to what it draws, its clear margin gone: the class icons'
+    /// octagon fills <paramref name="px"/> rather than two thirds of it. Kept per name and size.</summary>
+    private static Texture2D? QuickIconTight(string name, int px)
+    {
+        string key = $"{name}@{px}~tight";
+        if (QhTight.TryGetValue(key, out Texture2D? had))
+            return had;
+        // rastered as large as the box drawn, before the cut: the octagon is then px across
+        Texture2D? tex = QIcon(name, px * 3 / 2);
+        Texture2D? cut = null;
+        if (tex?.GetImage() is { } image && image.GetUsedRect() is { Size.X: > 0 } used)
+            cut = new AtlasTexture { Atlas = tex, Region = used };
+        return QhTight[key] = cut ?? tex;
+    }
+
+    private static readonly Dictionary<string, Texture2D?> QhTight = new();
 
     /// <summary>A class's icon in <c>Icons/</c>: <c>class_LT</c> and so on.</summary>
     private static string QuickClassIcon(QuickSquad.Class c) => $"class_{c.Short}";

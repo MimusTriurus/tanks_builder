@@ -53,6 +53,7 @@
   "quick.preset_tip": "Preset squad · {0}",
   "quick.preset_slot": "{0} — {1}, lv. {2}",
   "quick.preset_note": "{0}. Replaces the current squad; {1}",
+  "hangar.preset_slot": "{0} — {1}",
   "quick.preset_left": "{0} left for upgrades.",
   "quick.preset_all": "uses the whole budget.",
   "quick.no_class": [
@@ -163,7 +164,6 @@
   "loading.icons": "Drawing icons",
   "loading.ready": "Ready",
   "hangar.squad_default": "My squad",
-  "hangar.squad_preset": "preset squad",
   "hangar.squad_from": "preset “{0}”",
   "hangar.squad_changed": "changed from “{0}”",
   "hangar.no_upgrades": "no upgrades",

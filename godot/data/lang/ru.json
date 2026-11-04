@@ -52,6 +52,7 @@
   "quick.preset_tip": "Готовый отряд · {0}",
   "quick.preset_slot": "{0} — {1}, ур. {2}",
   "quick.preset_note": "{0}. Заменит текущий отряд; {1}",
+  "hangar.preset_slot": "{0} — {1}",
   "quick.preset_left": "ещё {0} останутся на прокачку.",
   "quick.preset_all": "бюджет уйдёт весь.",
   "quick.no_class": [
@@ -165,7 +166,6 @@
   "loading.icons": "Отрисовка иконок",
   "loading.ready": "Готово",
   "hangar.squad_default": "Мой отряд",
-  "hangar.squad_preset": "готовый отряд",
   "hangar.squad_from": "готовый отряд «{0}»",
   "hangar.squad_changed": "изменён, был «{0}»",
   "hangar.no_upgrades": "без прокачки",
