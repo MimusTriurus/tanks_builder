@@ -115,7 +115,9 @@ public sealed partial class Tank3DBench
             q.Squad = QuickSquad.OfCompany(q.Preset);
         }
         _qs = q;
-        _qPage = back ? QuickPage.Build : QuickPage.Lobby;
+        // the hangar is the first screen (author 2026-11-04): the battle's settings are its
+        // «Параметры и карта»; the lobby stays the old build's first
+        _qPage = back || _qHangar ? QuickPage.Build : QuickPage.Lobby;
         _qLayer = new CanvasLayer { Name = "QuickScreens", Layer = 20 };
         AddChild(_qLayer);
         var ground = new ColorRect { Color = Ui.Bg, MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -134,7 +136,7 @@ public sealed partial class Tank3DBench
         QuickShow();
         QuickArt();
         QuickScript();
-        Log.Print($"tank3d: quick: the screens - {(back ? "back to the build" : "the lobby")}, maps {string.Join(", ", pool)}");
+        Log.Print($"tank3d: quick: the screens - {(back ? "back to the build" : _qHangar ? "the hangar" : "the lobby")}, maps {string.Join(", ", pool)}");
         while (!_qGo)
         {
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
