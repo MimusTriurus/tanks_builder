@@ -66,6 +66,9 @@ public sealed partial class Tank3DBench
         /// <summary>The AI's, made at «К расстановке».</summary>
         public QuickSquad.Slot[] Ai = QuickSquad.Empty();
         public QuickSquad.Doctrine? AiDoctrine;
+        /// <summary>The squad's paint (<see cref="Livery"/>), the hangar's choice; the
+        /// AI's its own - the other side's brown of old.</summary>
+        public string Paint = Livery.Own, AiPaint = Livery.Brown;
     }
 
     /// <summary>The setup carried over the scene's reload, «К сборке» from the placement.</summary>
@@ -1842,6 +1845,10 @@ public sealed partial class Tank3DBench
                     if (_qTips is not null)
                         _qTips.Hold = true;
                     QuickPointAt(Slot(p[1]), p[2], (int)F(p[3], 1));
+                    continue;
+                case "paint" when p.Length > 1:
+                    // the squad's paint (Livery's id: colour, or colour/pattern)
+                    QuickPaint(string.Join("/", p.Skip(1)));
                     continue;
                 case "preset-tip" when p.Length > 1:
                     // the hangar's ready squad N (from 1) under the pointer: its tip

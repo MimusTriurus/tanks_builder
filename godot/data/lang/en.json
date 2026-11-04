@@ -662,5 +662,19 @@
   "point.held_by": "held by {0}",
   "point.held_by_none": "held by no one",
   "ghost.way_ends": "the path ends here — no turn",
-  "ghost.no_steps_to_turn": "no steps left for this turn"
+  "ghost.no_steps_to_turn": "no steps left for this turn",
+  "paint.olive": "Olive",
+  "paint.brown": "Brown",
+  "paint.sand": "Sand",
+  "paint.grey": "Grey",
+  "paint.snow": "Snow",
+  "paint.night": "Night",
+  "paint.jungle": "Jungle",
+  "paint.rust": "Rust",
+  "camo.plain": "Plain",
+  "camo.woodland": "Woodland",
+  "camo.digital": "Digital",
+  "camo.splinter": "Splinter",
+  "camo.dazzle": "Dazzle",
+  "camo.twotone": "Two-tone"
 }

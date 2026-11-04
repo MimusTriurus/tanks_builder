@@ -65,6 +65,9 @@ public sealed partial class Tank3DBench
     /// <summary>The podium's head and class strip, px.</summary>
     private const float QhHeadHigh = 40, QhStripHigh = 118;
 
+    /// <summary>A paint swatch's picture, px (QuickHangarPaints).</summary>
+    private const int QhSwatch = 26;
+
     /// <summary>A class tab: the icon's side; the pad - the icon's shield (its frame is
     /// 0.654 by 0.623 of the icon) and a 6 px halo; the gap - a gun reaches past its shield.</summary>
     private const float QhTabIcon = 112;
@@ -396,6 +399,11 @@ public sealed partial class Tank3DBench
         }
         stage.AddChild(strip);
 
+        // the squad's paint under the machine in front, over the classes (author
+        // 2026-11-04, as the jeep game's shop has it): the patterns, then the colours
+        Control paints = QuickHangarPaints();
+        stage.AddChild(paints);
+
         stage.Resized += () =>
         {
             Vector2 size = stage.Size;
@@ -407,6 +415,8 @@ public sealed partial class Tank3DBench
             next.Position = new Vector2(size.X - 52, size.Y * 0.5f - 33);
             strip.Size = strip.GetCombinedMinimumSize();
             strip.Position = new Vector2((size.X - strip.Size.X) * 0.5f, size.Y - QhStripHigh + 8);
+            paints.Size = paints.GetCombinedMinimumSize();
+            paints.Position = new Vector2((size.X - paints.Size.X) * 0.5f, strip.Position.Y - paints.Size.Y - 10);
             QuickHangarRing();
         };
         // the ready squad the squad was taken from opens into the podium like a tab
@@ -624,6 +634,62 @@ public sealed partial class Tank3DBench
         pad.Clicked += () => QuickHangarPick(c);
         QTip(pad, () => QuickHangarCompanyTip(c, start, short_));
         return pad;
+    }
+
+    /// <summary>The squad's paint (<see cref="Livery"/>): a row of patterns, each in the
+    /// squad's colour, over a row of colours, each in the squad's pattern - as the jeep
+    /// game's shop has them; free, the whole squad at once, the side's mark staying.</summary>
+    private Control QuickHangarPaints()
+    {
+        QuickSetup q = _qs;
+        var rows = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        rows.AddThemeConstantOverride("separation", 6);
+        string colour = Livery.ColourOf(q.Paint), pattern = Livery.PatternOf(q.Paint);
+        HBoxContainer Row(int n, Func<int, string> idAt, Func<int, string> nameAt, Func<int, bool> chosen)
+        {
+            var row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, MouseFilter = Control.MouseFilterEnum.Ignore };
+            row.AddThemeConstantOverride("separation", 6);
+            for (int i = 0; i < n; i++)
+            {
+                string id = idAt(i), name = nameAt(i);
+                bool on = chosen(i);
+                var pad = new QuickPad
+                {
+                    Picture = Livery.Swatch(id, QhSwatch), PictureSize = new Vector2(QhSwatch, QhSwatch),
+                    CustomMinimumSize = new Vector2(QhSwatch + 6, QhSwatch + 6), Fill = Ui.Inset,
+                    Rim = on ? Ui.Accent : Ui.Line, RimWidth = on ? 2 : 1, HoverRim = Ui.Accent,
+                };
+                pad.Clicked += () => QuickPaint(id);
+                QTip(pad, () => UiTip.Box("", name, ""));
+                row.AddChild(pad);
+            }
+            return row;
+        }
+        rows.AddChild(Row(Livery.Patterns.Count, i => Livery.Id(colour, Livery.Patterns[i].Id),
+            i => L.T("camo." + (Livery.Patterns[i].Id.Length == 0 ? "plain" : Livery.Patterns[i].Id)),
+            i => Livery.Patterns[i].Id == pattern));
+        rows.AddChild(Row(Livery.Colours.Count, i => Livery.Id(Livery.Colours[i].Id, pattern),
+            i => L.T("paint." + Livery.Colours[i].Id), i => Livery.Colours[i].Id == colour));
+        return rows;
+    }
+
+    /// <summary>The squad in paint <paramref name="id"/>: every machine on the screens
+    /// repainted - the ring's and the spare views - and the swatches redrawn.</summary>
+    private void QuickPaint(string id)
+    {
+        if (!Livery.Valid(id))
+        {
+            Log.Print($"tank3d: quick: no paint {id}");
+            return;
+        }
+        _qs.Paint = id;
+        foreach (var stage in _qStage.Values)
+            if (IsInstanceValid(stage.Rig) && stage.Rig.GetChildOrNull<TankModel>(0) is { } model)
+                SidePaint(model, stage.Side);
+        foreach (var spare in _qSpare)
+            if (IsInstanceValid(spare.Rig) && spare.Rig.GetChildOrNull<TankModel>(0) is { } model)
+                SidePaint(model, spare.Side);
+        QuickShow();
     }
 
     /// <summary>One of the equal gaps the machine's description is spread down its panel

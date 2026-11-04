@@ -182,7 +182,7 @@ public sealed partial class TankModel : Node3D
         // Before Bind: the belt's MultiMesh takes the link's mesh as it stands.
         if (toon)
             using (Prof.Measure("model.toon"))
-                model.Cel = Toon.Dress(scene);
+                model.Cel = Toon.Dress(scene, space: true);
         if (toon && bare is not null && bare.GetNodeOrNull(tag) is null)
         {
             Node kept = scene.Duplicate();
@@ -300,6 +300,10 @@ public sealed partial class TankModel : Node3D
         var uv2 = new List<Vector2>();
         var colors = new List<Color>();
         var custom0 = new List<float>();
+        // the place and the normal in the model's frame (Toon.Dress's space): the
+        // model's already, as they are whatever the piece's own place
+        var custom1 = new List<float>();
+        var custom2 = new List<float>();
         var index = new List<int>();
         foreach ((Godot.Collections.Array a, Transform3D to) in parts)
         {
@@ -335,6 +339,10 @@ public sealed partial class TankModel : Node3D
                     custom0.AddRange(new[] { d.X, d.Y, d.Z, c[k + 3] });
                 }
             }
+            if (a[(int)Mesh.ArrayType.Custom1].VariantType != Variant.Type.Nil)
+                custom1.AddRange(a[(int)Mesh.ArrayType.Custom1].AsFloat32Array());
+            if (a[(int)Mesh.ArrayType.Custom2].VariantType != Variant.Type.Nil)
+                custom2.AddRange(a[(int)Mesh.ArrayType.Custom2].AsFloat32Array());
             if (a[(int)Mesh.ArrayType.Index].VariantType != Variant.Type.Nil)
                 foreach (int i in a[(int)Mesh.ArrayType.Index].AsInt32Array())
                     index.Add(base_ + i);
@@ -358,6 +366,10 @@ public sealed partial class TankModel : Node3D
             result[(int)Mesh.ArrayType.Color] = colors.ToArray();
         if (custom0.Count == verts.Count * 4)
             result[(int)Mesh.ArrayType.Custom0] = custom0.ToArray();
+        if (custom1.Count == verts.Count * 4)
+            result[(int)Mesh.ArrayType.Custom1] = custom1.ToArray();
+        if (custom2.Count == verts.Count * 4)
+            result[(int)Mesh.ArrayType.Custom2] = custom2.ToArray();
         return result;
     }
 

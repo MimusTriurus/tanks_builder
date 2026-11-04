@@ -274,12 +274,30 @@ public sealed partial class Tank3DBench
             Banner(L.T("match.round1_banner", TossSaid, SideName(_mt.Turn)), SideInk(_mt.Turn));
     }
 
-    /// <summary>The side's paint on a model: brown or the model's own.</summary>
+    /// <summary>The side's paint on a model (<see cref="Livery"/>): in a quick battle
+    /// the squad's, the hangar's choice, and the AI's own; else the green side's the
+    /// model's own and the brown side's brown, as they were.</summary>
     private void SidePaint(TankModel model, Side side)
     {
         if (!Match)
             return;
-        Lineup.Paint(model, side == Side.Brown ? Parking.Brown : Parking.Green);
+        Lineup.Paint(model, Parking.Green);
+        Livery.Apply(model, PaintOf(side));
+    }
+
+    /// <summary>The paint <paramref name="side"/>'s machines wear (<see cref="SidePaint"/>).</summary>
+    private string PaintOf(Side side)
+    {
+        QuickSetup? q = _quick ?? (Quick ? _qs : null);
+        if (q is null)
+            return side == Side.Brown ? Livery.Brown : Livery.Own;
+        if (side == q.Player)
+            return q.Paint;
+        // the paint is all that tells the sides apart (the roof's mark was taken off,
+        // author 2026-11-04): the AI never in the player's colour
+        if (Livery.ColourOf(q.AiPaint) != Livery.ColourOf(q.Paint))
+            return q.AiPaint;
+        return Livery.ColourOf(q.Paint) == Livery.Brown ? Livery.Own : Livery.Brown;
     }
 
     /// <summary>Every unit on the board, the rig's first.</summary>

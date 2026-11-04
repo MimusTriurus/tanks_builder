@@ -664,5 +664,19 @@
   "point.held_by": "держат {0}",
   "point.held_by_none": "никто не держит",
   "ghost.way_ends": "здесь путь кончается — разворота нет",
-  "ghost.no_steps_to_turn": "на этот разворот шагов нет"
+  "ghost.no_steps_to_turn": "на этот разворот шагов нет",
+  "paint.olive": "Олива",
+  "paint.brown": "Бурый",
+  "paint.sand": "Песок",
+  "paint.grey": "Серый",
+  "paint.snow": "Снег",
+  "paint.night": "Ночь",
+  "paint.jungle": "Джунгли",
+  "paint.rust": "Ржавчина",
+  "camo.plain": "Без камуфляжа",
+  "camo.woodland": "Лесной",
+  "camo.digital": "Цифровой",
+  "camo.splinter": "Осколочный",
+  "camo.dazzle": "Слепящий",
+  "camo.twotone": "Двухцветный"
 }

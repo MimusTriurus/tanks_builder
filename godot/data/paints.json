@@ -1,0 +1,24 @@
+{
+  "_about": "A squad's paint (Livery, docs/tank3d.md «Окраска»): a colour and a pattern, kept as one id, \"olive\" or \"olive/woodland\". A colour is the army green taken to its base, or with a pattern its four colours light to dark, the ground first. Its name is the key paint.<id>, a pattern's camo.<id>; a pattern's mask is assets/Images/Camo/<id>.png (godot/tools/camo_masks.py). tile: a pattern's tile in hull lengths. Palettes after the jeep game's (jackal_port/ratel, Level3DBtr.PAINTS); brown is the old side_tone.",
+  "tile": 1.1,
+  "own": "olive",
+  "brown": "brown",
+  "colours": [
+    { "id": "olive",  "base": "586636", "palette": ["7a8052", "6b5032", "364228", "1c1c1a"] },
+    { "id": "brown",  "base": "5c3c1e", "palette": ["c3925c", "946133", "5e3c20", "2a1c12"] },
+    { "id": "sand",   "base": "ad9265", "palette": ["dccca2", "c4ac80", "82623f", "46342a"] },
+    { "id": "grey",   "base": "63686e", "palette": ["b4b8bc", "7e848a", "4e5359", "222528"] },
+    { "id": "snow",   "base": "d0d5db", "palette": ["e2e6ea", "b0b6be", "626870", "2c3036"] },
+    { "id": "night",  "base": "2a2f38", "palette": ["4e5664", "2a2f38", "1a1e26", "0b0d11"] },
+    { "id": "jungle", "base": "34603a", "palette": ["6e9448", "3e6a3c", "5a4428", "182a1a"] },
+    { "id": "rust",   "base": "8c4f35", "palette": ["c08a5a", "8c4f35", "5a3020", "2a1a14"] }
+  ],
+  "patterns": [
+    { "id": "" },
+    { "id": "woodland" },
+    { "id": "digital" },
+    { "id": "splinter" },
+    { "id": "dazzle" },
+    { "id": "twotone" }
+  ]
+}

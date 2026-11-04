@@ -431,7 +431,26 @@ uniform vec3 flash_tone : source_color = vec3(1.0, 0.58, 0.22);
 // grey already - keep their own.
 uniform float side_brown = 0.0;
 uniform vec3 side_tone : source_color = vec3(0.58, 0.38, 0.20);
+// The player's paint (Livery): the army's green - the same texels side_brown
+// takes - in paint_c0, or with camo_on in a pattern of the four colours, light
+// to dark: camo_tex's R, G and B the layers over the ground, laid out in the
+// model's frame (CUSTOM1, CUSTOM2 - Dress's space) a tile camo_tile model units
+// wide, each face from the side it looks to. Each texel keeps how much darker or
+// lighter than the paint it was (paint_lum the paint's own), so the baked
+// shading, the rivets and the weathering stay.
+uniform bool paint_on = false;
+uniform vec3 paint_c0 : source_color = vec3(0.35, 0.40, 0.21);
+uniform vec3 paint_c1 : source_color = vec3(0.35, 0.40, 0.21);
+uniform vec3 paint_c2 : source_color = vec3(0.35, 0.40, 0.21);
+uniform vec3 paint_c3 : source_color = vec3(0.35, 0.40, 0.21);
+uniform float paint_lum = 0.25;
+uniform bool camo_on = false;
+uniform sampler2D camo_tex : hint_default_black, filter_linear_mipmap, repeat_enable;
+uniform float camo_tile = 1.0;
+uniform float camo_sharp = 12.0;
 varying vec3 world;
+varying vec3 camo_p;
+varying vec3 camo_n;
 " + NoiseCode + RampCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
     vec3 n = NORMAL;
@@ -440,6 +459,8 @@ void vertex() {
     NORMAL = n;
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     mud_local = VERTEX * length(MODEL_MATRIX[0].xyz);
+    camo_p = CUSTOM1.xyz;
+    camo_n = CUSTOM2.xyz;
 }
 void fragment() {
     if ((burn_role != 0 && burn_gone(UV2.x, world)) || see_gone(FRAGCOORD.xy)) {
@@ -452,6 +473,23 @@ void fragment() {
         float tone = dot(side_tone, vec3(0.299, 0.587, 0.114));
         float paint = smoothstep(0.02, 0.08, c.g - max(c.r, c.b));
         c.rgb = mix(c.rgb, min(side_tone * lum / tone, vec3(1.0)), side_brown * paint);
+    }
+    if (paint_on) {
+        float lum = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        float paint = smoothstep(0.02, 0.08, c.g - max(c.r, c.b));
+        float keep = clamp(lum / max(paint_lum, 0.01), 0.0, 2.0);
+        vec3 tone = paint_c0;
+        if (camo_on) {
+            vec3 w = pow(abs(camo_n), vec3(camo_sharp));
+            w /= max(w.x + w.y + w.z, 1e-4);
+            vec3 q = camo_p / camo_tile;
+            vec3 m = texture(camo_tex, q.zy).rgb * w.x + texture(camo_tex, q.xz).rgb * w.y
+                   + texture(camo_tex, q.xy).rgb * w.z;
+            tone = mix(tone, paint_c1, m.r);
+            tone = mix(tone, paint_c2, m.g);
+            tone = mix(tone, paint_c3, m.b);
+        }
+        c.rgb = mix(c.rgb, min(tone * keep, vec3(1.0)), paint);
     }
     float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
     vec3 glow = vec3(0.0);
@@ -763,9 +801,17 @@ void fragment() {
     /// <paramref name="stencil"/> is left on every pixel the model's own
     /// surfaces draw (not its ink): what a pass that belongs to this kind of
     /// model alone reads - a tree's crown outline (<c>Tree3DBench</c>). 0, the
-    /// tanks', is what every other surface writes.</summary>
+    /// tanks', is what every other surface writes.
+    ///
+    /// <paramref name="space"/> - the tanks' - also writes each vertex where it
+    /// stands in <paramref name="scene"/>'s own frame, as the model is loaded:
+    /// <c>CUSTOM1</c> its place, <c>CUSTOM2</c> its normal. The paint's pattern
+    /// is laid out in it (<see cref="Livery"/>), so it
+    /// runs on across parts placed apart - hull, hatches, turret - and rides on
+    /// the turret as it turns, the turret having been at rest when it was written.</summary>
     public static List<ShaderMaterial> Dress(Node scene, Func<Material, bool>? keep = null,
-                                             Func<Material, bool>? foliage = null, int stencil = 0)
+                                             Func<Material, bool>? foliage = null, int stencil = 0,
+                                             bool space = false)
     {
         var made = new Dictionary<Material, ShaderMaterial>();
         var meshes = new List<MeshInstance3D>();
@@ -774,8 +820,19 @@ void fragment() {
         foreach (MeshInstance3D m in meshes)
             length = Mathf.Max(length, m.Mesh.GetAabb().Size.Length());
         foreach (MeshInstance3D m in meshes)
-            m.Mesh = Rebuild(m.Mesh, length, made, keep, foliage, stencil);
+            m.Mesh = Rebuild(m.Mesh, length, made, keep, foliage, stencil, space ? InScene(m, scene) : null);
         return new List<ShaderMaterial>(made.Values);
+    }
+
+    /// <summary>Where <paramref name="node"/> stands in <paramref name="scene"/>,
+    /// whether or not either is in the tree.</summary>
+    private static Transform3D InScene(Node node, Node scene)
+    {
+        Transform3D x = Transform3D.Identity;
+        for (Node? at = node; at is not null && at != scene; at = at.GetParent())
+            if (at is Node3D n)
+                x = n.Transform * x;
+        return x;
     }
 
     /// <summary>
@@ -1011,11 +1068,14 @@ void fragment() {
 
     private static ArrayMesh Rebuild(Mesh src, float length, Dictionary<Material, ShaderMaterial> made,
                                      Func<Material, bool>? keep, Func<Material, bool>? foliage,
-                                     int stencil)
+                                     int stencil, Transform3D? space = null)
     {
         var dst = new ArrayMesh();
-        const Mesh.ArrayFormat custom = (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat
-                                                           << (int)Mesh.ArrayFormat.FormatCustom0Shift);
+        Mesh.ArrayFormat custom = (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat
+                                                     << (int)Mesh.ArrayFormat.FormatCustom0Shift);
+        if (space is not null)
+            custom |= (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom1Shift)
+                      | (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom2Shift);
         for (int s = 0; s < src.GetSurfaceCount(); s++)
         {
             Material? mat = src.SurfaceGetMaterial(s);
@@ -1024,6 +1084,8 @@ void fragment() {
                 ? src.SurfaceGetArrays(s)
                 : Facet(src.SurfaceGetArrays(s));
             arrays[(int)Mesh.ArrayType.Custom0] = InkNormals(arrays, length);
+            if (space is { } at)
+                (arrays[(int)Mesh.ArrayType.Custom1], arrays[(int)Mesh.ArrayType.Custom2]) = InSpace(arrays, at);
             dst.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, custom);
             if (mat is not null)
                 dst.SurfaceSetMaterial(s, CelFor(mat, made, leaf, stencil));
@@ -1165,6 +1227,29 @@ void fragment() {
         for (int i = 0; i < from.Count; i++)
             System.Array.Copy(src, from[i] * per, dst, i * per, per);
         return dst;
+    }
+
+    /// <summary>Per vertex, its place and its normal in the model's frame
+    /// (<see cref="Dress"/>'s <c>space</c>), as <c>CUSTOM1</c> and <c>CUSTOM2</c>.</summary>
+    private static (float[] At, float[] Normal) InSpace(Godot.Collections.Array arrays, Transform3D space)
+    {
+        Vector3[] pos = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+        Vector3[] nor = arrays[(int)Mesh.ArrayType.Normal].AsVector3Array();
+        var at = new float[pos.Length * 4];
+        var n = new float[pos.Length * 4];
+        Basis turn = space.Basis.Inverse().Transposed();
+        for (int i = 0; i < pos.Length; i++)
+        {
+            Vector3 p = space * pos[i];
+            Vector3 q = i < nor.Length ? (turn * nor[i]).Normalized() : Vector3.Up;
+            at[i * 4] = p.X;
+            at[i * 4 + 1] = p.Y;
+            at[i * 4 + 2] = p.Z;
+            n[i * 4] = q.X;
+            n[i * 4 + 1] = q.Y;
+            n[i * 4 + 2] = q.Z;
+        }
+        return (at, n);
     }
 
     /// <summary>
