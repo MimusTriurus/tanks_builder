@@ -50,6 +50,8 @@ public sealed partial class Loading : CanvasLayer
     /// <summary>The scene going out is put aside in <see cref="Session.Parked"/>
     /// rather than freed (<see cref="Park"/>).</summary>
     private bool _park;
+    /// <summary>Over the scene as it is, nothing changed (<see cref="Cover"/>).</summary>
+    private bool _cover;
     private bool _changed;
     private bool _staged;
     private bool _built;
@@ -91,6 +93,26 @@ public sealed partial class Loading : CanvasLayer
     /// back. Every other exit - a quit, a scene freed - drops as before.
     /// </summary>
     public static bool Parking { get; private set; }
+
+    /// <summary>
+    /// A veil over <paramref name="scene"/> as it is, which goes on building its
+    /// board in stages under it - the quick battle's after «В бой» (2026-11-04):
+    /// the screens go, and launched straight there was no veil, so the window
+    /// stood on the hangar's last frame through the whole build. Up on screen when
+    /// the task is done; lifted by <see cref="Built"/> as a change's is.
+    /// </summary>
+    public static async Task Cover(Node scene, string what)
+    {
+        if (_on is not null && IsInstanceValid(_on) && !_on._lifting)
+            return;
+        // staged from the start: the scene goes on in stages, and the veil waits for its Built
+        var veil = new Loading { Layer = 128, _what = what, _cover = true, _changed = true, _staged = true };
+        _on = veil;
+        scene.GetTree().Root.AddChild(veil);
+        veil._changedAt = Time.GetTicksMsec();
+        for (int i = 0; i < Settle; i++)
+            await scene.ToSignal(scene.GetTree(), SceneTree.SignalName.ProcessFrame);
+    }
 
     private static void Start(SceneTree tree, Loading veil)
     {
@@ -300,7 +322,7 @@ public sealed partial class Loading : CanvasLayer
             return;
         }
         Node? now = GetTree().CurrentScene;
-        if (now is null || now == _from || (_staged && !_built) || ++_frames < Settle)
+        if (now is null || (!_cover && now == _from) || (_staged && !_built) || ++_frames < Settle)
             return;
         if (!_lifting)
             // the whole wait the author sat through, change to lift - the way

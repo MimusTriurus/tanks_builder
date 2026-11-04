@@ -160,8 +160,21 @@ public sealed partial class Tank3DBench
                         icons.Add((u.Icon, 32, true));
                     }
         }
+        // the wood the battle's maps grow, dressed now (TreeModel.Warm): after «В бой»
+        // it is only copied (2026-11-04: dressed there, it stood eleven seconds)
+        var trees = new List<string>();
+        foreach (string map in QuickPool())
+            if (QuickMap(map) is { } m)
+            {
+                IReadOnlyDictionary<char, int>? mix = m.WoodMix;
+                foreach (var s in Species.All)
+                    if ((mix is null || mix.Count == 0 ? s.Letter == Species.Oak : mix.ContainsKey(s.Letter)))
+                        for (int seed = 0; seed < s.Seeds; seed++)
+                            if (!trees.Contains($"{s.Model}_{seed + 1:000}"))
+                                trees.Add($"{s.Model}_{seed + 1:000}");
+            }
         int views = QuickStageWanted().Count, done = 0;
-        bar.MaxValue = views * 2 + icons.Count;
+        bar.MaxValue = views * 2 + icons.Count + trees.Count;
         ulong from = Time.GetTicksMsec();
         await QuickStageWarm((name, drawn) =>
         {
@@ -176,6 +189,15 @@ public sealed partial class Tank3DBench
             if (i % 6 == 5)
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         }
+        what.Text = L.T("loading.trees");
+        ulong woods = Time.GetTicksMsec();
+        foreach (string tree in trees)
+        {
+            TreeModel.Warm(tree, _pbr);
+            bar.Value = ++done;
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+        Log.Print($"tank3d: hangar: {trees.Count} trees dressed in {Time.GetTicksMsec() - woods} ms");
         what.Text = L.T("loading.ready");
         bar.Value = bar.MaxValue;
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);

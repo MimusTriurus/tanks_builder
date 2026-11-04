@@ -71,6 +71,88 @@ public static class TreeModel
     /// </summary>
     public static Loaded? Load(string name, bool pbr, out string? error)
     {
+        // <b>Each species dressed once, each tree a copy of it.</b> Dressed anew
+        // (Toon.Dress: the faces' normals, the ink's, the cel materials) a tree
+        // cost ~68 ms, and a quick battle's wood of 168 stood eleven seconds
+        // after «В бой» (2026-11-04). The species is dressed the first time and
+        // kept; each tree is that scene copied with its meshes and its materials
+        // its own (Clone), so its burn and its fall stay its own as before.
+        string key = pbr ? name + "~pbr" : name;
+        if (!Dressed.TryGetValue(key, out Loaded? kept))
+        {
+            kept = Dress(name, pbr, out error);
+            if (kept is null)
+                return null;
+            Dressed[key] = kept;
+        }
+        error = null;
+        return Clone(kept);
+    }
+
+    /// <summary>Species <paramref name="name"/> dressed ahead, nothing made of it: the
+    /// hangar's loading does the quick battle's wood so «В бой» only copies it.
+    /// False when the files are not there.</summary>
+    public static bool Warm(string name, bool pbr)
+    {
+        string key = pbr ? name + "~pbr" : name;
+        if (Dressed.ContainsKey(key))
+            return true;
+        if (Dress(name, pbr, out _) is not { } kept)
+            return false;
+        Dressed[key] = kept;
+        return true;
+    }
+
+    /// <summary>The species dressed (<see cref="Load"/>): never put in the tree, only copied.</summary>
+    private static readonly Dictionary<string, Loaded> Dressed = new();
+
+    /// <summary>A tree of <paramref name="of"/>'s species: its scene copied, every
+    /// mesh and every material its own - the ink's pass too - the materials shared
+    /// between its meshes shared as they were, its burn and its leaves' lists
+    /// pointing at the copies.</summary>
+    private static Loaded Clone(Loaded of)
+    {
+        Node scene = of.Scene.Duplicate();
+        var copies = new Dictionary<Material, Material>();
+        Material Copy(Material m)
+        {
+            if (copies.TryGetValue(m, out Material? had))
+                return had;
+            var c = (Material)m.Duplicate();
+            if (m.NextPass is { } next)
+                c.NextPass = Copy(next);
+            return copies[m] = c;
+        }
+        void Own(Node node)
+        {
+            foreach (Node child in node.GetChildren())
+                Own(child);
+            if (node is not MeshInstance3D { Mesh: { } mesh } mi)
+                return;
+            var own = (Mesh)mesh.Duplicate();
+            for (int s = 0; s < own.GetSurfaceCount(); s++)
+                if (own.SurfaceGetMaterial(s) is { } mat)
+                    own.SurfaceSetMaterial(s, Copy(mat));
+            mi.Mesh = own;
+        }
+        Own(scene);
+        var tree = new Loaded
+        {
+            Scene = scene, Json = of.Json, Ppm = of.Ppm, Seats = of.Seats,
+            Height = of.Height, Width = of.Width, Depth = of.Depth,
+        };
+        foreach (ShaderMaterial m in of.Burn)
+            if (copies.TryGetValue(m, out Material? c) && c is ShaderMaterial sm)
+                tree.Burn.Add(sm);
+        foreach (ShaderMaterial m in of.Leaves)
+            if (copies.TryGetValue(m, out Material? c) && c is ShaderMaterial sm)
+                tree.Leaves.Add(sm);
+        return tree;
+    }
+
+    /// <summary><see cref="Load"/>'s species, read and dressed.</summary>
+    private static Loaded? Dress(string name, bool pbr, out string? error)
+    {
         string dir = Dir(name);
         // <b>Each species read once, each tree its own meshes.</b> Reading the
         // glb was most of a tree's 85 ms, and a wood is seven of a few species.

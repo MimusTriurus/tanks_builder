@@ -151,6 +151,18 @@ public sealed partial class TankModel : Node3D
 
     public static string ModelDir(string tag) => AssetRoot.Repo + "/Models/" + tag;
 
+    /// <summary>The tags' glb read so far (<see cref="Load"/>).</summary>
+    private static readonly Dictionary<string, (GltfDocument Doc, GltfState State)> Read = new();
+
+    /// <summary>Every mesh under <paramref name="node"/> made this scene's own.</summary>
+    private static void OwnMeshes(Node node)
+    {
+        foreach (Node child in node.GetChildren())
+            OwnMeshes(child);
+        if (node is MeshInstance3D { Mesh: { } mesh } m)
+            m.Mesh = (Mesh)mesh.Duplicate();
+    }
+
     /// <summary>The cel materials <see cref="Toon.Dress"/> put on the model, one
     /// per glTF material; empty when it was loaded with the glTF's own.</summary>
     public List<ShaderMaterial> Cel = new();
@@ -168,16 +180,25 @@ public sealed partial class TankModel : Node3D
                                  Node? bare = null)
     {
         string dir = ModelDir(tag);
-        var doc = new GltfDocument();
-        var state = new GltfState();
-        Error err;
-        using (Prof.Measure("model.glb"))
-            err = doc.AppendFromFile(dir + "/tank.glb", state);
-        if (err != Error.Ok)
-            throw new InvalidOperationException($"{dir}/tank.glb: {err}");
+        // the glb read once a tag (2026-11-04): a quick battle loads its six after the
+        // hangar has read the same ones, each 9 MB parsed anew. The scenes a state
+        // generates share its meshes; Toon.Dress makes every mesh anew, and without
+        // it each is copied here - nothing of one tank is another's.
+        if (!Read.TryGetValue(tag, out (GltfDocument Doc, GltfState State) read))
+        {
+            read = (new GltfDocument(), new GltfState());
+            Error err;
+            using (Prof.Measure("model.glb"))
+                err = read.Doc.AppendFromFile(dir + "/tank.glb", read.State);
+            if (err != Error.Ok)
+                throw new InvalidOperationException($"{dir}/tank.glb: {err}");
+            Read[tag] = read;
+        }
         Node scene;
         using (Prof.Measure("model.scene"))
-            scene = doc.GenerateScene(state);
+            scene = read.Doc.GenerateScene(read.State);
+        if (!toon)
+            OwnMeshes(scene);
         var model = new TankModel { Tag = tag, PixelsPerUnit = pixelsPerUnit, Name = "Model" };
         // Before Bind: the belt's MultiMesh takes the link's mesh as it stands.
         if (toon)

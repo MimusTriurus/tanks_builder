@@ -321,7 +321,12 @@ public sealed partial class Tank3DBench : Node3D
         _tile = LoadTile("MTP");
         // the quick battle's lobby and build, before the board they choose (Tank3DBench.Quick)
         if (Quick && Match)
+        {
             await QuickScreens();
+            // the board, the wood, the grass and the six built next, seconds of it:
+            // under a veil with its bar, not on the hangar's last frame
+            await Loading.Cover(this, L.T("loading.battle"));
+        }
 
         GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
         BuildWorld();
