@@ -144,6 +144,17 @@ public partial class QuickPad : Control
             if (RimWidth > 0)
                 DrawPolyline(new[] { o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[0] }, new Color(rim, rim.A * a), RimWidth, true);
         }
+        else if (Dashed)
+        {
+            // a box's rim in dashes, inside its edge as the solid one is
+            DrawRect(new Rect2(Vector2.Zero, s), new Color(fill, fill.A * a));
+            float w = RimWidth * 1.5f, h = w * 0.5f;
+            var c = new Color(rim, rim.A * a);
+            DrawDashedLine(new Vector2(0, h), new Vector2(s.X, h), c, w, 4.0f);
+            DrawDashedLine(new Vector2(s.X - h, 0), new Vector2(s.X - h, s.Y), c, w, 4.0f);
+            DrawDashedLine(new Vector2(s.X, s.Y - h), new Vector2(0, s.Y - h), c, w, 4.0f);
+            DrawDashedLine(new Vector2(h, s.Y), new Vector2(h, 0), c, w, 4.0f);
+        }
         else
         {
             DrawRect(new Rect2(Vector2.Zero, s), new Color(fill, fill.A * a));

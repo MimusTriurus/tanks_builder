@@ -796,8 +796,9 @@ public sealed partial class Tank3DBench
         row.AddChild(QHint(L.T("quick.rules_cost")));
         row.AddChild(new QuickPad
         {
-            Form = QuickPad.Shape.Hex, Dashed = true, Rim = Ui.Muted, Fill = new Color(0, 0, 0, 0), RimWidth = 1,
-            CustomMinimumSize = new Vector2(18, 16), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            // the upgrade node's own shape, a square (QuickBranch)
+            Form = QuickPad.Shape.Box, Dashed = true, Rim = Ui.Muted, Fill = new Color(0, 0, 0, 0), RimWidth = 1,
+            CustomMinimumSize = new Vector2(16, 16), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         });
         row.AddChild(QHint(L.T("quick.rules_dash")));
@@ -1076,13 +1077,16 @@ public sealed partial class Tank3DBench
             bool bright = open || next || swap;
             Texture2D? icon = QIcon(u.Icon, 32, grey: !bright);
             // the hangar's tree has the room and the icon is how an upgrade is known: half
-            // as large again (author 2026-11-04); the build screen's narrow columns keep 46 × 40.
-            // The icon is still rastered at 32 - its own size is a later step
-            Vector2 node = _qHangar ? new Vector2(64, 56) : new Vector2(46, 40);
-            float pic = _qHangar ? 42 : 30;
+            // as large again (author 2026-11-04); the build screen's narrow columns keep it
+            // small. The icon is still rastered at 32 - its own size is a later step.
+            // A square, the match's action buttons' own shape (author 2026-11-04): the hex
+            // is the board's cell and the budget's pip, and some icons draw a cell inside
+            // themselves (wide_tracks, concrete) - a hex in a hex read as a double rim
+            Vector2 node = _qHangar ? new Vector2(56, 56) : new Vector2(40, 40);
+            float pic = _qHangar ? 44 : 32;
             var hex = new QuickPad
             {
-                Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next || swap ? 2 : 1,
+                Form = QuickPad.Shape.Box, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next || swap ? 2 : 1,
                 Rim = open || swap ? Ui.Accent : next ? Ui.Extra : shortOf ? new Color(Ui.Danger, 0.8f) : Ui.Line.Lightened(0.15f),
                 Fill = open ? Ui.Accent : Ui.Panel, Ink = open ? Ui.OnAccent : Ui.Ink, Dashed = u.Flag is null && !open,
                 HoverFill = open ? null : Ui.AccentFill, Disabled = shortOf, CustomMinimumSize = node,
