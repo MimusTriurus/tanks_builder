@@ -416,7 +416,8 @@ public sealed partial class Tank3DBench
             strip.Size = strip.GetCombinedMinimumSize();
             strip.Position = new Vector2((size.X - strip.Size.X) * 0.5f, size.Y - QhStripHigh + 8);
             paints.Size = paints.GetCombinedMinimumSize();
-            paints.Position = new Vector2((size.X - paints.Size.X) * 0.5f, strip.Position.Y - paints.Size.Y - 10);
+            // a clear gap over the classes' icons (author 2026-11-04: 10 px read as one block)
+            paints.Position = new Vector2((size.X - paints.Size.X) * 0.5f, strip.Position.Y - paints.Size.Y - 30);
             QuickHangarRing();
         };
         // the ready squad the squad was taken from opens into the podium like a tab
