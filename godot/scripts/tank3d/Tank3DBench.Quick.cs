@@ -1075,17 +1075,22 @@ public sealed partial class Tank3DBench
             // on the dark panel was lost) where it does not yet
             bool bright = open || next || swap;
             Texture2D? icon = QIcon(u.Icon, 32, grey: !bright);
+            // the hangar's tree has the room and the icon is how an upgrade is known: half
+            // as large again (author 2026-11-04); the build screen's narrow columns keep 46 × 40.
+            // The icon is still rastered at 32 - its own size is a later step
+            Vector2 node = _qHangar ? new Vector2(64, 56) : new Vector2(46, 40);
+            float pic = _qHangar ? 42 : 30;
             var hex = new QuickPad
             {
                 Form = QuickPad.Shape.Hex, Text = icon is null ? l.ToString() : "", FontSize = 15, Bold = true, RimWidth = next || swap ? 2 : 1,
                 Rim = open || swap ? Ui.Accent : next ? Ui.Extra : shortOf ? new Color(Ui.Danger, 0.8f) : Ui.Line.Lightened(0.15f),
                 Fill = open ? Ui.Accent : Ui.Panel, Ink = open ? Ui.OnAccent : Ui.Ink, Dashed = u.Flag is null && !open,
-                HoverFill = open ? null : Ui.AccentFill, Disabled = shortOf, CustomMinimumSize = new Vector2(46, 40),
+                HoverFill = open ? null : Ui.AccentFill, Disabled = shortOf, CustomMinimumSize = node,
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
-                Picture = icon, PictureSize = new Vector2(30, 30),
+                Picture = icon, PictureSize = new Vector2(pic, pic),
                 TextureFilter = QIconFilter,
                 // the price on the node, what this click costs: none on what is held or free
-                Badge = open || need <= 0 ? "" : need.ToString(), BadgeSize = Ui.Size(12),
+                Badge = open || need <= 0 ? "" : need.ToString(), BadgeSize = Ui.Size(_qHangar ? 14 : 12),
                 BadgeRim = next ? Ui.Extra : shortOf ? new Color(Ui.Danger, 0.8f) : Ui.Line.Lightened(0.15f),
                 BadgeFill = next ? Ui.Extra : Ui.Inset, BadgeInk = next ? Ui.OnAccent : Ui.Ink,
             };
