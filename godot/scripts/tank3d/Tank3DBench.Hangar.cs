@@ -463,9 +463,16 @@ public sealed partial class Tank3DBench
         Vector2 size = stage.Size;
         float room = size.Y - QhHeadHigh - QhStripHigh;
         float k = Mathf.Min((size.X - 120) / QhView.X, room / QhView.Y);
-        // the light under the machine in front, where it stands, not low under it
-        // (author 2026-11-04); the front's middle is the ring's at near = 1, below
-        var glowAt = new Vector2(0.5f, size.Y > 0 ? (QhHeadHigh + room * 0.5f) / size.Y : 0.72f);
+        // the light under the machine in front, centred on its turntable's axis where it
+        // meets the ground (author 2026-11-04) - fixed at the front's place (near = 1,
+        // below), not following the ring as it turns; an empty slot, the place's middle
+        var axis = new Vector2(size.X * 0.5f, QhHeadHigh + room * 0.5f);
+        if (_qhRing[_qhAt].View is { } fv && IsInstanceValid(fv) && fv.HasMeta(RosterAxisMeta))
+        {
+            float fd = k / (fv.HasMeta("q_px") ? (float)fv.GetMeta("q_px") : 1.0f);
+            axis += ((Vector2)fv.GetMeta(RosterAxisMeta) - new Vector2(0.5f, 0.5f)) * fv.Size * fd;
+        }
+        var glowAt = size.X > 0 && size.Y > 0 ? axis / size : new Vector2(0.5f, 0.72f);
         if (stage is QuickPad pad && pad.GlowAt != glowAt)
         {
             pad.GlowAt = glowAt;

@@ -327,11 +327,13 @@ public sealed partial class Tank3DBench
             box.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         // into the tree for the framing, which reads the placed meshes; the card takes it after
         _qLayer.AddChild(box);
-        if (RosterScene(model, side, size, box, live: true, even: fixedPx is not null) is not var (_, rig))
+        if (RosterScene(model, side, size, box, live: true, even: fixedPx is not null) is not var (sub, rig))
         {
             box.QueueFree();
             return null;
         }
+        if (sub.HasMeta(RosterAxisMeta))
+            box.SetMeta(RosterAxisMeta, sub.GetMeta(RosterAxisMeta));
         // a drag turns every model at once: they keep one heading (QuickStageTurn)
         box.GuiInput += e =>
         {

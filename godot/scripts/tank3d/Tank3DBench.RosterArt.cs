@@ -39,6 +39,10 @@ public sealed partial class Tank3DBench
 
     private readonly Dictionary<(string Tag, Side Side), Texture2D> _rosterArt = new();
 
+    /// <summary>An even live view's turntable axis on the ground, as shares of the
+    /// view's size (<see cref="RosterScene"/>); its box carries it too (QuickStage).</summary>
+    private static readonly StringName RosterAxisMeta = "q_axis";
+
     /// <summary>One model's picture in a side's paint: off the disk, else
     /// rendered and kept, and into <see cref="_rosterArt"/>; null if the model
     /// does not load. The quick battle's build screen asks it too
@@ -223,6 +227,13 @@ public sealed partial class Tank3DBench
                 camera.Size = s;
                 // the foot a tenth of the body under its tracks: a gun swung at the camera dips that far
                 camera.Position = b.Y * (bodyLow - (bodyHigh - bodyLow) * 0.1f + s * 0.5f) + b.Z * reach * 2.0f;
+                // where the turntable's axis meets the ground, as shares of the view: the
+                // podium's light is centred there (author 2026-11-04). Orthogonal, the
+                // height kept: a camera unit is size.Y / s pixels either way
+                Vector3 foot = new Vector3(0.0f, own.Position.Y, 0.0f) - camera.Position;
+                float unit = size.Y / s;
+                view.SetMeta(RosterAxisMeta, new Vector2((size.X * 0.5f + foot.Dot(b.X) * unit) / size.X,
+                                                         (size.Y * 0.5f - foot.Dot(b.Y) * unit) / size.Y));
                 return (view, rig);
             }
             camera.Size = Mathf.Max(highY - lowY, 2.0f * wide * size.Y / Mathf.Max(size.X, 1)) * 1.04f;
