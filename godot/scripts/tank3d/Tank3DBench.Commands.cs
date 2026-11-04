@@ -31,7 +31,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -42,7 +42,7 @@ public sealed partial class Tank3DBench
         {
             CommandKind.Take => $"take #{Unit}",
             CommandKind.Go => $"go ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
-            CommandKind.Turn or CommandKind.RamWall => $"{Kind.ToString().ToLowerInvariant()} {Side}",
+            CommandKind.Turn or CommandKind.RamWall or CommandKind.Pivot => $"{Kind.ToString().ToLowerInvariant()} {Side}",
             CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke
                 or CommandKind.Mine or CommandKind.Repair or CommandKind.Winch => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
             CommandKind.Ambush => $"ambush {Side}{(Side2 >= 0 ? $"+{Side2}" : "")}",
@@ -83,7 +83,7 @@ public sealed partial class Tank3DBench
                 if (_fate != Fate.Alive)
                     return L.T("commands.why_out", _modelTag);
                 if (MatchBonusSpent)
-                    return L.T("commands.why_bonus_spent");
+                    return BonusGoneSay("commands.why_bonus_spent");
                 return UnitStanding(c.Cell) is null && !(_other is { Unit: true } o && OtherCell(o) == c.Cell)
                     ? L.T("commands.why_no_ram_target", MapAt(c.Cell)) : "";
             case CommandKind.RamWall:
@@ -92,7 +92,7 @@ public sealed partial class Tank3DBench
                 if (_side != _mt.Turn)
                     return L.T("commands.why_turn", SideName(_mt.Turn));
                 if (MatchBonusSpent)
-                    return L.T("commands.why_bonus_spent");
+                    return BonusGoneSay("commands.why_bonus_spent");
                 if (_field is null || !_field.Walled(CellHere, c.Side))
                     return L.T("commands.why_no_wall");
                 return HullSide() != c.Side ? L.T("commands.why_face_wall") : "";
@@ -104,10 +104,12 @@ public sealed partial class Tank3DBench
             case CommandKind.Repair:
             case CommandKind.Winch:
                 return GearWhy(GearOf(c.Kind), c.Cell);
+            case CommandKind.Pivot:
+                return _fate != Fate.Alive ? L.T("commands.why_out", _modelTag) : PivotWhy(c.Side);
             case CommandKind.Douse:
                 return !Burning(_unitId) ? L.T("commands.why_not_burning", _modelTag)
                     : _side != _mt.Turn ? L.T("commands.why_turn", SideName(_mt.Turn))
-                    : _mt.Bonus ? L.T("commands.why_bonus_spent") : "";
+                    : _mt.Bonus || RigOwes ? BonusGoneSay("commands.why_bonus_spent") : "";
             case CommandKind.Undo:
                 return UndoWhy();
             case CommandKind.Place:
@@ -184,6 +186,9 @@ public sealed partial class Tank3DBench
             case CommandKind.Repair:
             case CommandKind.Winch:
                 GearDo(GearOf(c.Kind), c.Cell);
+                break;
+            case CommandKind.Pivot:
+                PivotTo(c.Side);
                 break;
             case CommandKind.Douse:
                 Douse();
@@ -316,6 +321,7 @@ public sealed partial class Tank3DBench
                 "ambush" => new Command(CommandKind.Ambush, Side: int.Parse(parts[1]),
                                         Side2: parts.Length > 2 ? int.Parse(parts[2]) : -1),
                 "douse" => new Command(CommandKind.Douse),
+                "pivot" => new Command(CommandKind.Pivot, Side: int.Parse(parts[1])),
                 "pass" => new Command(CommandKind.Pass),
                 "undo" => new Command(CommandKind.Undo),
                 // the placement before the first turn (Tank3DBench.Deploy)

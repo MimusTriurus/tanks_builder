@@ -301,7 +301,7 @@ public sealed partial class Tank3DBench
     {
         if (!_ramMode && MatchBonusSpent)
         {
-            _orderNote = L.T("ramplan.bonus_spent");
+            _orderNote = BonusGoneSay("ramplan.bonus_spent");
             return;
         }
         _ramMode = !_ramMode;

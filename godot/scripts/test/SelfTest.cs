@@ -11143,11 +11143,15 @@ public static partial class SelfTest
 
             HexField mined = Keep(StepBoard(".......", ".......", ".......", "...m...", "......."));
             Steps.Route? onMine = Steps.Plan(mined, new Steps.Pose(up, 90), stMt).RouteTo(new Vector2I(3, 3));
-            Steps.Reach trawled = Steps.Plan(mined, new Steps.Pose(up, 90), new Steps.Mover { Speed = 4, Trawl = true });
-            Check("a mine ends the move and says so; a trawl driven forward goes over it",
+            Steps.Route? guarded = Steps.Plan(mined, new Steps.Pose(up, 90), new Steps.Mover { Speed = 4, MineGuard = true })
+                .RouteTo(new Vector2I(3, 3));
+            bool guardedThrough = Steps.Plan(mined, new Steps.Pose(up, 90), new Steps.Mover { Speed = 4, MineGuard = true })
+                .RoutesTo(new Vector2I(3, 2)).Any(w => w.Turns == 0 && w.Spent == 2);
+            Check("a mine ends the move and says so; with the mine guard it ends it too, a fire rather than a mine",
                 onMine is { Final: true } && onMine.Risk.HasFlag(Steps.Risk.Mine)
-                && trawled.RoutesTo(new Vector2I(3, 2)).Any(w => w.Turns == 0 && w.Spent == 2),
-                $"{onMine} {onMine?.Risk}");
+                && guarded is { Final: true } && guarded.Risk.HasFlag(Steps.Risk.Fire) && !guarded.Risk.HasFlag(Steps.Risk.Mine)
+                && !guardedThrough,
+                $"{onMine} {onMine?.Risk}; guarded {guarded} {guarded?.Risk}, straight through {guardedThrough}");
 
             HexField burning = Keep(StepBoard(".......", ".......", ".......", "...b...", "......."));
             Steps.Route? intoFire = Steps.Plan(burning, new Steps.Pose(up, 90), stMt).RouteTo(new Vector2I(3, 3));

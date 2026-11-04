@@ -388,23 +388,36 @@ public static partial class SelfTest
                   $"driven: {Said(driven)}; after a round {afterOne}, after two {left.Board.Smoked(new Vector2I(4, 7))}");
         }
 
-        // Д8, upgrades.md «Минный трал»: nose first over the mine it is
-        // cleared; backing on to it, the hull goes up as any.
+        // upgrades.md «Противоминная защита» (2026-11-02): driven on nose first
+        // or backed on, the mine goes off and is spent, the hull is alight and
+        // not knocked out, and the way ends on the mine's hex; shoved on by a
+        // ram, the same; without it, knocked out as ever.
         {
             var mine = new Vector2I(4, 7);
             BattleState ahead = Probe(9, 10, mines: new[] { mine });
-            Put(ahead, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.Trawl);
+            Put(ahead, 0, "MTR", Camp.Green, 4, 8, 90, kit: Kit.MineGuard);
             Put(ahead, 1, "LTR", Camp.Brown, 0, 0, 90);
             Act(ahead, 0, st => Battle.Move(st, new[] { mine, new Vector2I(4, 6) }, -1));
             BattleState back = Probe(9, 10, mines: new[] { mine });
-            Put(back, 0, "MTR", Camp.Green, 4, 8, 270, kit: Kit.Trawl);
+            Put(back, 0, "MTR", Camp.Green, 4, 8, 270, kit: Kit.MineGuard);
             Put(back, 1, "LTR", Camp.Brown, 0, 0, 90);
             Act(back, 0, st => Battle.Move(st, new[] { mine }, -1));
-            check("the trawl clears a mine driven on to nose first, not one backed on to",
-                  ahead.Unit(0)!.Fate == UnitFate.Alive && ahead.Unit(0)!.Cell == new Vector2I(4, 6)
-                  && ahead.Events.Any(e => e.Kind == BattleEventKind.MineCleared)
-                  && back.Unit(0)!.Fate == UnitFate.Knocked,
-                  $"ahead: {Said(ahead)}; back: {Said(back)}");
+            BattleState shoved = Probe(9, 10, mines: new[] { mine });
+            Put(shoved, 0, "HTR", Camp.Brown, 4, 9, 90);
+            Put(shoved, 1, "MTR", Camp.Green, 4, 8, 270, kit: Kit.MineGuard);
+            Act(shoved, 0, st => Battle.Ram(st, new Vector2I(4, 8)));
+            BattleState bare = Probe(9, 10, mines: new[] { mine });
+            Put(bare, 0, "MTR", Camp.Green, 4, 8, 90);
+            Put(bare, 1, "LTR", Camp.Brown, 0, 0, 90);
+            Act(bare, 0, st => Battle.Move(st, new[] { mine, new Vector2I(4, 6) }, -1));
+            static bool Guarded(BattleState s, int id, Vector2I at) =>
+                s.Unit(id)! is { Fate: UnitFate.Alive, Burning: true } u && u.Cell == at
+                && s.Board.CoverStateAt(at) == CoverState.Cleared
+                && s.Events.Any(e => e.Kind == BattleEventKind.MineBlown) && !s.Events.Any(e => e.Note == "REFUSED");
+            check("the mine guard: the mine goes off under the hull nose or tail first or shoved - alight, not knocked out, the way ends on it",
+                  Guarded(ahead, 0, mine) && Guarded(back, 0, mine) && Guarded(shoved, 1, mine)
+                  && bare.Unit(0)!.Fate == UnitFate.Knocked && bare.Unit(0)!.Cell == mine,
+                  $"ahead: {Said(ahead)}; back: {Said(back)}; shoved: {Said(shoved)}; bare: {Said(bare)}");
         }
 
         // Д8, upgrades.md «Зажигательный снаряд»: the medium at (4,8) fires up
@@ -497,30 +510,35 @@ public static partial class SelfTest
 
         // Д8, upgrades.md «Двойной поворот»: the first 60° on the spot is free -
         // the medium (4 steps) reaches four cells out along 30, not three.
+        // upgrades.md «Двойной поворот» (2026-11-02): a bonus act - 60° with no
+        // step, after the move (in mud too, its one step spent on the cell),
+        // the attack still to be had; the move is over with it, a second is
+        // the bonus act spent, 120° is no double turn, and without the kit
+        // there is none. The move's own turns cost a step each, kit or not.
         {
             var start = new Vector2I(4, 6);
-            Vector2I c = start;
-            for (int k = 0; k < 4; k++)
-                c = HexField.Step(c, 30);
-            BattleState field = Probe(9, 10);
-            Steps.Mover plain = Steps.Mover.Of(MovementProfile.Medium);
+            var mud = new Vector2I(4, 5);
+            BattleState s = Probe(9, 10, mud: new[] { mud });
+            Put(s, 0, "TDR", Camp.Green, start.X, start.Y, 90, kit: Kit.DoubleTurn);
+            Put(s, 1, "LTR", Camp.Brown, 0, 0, 90);
+            string? wide = null, pivot = null, again = null, after = null;
+            Act(s, 0, st => Battle.Move(st, new[] { mud }, -1));
+            wide = Battle.Pivot(s, 210);
+            pivot = Battle.Pivot(s, 30);
+            int heading = s.Unit(0)!.Heading;
+            bool fire = !s.Fired && s.Drove && s.Bonus;
+            again = Battle.Pivot(s, 330);
+            after = Battle.Go(s, new Vector2I(4, 4));
+            BattleState none = Probe(9, 10);
+            Put(none, 0, "TDR", Camp.Green, start.X, start.Y, 90);
+            Put(none, 1, "LTR", Camp.Brown, 0, 0, 90);
+            string? bare = null;
+            Act(none, 0, st => bare = Battle.Pivot(st, 30));
             Steps.Mover twice = Steps.Kitted(Steps.Mover.Of(MovementProfile.Medium), Kit.DoubleTurn);
-            bool without = Steps.Plan(field.Board, new Steps.Pose(start, 90), plain).Reaches(c);
-            bool with = Steps.Plan(field.Board, new Steps.Pose(start, 90), twice).Reaches(c);
-            // in mud the budget is one step: 120° on the spot is one with it, two without
-            BattleState turn = Probe(9, 10, mud: new[] { start });
-            Put(turn, 0, "HMR", Camp.Green, start.X, start.Y, 90, kit: Kit.DoubleTurn);
-            Put(turn, 1, "HMR", Camp.Brown, 0, 0, 90);
-            string? free = null, paid = null;
-            Act(turn, 0, st => free = Battle.Turn(st, 330));
-            BattleState slow = Probe(9, 10, mud: new[] { start });
-            Put(slow, 0, "HMR", Camp.Green, start.X, start.Y, 90);
-            Put(slow, 1, "HMR", Camp.Brown, 0, 0, 90);
-            Act(slow, 0, st => paid = Battle.Turn(st, 330));
-            check("the double turn's first 60° costs nothing: four cells out along 30; 120° in mud for its one step",
-                  !without && with && Steps.TurnCost(90, 30, twice) == 0 && Steps.TurnCost(90, 330, twice, turned: true) == 2
-                  && free is null && turn.Unit(0)!.Heading == 330 && paid is not null,
-                  $"plain {without}, double {with}; in mud with {free ?? "ok"}, without {paid}");
+            check("the double turn: a bonus act of 60° with no step after the move; one a turn, not 120°, not without the kit; the move's turns cost as ever",
+                  wide is not null && pivot is null && heading == 30 && fire && again is not null && after is not null
+                  && bare is not null && Steps.TurnCost(90, 30, twice) == 1,
+                  $"120°: {wide}; pivot {pivot ?? "ok"} to h{heading}; again {again}; move after {after}; without the kit {bare}; {Said(s)}");
         }
 
         // Д8, upgrades.md «Противоосколочный подбой»: the mortar's bomb sets off
@@ -539,16 +557,24 @@ public static partial class SelfTest
                   Said(s));
         }
 
-        // Д8, upgrades.md «Автоматическое тушение»: two greens burning from the
-        // last turn, both with it - the one left alone (and in ambush) goes out
-        // and keeps its watch, the one that moved burns out as ever.
+        // upgrades.md «Автоматическое тушение» (2026-11-02): three greens
+        // burning from the last turn, all with it, one without - each with it
+        // goes out at the turn's end. The one that moved pays with this turn's
+        // bonus act; the one left alone (in ambush) keeps its watch and owes
+        // it - its next activation has none, and pays the debt; the third, in
+        // a burning wood, goes up; the one without, as ever.
         {
-            BattleState s = Probe(9, 10);
+            var wood = new Vector2I(4, 8);
+            BattleState s = Probe(9, 10, woods: new[] { wood });
+            s.Board.SetCoverState(wood, CoverState.Burning);
+            s.Fires[wood] = 2;
             Put(s, 0, "MTR", Camp.Green, 1, 8, 90, kit: Kit.Extinguisher);
             Put(s, 1, "MTR", Camp.Green, 7, 8, 90, kit: Kit.Extinguisher);
-            Put(s, 2, "LTR", Camp.Brown, 4, 0, 270);
+            Put(s, 2, "MTR", Camp.Green, wood.X, wood.Y, 90, kit: Kit.Extinguisher);
+            Put(s, 3, "MTR", Camp.Green, 7, 3, 90);
+            Put(s, 4, "LTR", Camp.Brown, 4, 0, 270);
             s.TurnNo = 1;
-            foreach (int id in new[] { 0, 1 })
+            foreach (int id in new[] { 0, 1, 2, 3 })
             {
                 s.Unit(id)!.Burning = true;
                 s.Unit(id)!.BurnSince = 0;
@@ -556,10 +582,19 @@ public static partial class SelfTest
             s.Unit(0)!.Watch = 90;
             Act(s, 1, st => Battle.Move(st, new[] { new Vector2I(7, 7) }, -1));
             Battle.EndTurn(s);
-            check("the auto-extinguisher puts out a unit not activated this turn, ambush kept; one that moved burns out",
-                  s.Unit(0)!.Fate == UnitFate.Alive && !s.Unit(0)!.Burning && s.Unit(0)!.Ambushing
-                  && s.Unit(1)!.Fate == UnitFate.Destroyed,
-                  Said(s));
+            bool outs = s.Unit(0)! is { Fate: UnitFate.Alive, Burning: false, Ambushing: true, OwesBonus: true }
+                        && s.Unit(1)! is { Fate: UnitFate.Alive, Burning: false, OwesBonus: false }
+                        && s.Unit(2)!.Fate == UnitFate.Destroyed && s.Unit(3)!.Fate == UnitFate.Destroyed;
+            // the brown's turn, then green's again: the debtor taken, no bonus act for it
+            Battle.EndTurn(s);
+            string? owed = null;
+            Act(s, 0, st => owed = Battle.Ram(st, new Vector2I(1, 7)));
+            bool kept = !Battle.BonusLeft(s, s.Unit(0)!);
+            Act(s, 0, st => Battle.Move(st, new[] { new Vector2I(1, 7) }, -1));
+            Battle.EndTurn(s);
+            check("the auto-extinguisher puts out every unit with it but in a burning wood; this turn's bonus act or the next activation's pays",
+                  outs && owed is not null && owed.Contains("owed") && kept && !s.Unit(0)!.OwesBonus,
+                  $"{s.Say()}; refused {owed}; {Said(s)}");
         }
 
         // Д8, upgrades.md «Тепловизор»: smoke on (4,6) between the medium at
@@ -801,6 +836,7 @@ public static partial class SelfTest
             string drill = System.IO.File.ReadAllText(MapFile.PathOf("drill10"));
             string kitted = drill.Replace("\"homes\": [[1, 7], [3, 4]",
                 "\"homes\": [{ \"at\": [1, 7], \"kit\": [\"smoke\", \"trawl\"] }, { \"at\": [3, 4], \"kit\": [] }");
+            // «trawl» is the mine guard's name from before 2026-11-02, still read
             BoardMap map = MapFile.Parse(kitted, "drill10");
             BoardMap again = MapFile.Parse(MapFile.Write(map), "drill10");
             string? refused = null;
@@ -813,7 +849,7 @@ public static partial class SelfTest
                 refused = e.Message;
             }
             check("a home's kit is read, written back the same, and an unknown upgrade refused",
-                  kitted != drill && map.Parked[0].Kit == (Kit.Smoke | Kit.Trawl) && map.Parked[1].Kit == Kit.None
+                  kitted != drill && map.Parked[0].Kit == (Kit.Smoke | Kit.MineGuard) && map.Parked[1].Kit == Kit.None
                   && map.Parked[2].Kit is null && again.Parked[0].Kit == map.Parked[0].Kit
                   && again.Parked[1].Kit == Kit.None && again.Parked[2].Kit is null
                   && refused is not null && refused.Contains("jetpack"),

@@ -20,9 +20,10 @@ namespace TankSpriteTest;
 /// of its side's turn, the blast of a destroyed unit and its chain, the wood's
 /// fire by rounds, the win by destruction, the stalemate (Д6), the ambush and
 /// the medium's sector (Д7), the smoke grenade and its smoke, the incendiary
-/// round, the drive's upgrades (in <see cref="Steps"/>), the spall liner, the
-/// auto-extinguisher, the thermal imager, the mine layer, the repair kit, the
-/// winch, the ambush stabilizer (Д8), the control point - holding, points on
+/// round, the drive's upgrades (in <see cref="Steps"/>), the mine guard, the
+/// spall liner, the auto-extinguisher and its price, the thermal imager, the
+/// mine layer, the repair kit, the winch, the double turn, the ambush
+/// stabilizer (Д8; upgrades.md as revised 2026-11-02), the control point - holding, points on
 /// the field's tick, the win on points (Д9).
 ///
 /// <b>Not yet</b>: an ambush that holds an incendiary round back - it fires a
@@ -64,8 +65,8 @@ public static partial class Battle
     /// <summary>
     /// The move (п. 2-4): along <paramref name="path"/>, cell after cell - the
     /// start may lead it or not - then turned to <paramref name="face"/>. What
-    /// each cell does is done as it is entered (п. 4): a mine knocks out and the
-    /// path ends there, deep water drowns without the gear, a wood alight sets
+    /// each cell does is done as it is entered (п. 4): a mine knocks out - or,
+    /// with the mine guard, sets alight - and the path ends there, deep water drowns without the gear, a wood alight sets
     /// the hull alight, water puts a fire out, a burning hull sets a wood alight,
     /// the heavy knocks down a wall it crosses. The cost is the route planner's
     /// (<see cref="Steps"/>) and not checked again here. <paramref name="back"/>:
@@ -133,10 +134,13 @@ public static partial class Battle
             u.Cell = next;
             s.Events.Add(new BattleEvent(BattleEventKind.Moved, u.Id, next, way));
             // what the hex does first: a mine or the deep stops it there
-            Entered(s, u, way, forward: !astern, ambushes: false);
+            bool stops = Entered(s, u, way, forward: !astern, ambushes: false);
             if (u.Fate != UnitFate.Alive)
                 return null;
             if (!at(pose++))
+                return null;
+            // the mine guard's mine: alight, and the way ends on its hex
+            if (stops)
                 return null;
         }
         if (face >= 0 && face != u.Heading)
@@ -216,7 +220,9 @@ public static partial class Battle
         {
             var queue = new Queue<int>();
             int after = -1;
-            for (int shot = 0; shot < s.Unit(id)!.WatchShots; shot++)
+            // nought reads as one (BattleUnit.WatchShots), as Ambushes spends it
+            int shots = Math.Max(1, s.Unit(id)!.WatchShots);
+            for (int shot = 0; shot < shots; shot++)
             {
                 int pick = -1;
                 foreach ((int pose, bool knocks) in poses)
@@ -306,21 +312,26 @@ public static partial class Battle
     }
 
     /// <summary>What a cell does to a hull that comes on to it, driven or pushed
-    /// (field.md, «мины», «вода», «огонь\пожар»; states.md, «Горит»).</summary>
-    private static void Arrive(BattleState s, BattleUnit u, int way, bool forward)
+    /// (field.md, «мины», «вода», «огонь\пожар»; states.md, «Горит»). True
+    /// when the hex ends a move that is still alive on it: the mine guard's
+    /// mine (upgrades.md, «Противоминная защита», 2026-11-02) - gone off and
+    /// spent under the hull however it came, driven nose or tail first or
+    /// shoved, the hull alight rather than knocked out.</summary>
+    private static bool Arrive(BattleState s, BattleUnit u, int way, bool forward)
     {
         Vector2I c = u.Cell;
+        bool stops = false;
         if (s.Board.CoverAt(c) == Cover.Minefield && s.Board.CoverStateAt(c) == CoverState.Intact)
         {
             s.Board.SetCoverState(c, CoverState.Cleared);
-            if ((u.Kit & Kit.Trawl) != 0 && forward && way == u.Heading)
-                s.Events.Add(new BattleEvent(BattleEventKind.MineCleared, u.Id, c));
-            else
+            s.Events.Add(new BattleEvent(BattleEventKind.MineBlown, u.Id, c));
+            if ((u.Kit & Kit.MineGuard) == 0 || u.Fate != UnitFate.Alive)
             {
-                s.Events.Add(new BattleEvent(BattleEventKind.MineBlown, u.Id, c));
                 Knock(s, u);
-                return;
+                return false;
             }
+            Ignite(s, u, "mine");
+            stops = true;
         }
         if (s.Board.IsWater(c))
         {
@@ -337,7 +348,7 @@ public static partial class Battle
                     Lift(s, u, "drowned");
                 }
             }
-            return;
+            return stops;
         }
         if (s.Board.CoverAt(c) == Cover.Forest)
         {
@@ -346,6 +357,7 @@ public static partial class Battle
             else if (u.Burning)
                 WoodAlight(s, c);
         }
+        return stops;
     }
 
     // --- the shot -------------------------------------------------------------------
@@ -559,8 +571,8 @@ public static partial class Battle
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (s.At(target) is not { } victim)
             return "nobody to ram";
         int way = HexField.HeadingTo(u.Cell, target);
@@ -618,8 +630,8 @@ public static partial class Battle
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (!s.Board.Walled(u.Cell, heading))
             return "no wall there";
         Vector2I past = HexField.Step(u.Cell, heading);
@@ -641,8 +653,8 @@ public static partial class Battle
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (!u.Burning)
             return "not burning";
         if (s.Board.CoverAt(u.Cell) == Cover.Forest && s.Board.CoverStateAt(u.Cell) == CoverState.Burning)
@@ -651,6 +663,46 @@ public static partial class Battle
         Lift(s, u, "doused");
         Douse(s, u);
         return null;
+    }
+
+    /// <summary>Why the bonus act may not be had: spent this turn, or owed to
+    /// the auto-extinguisher (<see cref="BattleUnit.OwesBonus"/>); null if it may.</summary>
+    private static string? BonusGone(BattleState s, BattleUnit u) =>
+        s.Bonus ? "the bonus act is spent"
+        : u.OwesBonus ? "the bonus act is owed to the extinguisher"
+        : null;
+
+    /// <summary>Whether the unit on turn may still have a bonus act - the
+    /// turn's not spent and none owed (<see cref="BonusGone"/>).</summary>
+    public static bool BonusLeft(BattleState s, BattleUnit u) => BonusGone(s, u) is null;
+
+    /// <summary>
+    /// The double turn (upgrades.md, «Двойной поворот», 2026-11-02; п. 5б): the
+    /// hull 60° round to <paramref name="face"/> with no step - after the move,
+    /// before or after the attack. The move is over with it, LT's too: the
+    /// rule says «после движения». Not on a ramp, which nothing turns on. An
+    /// enemy ambush that sees the hull answers it as on a turn in the move
+    /// (<see cref="AmbushPicks"/>).
+    /// </summary>
+    public static string? Pivot(BattleState s, int face)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.DoubleTurn) == 0)
+            return "no double turn";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
+        if (Array.IndexOf(HexField.EdgeHeadings, face) < 0)
+            return $"{face} is not a side";
+        if (Steps.Turning(u.Heading, face) != 1)
+            return "the double turn is sixty degrees";
+        if (s.Board.IsRamp(u.Cell))
+            return "not on a ramp";
+        s.Bonus = s.Drove = true;
+        Lift(s, u, "turned");
+        var here = new[] { u.Cell };
+        Dictionary<int, Queue<int>>? picks = AmbushPicks(s, u, here, face, null);
+        return Walk(s, u, here, face, null, pose => picks is null || AmbushesAt(s, u, pose, picks));
     }
 
     // --- the ambush ---------------------------------------------------------------------
@@ -694,13 +746,14 @@ public static partial class Battle
     /// then the enemy's ambushes on it - in that order (match.md п. 4). An
     /// effect of the hex that knocks it out ends the hex: the ambush answers
     /// the hull as it came in.</summary>
-    private static void Entered(BattleState s, BattleUnit u, int way, bool forward, bool ambushes = true)
+    private static bool Entered(BattleState s, BattleUnit u, int way, bool forward, bool ambushes = true)
     {
         UnitFate was = u.Fate;
         Disperse(s, u);
-        Arrive(s, u, way, forward);
+        bool stops = Arrive(s, u, way, forward);
         if (ambushes && u.Fate == was)
             Ambushes(s, u);
+        return stops;
     }
 
     // --- smoke ------------------------------------------------------------------------
@@ -727,8 +780,8 @@ public static partial class Battle
             return why;
         if ((u.Kit & Kit.Smoke) == 0)
             return "no smoke grenade";
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (HexField.HeadingTo(u.Cell, cell) < 0 || !s.Board.InBounds(cell))
             return "only on a hex beside";
         if (s.At(cell) is not null)
@@ -761,8 +814,8 @@ public static partial class Battle
             return why;
         if ((u.Kit & Kit.MineLayer) == 0)
             return "no mine layer";
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (HexField.HeadingTo(u.Cell, cell) < 0 || !s.Board.InBounds(cell))
             return "only on a hex beside";
         if (s.At(cell) is not null)
@@ -790,8 +843,8 @@ public static partial class Battle
             return why;
         if ((u.Kit & Kit.RepairKit) == 0)
             return "no repair kit";
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (HexField.HeadingTo(u.Cell, cell) < 0)
             return "only a hull beside";
         if (s.At(cell) is not { } hull)
@@ -825,8 +878,8 @@ public static partial class Battle
             return why;
         if ((u.Kit & Kit.Winch) == 0)
             return "no winch";
-        if (s.Bonus)
-            return "the bonus act is spent";
+        if (BonusGone(s, u) is { } spent)
+            return spent;
         if (s.At(cell) is not { } hull)
             return "nobody there";
         (int heading, int range) = s.Board.LaneTo(u.Cell, cell);
@@ -966,9 +1019,14 @@ public static partial class Battle
     /// (states.md, «Горит»), the wood under a heavy that ends its turn on it
     /// falls (classes.md, «Бульдозер HT»), and the turn goes over - the round,
     /// and the field's tick, after the second side's (match.md, «Ход и раунд»).
-    /// A burning unit with the auto-extinguisher (upgrades.md) its side did not
-    /// activate this turn - did not move it nor act with it - goes out instead,
-    /// and keeps its ambush.
+    /// <para>The auto-extinguisher (upgrades.md, 2026-11-02): every burning unit
+    /// with it goes out instead, activated or not, and keeps its ambush - but
+    /// not on a burning hex, where it would only catch again, and that one
+    /// goes up as any. Its price is one bonus act: this turn's, if the unit
+    /// was the one activated and has it unspent; else it owes it
+    /// (<see cref="BattleUnit.OwesBonus"/>), and its next activation goes
+    /// without one. The activated unit's old debt is paid by this turn first -
+    /// its bonus act was not to be had in it.</para>
     /// </summary>
     public static void EndTurn(BattleState s)
     {
@@ -983,13 +1041,33 @@ public static partial class Battle
             s.Events.Add(new BattleEvent(BattleEventKind.WoodCleared, u.Id, u.Cell));
         }
         int activated = s.Active is int a && (s.Drove || s.Fired || s.Bonus) ? a : -1;
+        // the activation the debt was owed to has gone without its bonus act
+        bool owed = false;
+        if (s.Unit(activated) is { OwesBonus: true } payer)
+        {
+            payer.OwesBonus = false;
+            owed = true;
+        }
         foreach (BattleUnit b in s.Units.ToArray())
             if (b.Side == ending && b.Fate == UnitFate.Alive && b.Burning && b.BurnSince < s.TurnNo)
             {
-                if ((b.Kit & Kit.Extinguisher) != 0 && b.Id != activated)
-                    Douse(s, b);
-                else
+                bool woodAlight = s.Board.CoverAt(b.Cell) == Cover.Forest && s.Board.CoverStateAt(b.Cell) == CoverState.Burning;
+                if ((b.Kit & Kit.Extinguisher) == 0 || woodAlight)
+                {
                     Explode(s, b);
+                    continue;
+                }
+                Douse(s, b);
+                if (b.Id == activated && !s.Bonus && !owed)
+                {
+                    s.Bonus = true;
+                    s.Events.Add(new BattleEvent(BattleEventKind.BonusOwed, b.Id, b.Cell, 1, "paid with this turn's bonus act"));
+                }
+                else
+                {
+                    b.OwesBonus = true;
+                    s.Events.Add(new BattleEvent(BattleEventKind.BonusOwed, b.Id, b.Cell, 0, "owed to its next activation"));
+                }
             }
         s.Events.Add(new BattleEvent(BattleEventKind.TurnEnded, s.Active ?? -1, default, s.TurnNo));
         s.TurnNo++;

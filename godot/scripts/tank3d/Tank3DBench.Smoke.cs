@@ -62,7 +62,7 @@ public sealed partial class Tank3DBench
         if (!RigSmokes)
             return L.T("smoke.no_grenade", _modelTag);
         if (MatchBonusSpent)
-            return L.T("smoke.bonus_spent");
+            return BonusGoneSay("smoke.bonus_spent");
         if (HexField.HeadingTo(CellHere, cell) < 0 || !_field.InBounds(cell))
             return L.T("smoke.adjacent_only");
         if (UnitStanding(cell) is not null || (_other is { Unit: true } o && o.Fate != Fate.Destroyed && OtherCell(o) == cell))
@@ -199,7 +199,7 @@ public sealed partial class Tank3DBench
     {
         if (!_smokeMode && MatchBonusSpent)
         {
-            _orderNote = L.T("smoke.bonus_spent");
+            _orderNote = BonusGoneSay("smoke.bonus_spent");
             return;
         }
         _smokeMode = !_smokeMode;

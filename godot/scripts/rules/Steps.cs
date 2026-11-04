@@ -28,9 +28,9 @@ namespace TankSpriteTest;
 /// driving ahead;</item>
 /// <item>mud and wood end the move on entry; a turn begun in either has one step
 /// (the budget is 1) - on wide tracks mud is ground (upgrades.md);</item>
-/// <item>with the double turn the move's first 60° on the spot is free.</item>
-/// <item>a mine fires on entry and the move ends there (a trawl driving forward
-/// passes it); deep water without the snorkel drowns the tank, and that ends
+/// <item>a mine fires on entry and the move ends there - with the mine guard
+/// the hull is set alight instead of knocked out, which ends it all the same
+/// (upgrades.md, 2026-11-02); deep water without the snorkel drowns the tank, and that ends
 /// it too; a burning wood sets the tank alight - a <see cref="Risk"/> on the
 /// way, the path itself goes on (it is a wood, so it stops anyway);</item>
 /// <item>a ramp is crossed along its axis, never stopped on by choice and never
@@ -66,8 +66,10 @@ public static class Steps
         public bool Bulldozer;
         /// <summary>The snorkel: deep water is swum, not drowned in.</summary>
         public bool Amphibious;
-        /// <summary>The mine trawl: a mine driven over forward is cleared.</summary>
-        public bool Trawl;
+        /// <summary>The mine guard (upgrades.md, «Противоминная защита»): a mine
+        /// still ends the way, but sets the hull alight rather than knocking it
+        /// out - <see cref="Risk.Fire"/>, not <see cref="Risk.Mine"/>.</summary>
+        public bool MineGuard;
         /// <summary>Wide tracks (upgrades.md): mud is ground - it neither ends
         /// the move nor cuts the budget to one. A wood still does.</summary>
         public bool WideTracks;
@@ -75,9 +77,6 @@ public static class Steps
         /// <see cref="ReverseCells"/> cells and with turns, each a step as ever -
         /// a move astern, not mixed with driving forward.</summary>
         public bool Reverse;
-        /// <summary>The double turn (upgrades.md): the move's first 60° on the
-        /// spot costs no step.</summary>
-        public bool FreeTurn;
         /// <summary>Cells no step may enter - the other tanks.</summary>
         public IReadOnlySet<Vector2I>? Barred;
         /// <summary>The way is planned as if the board had no mines: the HUD's
@@ -97,14 +96,14 @@ public static class Steps
     }
 
     /// <summary>The kit's say in how <paramref name="mover"/> drives: the
-    /// trawl, wide tracks, the reverse gear, the double turn - one reading
-    /// for the core and the bench.</summary>
+    /// mine guard, wide tracks, the reverse gear - one reading for the core
+    /// and the bench. The double turn is no longer the drive's: since
+    /// 2026-11-02 it is a bonus act (<see cref="Battle.Pivot"/>).</summary>
     public static Mover Kitted(Mover mover, Kit kit)
     {
-        mover.Trawl = (kit & Kit.Trawl) != 0;
+        mover.MineGuard = (kit & Kit.MineGuard) != 0;
         mover.WideTracks = (kit & Kit.WideTracks) != 0;
         mover.Reverse = (kit & Kit.Reverse) != 0;
-        mover.FreeTurn = (kit & Kit.DoubleTurn) != 0;
         return mover;
     }
 
@@ -147,9 +146,8 @@ public static class Steps
     /// every cell to it - the start among them - was road: the road's step
     /// (<see cref="Paved"/>) is had only on such a way. <paramref name="Gear"/>
     /// for the reverse gear: nothing driven yet (0), cells backed (1, 2), driven
-    /// forward (<see cref="Ahead"/>); <paramref name="Turned"/> - the double
-    /// turn's free one is spent.</summary>
-    internal readonly record struct State(Pose Pose, bool Final, bool Paved = false, int Gear = 0, bool Turned = false);
+    /// forward (<see cref="Ahead"/>).</summary>
+    internal readonly record struct State(Pose Pose, bool Final, bool Paved = false, int Gear = 0);
 
     /// <summary>How far the reverse gear backs (upgrades.md, «до 2 клеток»).</summary>
     public const int ReverseCells = 2;
@@ -268,8 +266,7 @@ public static class Steps
         /// The steps a turn on the spot to <paramref name="heading"/> costs at
         /// the end of <paramref name="route"/>, or null when it may not be had:
         /// over the budget, after a final step (mud, wood, a mine, the step
-        /// back), or not a flat side at all. 0 for the side it already faces -
-        /// and for one 60° when the double turn's free one is still to be had.
+        /// back), or not a flat side at all. 0 for the side it already faces.
         /// </summary>
         public int? TurnTo(Route route, int heading)
         {
@@ -277,7 +274,7 @@ public static class Steps
                 return null;
             if (Turning(route.End.Heading, heading) == 0)
                 return 0;
-            int turns = TurnCost(route.End.Heading, heading, Mover, route.Turns > 0);
+            int turns = TurnCost(route.End.Heading, heading, Mover);
             if (route.Final || route.Spent + turns > Cap(route))
                 return null;
             return turns;
@@ -343,10 +340,9 @@ public static class Steps
 
     /// <summary>The steps a turn on the spot from <paramref name="from"/> to
     /// <paramref name="to"/> costs <paramref name="mover"/>: <see cref="Turning"/>,
-    /// one less with the double turn while the move has <paramref name="turned"/>
-    /// not yet.</summary>
-    public static int TurnCost(int from, int to, Mover mover, bool turned = false) =>
-        Math.Max(0, Turning(from, to) - (mover.FreeTurn && !turned ? 1 : 0));
+    /// a step each 60° for every mover - no kit makes a turn in the move
+    /// cheaper (the double turn is a bonus act since 2026-11-02, <see cref="Battle.Pivot"/>).</summary>
+    public static int TurnCost(int from, int to, Mover mover) => Turning(from, to);
 
     /// <summary>
     /// Search the turn from <paramref name="start"/>: every pose within the
@@ -375,11 +371,8 @@ public static class Steps
 
             if (!onRamp)
             {
-                // the double turn's first 60° is free (upgrades.md); without it
-                // the state does not carry the turn, and the search is as it was
-                int turn = mover.FreeTurn && !s.Turned ? 0 : 1;
-                Offer(s with { Pose = new Pose(cell, Turn(heading, 60)), Turned = mover.FreeTurn }, cost + turn, s, Risk.None);
-                Offer(s with { Pose = new Pose(cell, Turn(heading, -60)), Turned = mover.FreeTurn }, cost + turn, s, Risk.None);
+                Offer(s with { Pose = new Pose(cell, Turn(heading, 60)) }, cost + 1, s, Risk.None);
+                Offer(s with { Pose = new Pose(cell, Turn(heading, -60)) }, cost + 1, s, Risk.None);
             }
             // Ahead: not once the reverse gear has backed.
             if ((!mover.Reverse || s.Gear is 0 or Ahead)
@@ -440,10 +433,11 @@ public static class Steps
         int price = field.FoundationAt(to) == Foundation.Sand ? 2 : 1;
         bool ends = Stops(field, to, mover);
         Risk risk = Risk.None;
-        if (!mover.MinesUnseen && field.CoverAt(to) == Cover.Minefield && field.CoverStateAt(to) != CoverState.Cleared
-            && !(mover.Trawl && forward))
+        // the mine guard: the mine goes off all the same and ends the way, the
+        // hull set alight rather than knocked out (upgrades.md, 2026-11-02)
+        if (!mover.MinesUnseen && field.CoverAt(to) == Cover.Minefield && field.CoverStateAt(to) != CoverState.Cleared)
         {
-            risk |= Risk.Mine;
+            risk |= mover.MineGuard ? Risk.Fire : Risk.Mine;
             ends = true;
         }
         if (field.CoverStateAt(to) == CoverState.Burning)

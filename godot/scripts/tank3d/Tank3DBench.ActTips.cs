@@ -69,6 +69,7 @@ public sealed partial class Tank3DBench
         ["repair"] = L.T("acttips.text_repair"),
         ["winch"] = L.T("acttips.text_winch", Battle.WinchReach),
         ["douse"] = L.T("acttips.text_douse"),
+        ["double_turn"] = L.T("acttips.text_pivot"),
         // the corner's buttons (TurnTipHook)
         ["endturn"] = L.T("acttips.text_endturn"),
         ["ready"] = L.T("acttips.text_ready"),
@@ -157,7 +158,7 @@ public sealed partial class Tank3DBench
             : tip.Group is null ? (tip.Icon == "undo" ? UndoWhy() : L.T("acttips.why_over"))
             : tip.Group.Shape == GroupShape.Diamond ? MatchMoveWhy()
             : tip.Group.Shape == GroupShape.Circle ? MatchShotWhy(CellHere) is { Length: > 0 } s ? s : L.T("acttips.why_shot_spent")
-            : L.T("acttips.why_bonus_spent");
+            : BonusGoneSay("acttips.why_bonus_spent");
         Control? mark = null;
         if (tip.Group is { } g)
         {

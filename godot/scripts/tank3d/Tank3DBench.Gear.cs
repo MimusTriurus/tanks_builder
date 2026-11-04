@@ -17,6 +17,10 @@ namespace TankSpriteTest;
 /// <item><b>Лебёдка</b> - the hull 2 out along an axis slid on to the hex
 /// between (<see cref="PullTick"/>), then what the core said that hex did to
 /// it - a mine, fire, water, smoke - and the ambushes that answered it.</item>
+/// <item><b>Поворот</b> - the double turn (upgrades.md, 2026-11-02): a click
+/// on the hex beside, left or right of the nose, and the hull comes 60° round
+/// to it with no step (<see cref="Battle.Pivot"/>); the move is over with it.
+/// Its command is <c>pivot:SIDE</c>, as the core's order.</item>
 /// </list>
 /// A button each in the bonus act's group, for a unit with that kit, then a
 /// click on the hex; or <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>.
@@ -26,11 +30,11 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum Gear { None, Mine, Repair, Winch }
+    private enum Gear { None, Mine, Repair, Winch, Pivot }
 
     /// <summary>The panel's mode: a click on a hex is this act.</summary>
     private Gear _gearMode;
-    private Button? _actMine, _actRepair, _actWinch;
+    private Button? _actMine, _actRepair, _actWinch, _actPivot;
 
     /// <summary>Seconds the winch takes to pull a hull a hex.</summary>
     private const float WinchTime = 0.9f;
@@ -52,6 +56,7 @@ public sealed partial class Tank3DBench
     {
         Gear.Mine => Kit.MineLayer,
         Gear.Repair => Kit.RepairKit,
+        Gear.Pivot => Kit.DoubleTurn,
         _ => Kit.Winch,
     };
 
@@ -59,6 +64,7 @@ public sealed partial class Tank3DBench
     {
         Gear.Mine => L.T("gear.kit_mine"),
         Gear.Repair => L.T("gear.kit_repair"),
+        Gear.Pivot => L.T("gear.kit_pivot"),
         _ => L.T("gear.kit_winch"),
     };
 
@@ -149,6 +155,10 @@ public sealed partial class Tank3DBench
     {
         Gear.Mine => Battle.LayMine(s, cell),
         Gear.Repair => Battle.Repair(s, cell),
+        // the side the hex beside is on, from where the unit stands in the core
+        Gear.Pivot => s.Active is int id && s.Unit(id) is { } u
+            ? Battle.Pivot(s, HexField.HeadingTo(u.Cell, cell) is >= 0 and int side ? side : -1)
+            : "no unit taken",
         _ => Battle.Winch(s, cell),
     };
 
@@ -166,7 +176,7 @@ public sealed partial class Tank3DBench
         if (!RigHas(KitFor(g)))
             return L.T("gear.why_no_kit", _modelTag, GearName(g));
         if (MatchBonusSpent)
-            return L.T("gear.why_bonus_spent");
+            return BonusGoneSay("gear.why_bonus_spent");
         return GearAct(g, ShadowOfBench(), cell) is { } no ? Words(no) : "";
     }
 
@@ -186,6 +196,8 @@ public sealed partial class Tank3DBench
         "only on its own level" => L.T("gear.why_level"),
         "the hex between is taken" => L.T("gear.why_between"),
         "a wall across the way" => L.T("gear.why_wall"),
+        "the double turn is sixty degrees" or "-1 is not a side" => L.T("gear.why_sixty"),
+        "not on a ramp" => L.T("gear.why_ramp"),
         _ when why.StartsWith("the winch pulls", System.StringComparison.Ordinal)
             => L.T("gear.why_winch_reach", Battle.WinchReach),
         _ => why,
@@ -195,6 +207,11 @@ public sealed partial class Tank3DBench
     /// shadow told, the bonus act spent, and what happened played.</summary>
     private void GearDo(Gear g, Vector2I cell)
     {
+        if (g == Gear.Pivot)
+        {
+            PivotTo(HexField.HeadingTo(CellHere, cell));
+            return;
+        }
         BattleState st = ShadowOfBench();
         int was = st.Events.Count;
         if (GearAct(g, st, cell) is { } no)
@@ -363,7 +380,7 @@ public sealed partial class Tank3DBench
     {
         if (_gearMode != g && MatchBonusSpent)
         {
-            _orderNote = L.T("gear.why_bonus_spent");
+            _orderNote = BonusGoneSay("gear.why_bonus_spent");
             return;
         }
         _gearMode = _gearMode == g ? Gear.None : g;
@@ -378,6 +395,7 @@ public sealed partial class Tank3DBench
             Gear.Mine => L.T("gear.mode_mine"),
             Gear.Repair => L.T("gear.mode_repair"),
             Gear.Winch => L.T("gear.mode_winch", Battle.WinchReach),
+            Gear.Pivot => L.T("gear.mode_pivot"),
             _ => L.T("gear.mode_off"),
         };
     }
@@ -390,6 +408,16 @@ public sealed partial class Tank3DBench
         if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
             return true;
         Vector2I cell = onTank && _other is { } t ? OtherCell(t) : onOwn ? CellHere : _field.FlatCellAt(Board(point));
+        // the double turn's command is the side, as the core's order
+        if (_gearMode == Gear.Pivot)
+        {
+            int side = HexField.HeadingTo(CellHere, cell);
+            if (side < 0)
+                _orderNote = L.T("gear.why_sixty");
+            else
+                Execute(new Command(CommandKind.Pivot, Side: side));
+            return true;
+        }
         Execute(new Command(CommandOf(_gearMode), cell));
         return true;
     }
@@ -398,6 +426,7 @@ public sealed partial class Tank3DBench
     {
         Gear.Mine => CommandKind.Mine,
         Gear.Repair => CommandKind.Repair,
+        Gear.Pivot => CommandKind.Pivot,
         _ => CommandKind.Winch,
     };
 
@@ -405,6 +434,36 @@ public sealed partial class Tank3DBench
     {
         CommandKind.Mine => Gear.Mine,
         CommandKind.Repair => Gear.Repair,
+        CommandKind.Pivot => Gear.Pivot,
         _ => Gear.Winch,
     };
+
+    /// <summary>Why the double turn to <paramref name="side"/> may not be had
+    /// now, or empty: the gates of a kit act, then the core's own.</summary>
+    private string PivotWhy(int side) =>
+        side < 0 ? L.T("gear.why_sixty")
+        : GearWhy(Gear.Pivot, HexField.Step(CellHere, side)) is { Length: > 0 } no ? no
+        : MatchBusy ? L.T("blast.busy")
+        : "";
+
+    /// <summary>The double turn given (the command's executor): the core asked,
+    /// the hull brought round as a turn on the spot is (<c>_turnGoal</c>) and
+    /// the enemy's ambushes timed by the core (<see cref="ShadowMove"/>); the
+    /// bonus act and the move spent.</summary>
+    private void PivotTo(int side)
+    {
+        if (PivotWhy(side) is { Length: > 0 } no)
+        {
+            _orderNote = no;
+            return;
+        }
+        _gearMode = Gear.None;
+        _mt.Bonus = true;
+        _mt.Drove = true;
+        _route = null;
+        _turnGoal = HeadingFor(CellHere, side);
+        ShadowMove($"pivot to {side}", s => Battle.Pivot(s, side));
+        _orderNote = "";
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} double turn on {MapAt(CellHere)} to {side}, no step");
+    }
 }

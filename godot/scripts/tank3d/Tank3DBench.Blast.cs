@@ -23,6 +23,10 @@ namespace TankSpriteTest;
 /// </item>
 /// <item><b>Putting it out</b> (<c>J</c> in a match, <see cref="Douse"/>) is
 /// the turn's bonus act, the shot stays (U-22) - after the move, LT whenever.</item>
+/// <item><b>The auto-extinguisher</b> (upgrades.md, 2026-11-02) puts every
+/// unit with it out at its turn's end instead, for a bonus act - this turn's,
+/// or owed to its next activation (<see cref="_owesBonus"/>; the core's
+/// <see cref="BattleUnit.OwesBonus"/>).</item>
 /// </list>
 ///
 /// Not yet: the blast setting a wood alight and taking the walls on the
@@ -50,6 +54,17 @@ public sealed partial class Tank3DBench
     }
 
     private readonly List<Blaze> _blazes = new();
+
+    /// <summary>Units whose auto-extinguisher put a fire out on credit: the
+    /// next activation of each goes without its bonus act (<see cref="BurnOut"/>).</summary>
+    private readonly HashSet<int> _owesBonus = new();
+
+    /// <summary>The unit on the rig owes its bonus act to the extinguisher.</summary>
+    private bool RigOwes => Match && _owesBonus.Contains(_unitId);
+
+    /// <summary>Why the bonus act is gone, in <paramref name="key"/>'s words -
+    /// or the extinguisher's, when that is why.</summary>
+    private string BonusGoneSay(string key) => RigOwes ? L.T("gear.why_bonus_owed") : L.T(key);
     /// <summary>Blasts to come, a beat apart: a knocked hull the last blast
     /// reached, or (<c>Burnt</c>) a burning unit whose turn is over.</summary>
     private readonly List<(Vector2I Cell, float In, bool Burnt)> _chain = new();
@@ -212,21 +227,33 @@ public sealed partial class Tank3DBench
 
     /// <summary>The owner's turn over (п. 6): every unit of <paramref name="side"/>
     /// still burning from before the turn began is destroyed - but one with the
-    /// auto-extinguisher (upgrades.md, Д8) that was not <paramref name="activated"/>
-    /// this turn goes out instead, its ambush kept.</summary>
-    private void BurnOut(Side side, int turn, int activated)
+    /// auto-extinguisher (upgrades.md, 2026-11-02) goes out instead, its ambush
+    /// kept, unless it stands in a burning wood; its price a bonus act, this
+    /// turn's if it was the unit <paramref name="activated"/> and the act was
+    /// not <paramref name="bonusSpent"/>, else owed. The activated unit's old
+    /// debt is paid by this turn first (Battle.EndTurn).</summary>
+    private void BurnOut(Side side, int turn, int activated, bool bonusSpent)
     {
+        bool owed = activated >= 0 && _owesBonus.Remove(activated);
+        if (owed)
+            Log.Print($"tank3d: match: #{activated} went this turn without its bonus act - the extinguisher's debt is paid");
         float beat = 0.0f;
         foreach (Blaze b in _blazes.Where(b => !b.Out && b.Side == side && b.Since < turn).ToList())
         {
-            if ((KitOf(b.Id) & Kit.Extinguisher) != 0 && b.Id != activated)
-            {
-                Quench(b.Id, steam: true);
-                Log.Print($"tank3d: match: {SideName(side)} {b.Tag}#{b.Id} was not activated - its auto-extinguisher puts the fire out");
-                continue;
-            }
             Vector2I? at = _other is { Unit: true } o && o.Id == b.Id ? OtherCell(o)
                 : _parked.Find(p => p.Id == b.Id)?.Cell;
+            bool woodAlight = at is Vector2I lit && _field is not null && _field.CoverAt(lit) == Cover.Forest
+                              && (_field.CoverStateAt(lit) == CoverState.Burning || (_wildfire?.LitAt(lit) ?? false));
+            if ((KitOf(b.Id) & Kit.Extinguisher) != 0 && !woodAlight)
+            {
+                Quench(b.Id, steam: true);
+                bool now = b.Id == activated && !bonusSpent && !owed;
+                if (!now)
+                    _owesBonus.Add(b.Id);
+                Log.Print($"tank3d: match: {SideName(side)} {b.Tag}#{b.Id}: its auto-extinguisher puts the fire out - "
+                          + (now ? "for this turn's bonus act" : "its next activation goes without the bonus act"));
+                continue;
+            }
             if (at is not Vector2I cell)
             {
                 // still on the rig: nobody of the other side was there to take it
@@ -261,7 +288,7 @@ public sealed partial class Tank3DBench
             return;
         string why = !Burning(_unitId) ? L.T("blast.not_burning", _modelTag)
             : _side != _mt.Turn ? L.T("blast.their_turn", SideName(_mt.Turn))
-            : _mt.Bonus ? L.T("blast.bonus_spent")
+            : _mt.Bonus || RigOwes ? BonusGoneSay("blast.bonus_spent")
             : _passIn is not null ? L.T("blast.passing")
             : MatchBusy ? L.T("blast.busy")
             : "";

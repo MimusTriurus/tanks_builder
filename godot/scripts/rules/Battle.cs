@@ -35,6 +35,10 @@ public sealed class BattleUnit
     /// <summary>Rounds the ambush has left: one, two with the stabilizer
     /// (upgrades.md, «Стабилизатор засады»); nought reads as one.</summary>
     public int WatchShots;
+    /// <summary>The auto-extinguisher put its fire out on credit (upgrades.md,
+    /// «Автоматическое тушение»): its next activation goes without the bonus
+    /// act, and that pays it.</summary>
+    public bool OwesBonus;
 
     public bool Out => Fate is UnitFate.Knocked or UnitFate.Drowned;
     public bool Standing => Fate != UnitFate.Destroyed;
@@ -47,7 +51,8 @@ public sealed class BattleUnit
     /// <summary>The unit in a line, its cell less <paramref name="shift"/> -
     /// the map's cell on a board in a sea (<see cref="BattleState.Shift"/>).</summary>
     public string Say(Vector2I shift) => $"{Side} {Tag}#{Id} ({Cell.X - shift.X},{Cell.Y - shift.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
-                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "");
+                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "")
+                                         + (OwesBonus ? " owes the bonus act" : "");
 }
 
 public enum BattleEventKind
@@ -59,6 +64,9 @@ public enum BattleEventKind
     AmbushSet, AmbushFired, AmbushLifted,
     SmokeLaid, SmokeGone,
     MineLaid, Repaired, Winched,
+    /// <summary>The auto-extinguisher's price: Value 1 - paid with this turn's
+    /// bonus act, 0 - owed to the unit's next activation; Note says which.</summary>
+    BonusOwed,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench

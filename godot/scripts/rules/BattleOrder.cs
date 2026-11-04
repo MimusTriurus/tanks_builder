@@ -4,7 +4,7 @@ using Godot;
 
 namespace TankSpriteTest;
 
-public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready }
+public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot }
 
 /// <summary>
 /// An order to the core (docs/battle-core-plan.md, Д10): the bench's command
@@ -12,7 +12,7 @@ public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke,
 /// the same words as <c>--commands</c> - <c>take:ID</c>, <c>go:Q,R[:SIDE]</c>,
 /// <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
 /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>,
-/// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>,
+/// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>,
 /// <c>pass</c>, <c>undo</c>, <c>place:ID:Q,R[:SIDE]</c>, <c>ready</c>. What a
 /// script gives <see cref="BattleRun"/> and, next, what the AI gives.
 /// </summary>
@@ -22,7 +22,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
     {
         OrderKind.Take => $"take:{Unit}",
         OrderKind.Go => $"go:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
-        OrderKind.Turn or OrderKind.RamWall => $"{Kind.ToString().ToLowerInvariant()}:{Side}",
+        OrderKind.Turn or OrderKind.RamWall or OrderKind.Pivot => $"{Kind.ToString().ToLowerInvariant()}:{Side}",
         OrderKind.Ambush => $"ambush:{Side}{(Side2 >= 0 ? $":{Side2}" : "")}",
         OrderKind.Place => $"place:{Unit}:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
         OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke
@@ -67,6 +67,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
                 "repair" => new Order(OrderKind.Repair, Cell(parts[1])),
                 "winch" => new Order(OrderKind.Winch, Cell(parts[1])),
                 "douse" => new Order(OrderKind.Douse),
+                "pivot" => new Order(OrderKind.Pivot, Side: int.Parse(parts[1])),
                 "pass" => new Order(OrderKind.Pass),
                 "undo" => new Order(OrderKind.Undo),
                 "place" => new Order(OrderKind.Place, Cell(parts[2]), Arg(3), int.Parse(parts[1])),
@@ -133,6 +134,7 @@ public static partial class Battle
         OrderKind.Repair => Repair(s, o.Cell),
         OrderKind.Winch => Winch(s, o.Cell),
         OrderKind.Douse => Douse(s),
+        OrderKind.Pivot => Pivot(s, o.Side),
         OrderKind.Pass => s.Over ? "the match is over" : PassNow(s),
         OrderKind.Undo => "the core keeps no undo",
         _ => "the placement is before the first turn",
@@ -215,7 +217,8 @@ public static partial class Battle
     /// Nothing is left in the turn, and the bench hands it over by itself
     /// (Tank3DBench.Match, <c>MatchTick</c>): the unit is out of the fight, or
     /// it has fired, moved (or may not - only LT moves after the shot) and has
-    /// no bonus act to be had - a fire to put out, a unit beside to ram.
+    /// no bonus act to be had - a fire to put out, a unit beside to ram, the
+/// double turn; none at all once the bonus act is spent or owed.
     /// </summary>
     public static bool TurnDone(BattleState s)
     {
@@ -225,9 +228,12 @@ public static partial class Battle
             return true;
         if (!s.Fired || !(s.Drove || !u.Class.FreeOrder))
             return false;
-        if (s.Bonus)
+        if (!BonusLeft(s, u))
             return true;
         if (u.Burning)
+            return false;
+        // the double turn is a bonus act to be had anywhere but on a ramp
+        if ((u.Kit & Kit.DoubleTurn) != 0 && !s.Board.IsRamp(u.Cell))
             return false;
         foreach (int h in HexField.EdgeHeadings)
             if (s.At(HexField.Step(u.Cell, h)) is not null)

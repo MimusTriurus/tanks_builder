@@ -72,7 +72,7 @@ public static class QuickSquad
     private static readonly Upgrade MineLayer = U("mine", L.T("squad.up.mine_layer.name"), "squad.kind.ability_bonus", L.T("squad.up.mine_layer.text"), Kit.MineLayer);
     private static readonly Upgrade Stabilizer = U("ambush_stabilizer", L.T("squad.up.stabilizer.name"), "squad.kind.passive", L.T("squad.up.stabilizer.text"), Kit.AmbushStabilizer);
     private static readonly Upgrade Thermal = U("thermal", L.T("squad.up.thermal.name"), "squad.kind.passive", L.T("squad.up.thermal.text"), Kit.Thermal);
-    private static readonly Upgrade MineGuard = U("trawl", L.T("squad.up.mine_guard.name"), "squad.kind.passive", L.T("squad.up.mine_guard.text"));
+    private static readonly Upgrade MineGuard = U("trawl", L.T("squad.up.mine_guard.name"), "squad.kind.passive", L.T("squad.up.mine_guard.text"), Kit.MineGuard);
     private static readonly Upgrade Winch = U("winch", L.T("squad.up.winch.name"), "squad.kind.ability_bonus", L.T("squad.up.winch.text"), Kit.Winch);
     private static readonly Upgrade RepairKit = U("repair", L.T("squad.up.repair_kit.name"), "squad.kind.ability_bonus", L.T("squad.up.repair_kit.text"), Kit.RepairKit);
     private static readonly Upgrade SpallLiner = U("spall_liner", L.T("squad.up.spall_liner.name"), "squad.kind.passive", L.T("squad.up.spall_liner.text"), Kit.SpallLiner);

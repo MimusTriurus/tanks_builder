@@ -357,17 +357,20 @@ public sealed partial class Tank3DBench
     /// out, or the turn going over.</summary>
     private static string BonusWaits => L.T("match.bonus_waits");
 
-    private bool MatchBonusSpent => Match && (_mt.Bonus || _passIn is not null || MatchOver || Deploying);
+    private bool MatchBonusSpent => Match && (_mt.Bonus || RigOwes || _passIn is not null || MatchOver || Deploying);
 
     /// <summary>Whether a bonus act is still to be had once the move is over:
-    /// a fire to put out, or a unit beside to ram - the move being spent, the
-    /// ram goes from where the hull stands. No allocation, it is read every
-    /// frame.</summary>
+    /// a fire to put out, a unit beside to ram - the move being spent, the
+    /// ram goes from where the hull stands - or the double turn (Battle.TurnDone).
+    /// None while it is owed to the extinguisher. No allocation, it is read
+    /// every frame.</summary>
     private bool BonusLeft()
     {
-        if (_mt.Bonus)
+        if (_mt.Bonus || RigOwes)
             return false;
         if (Burning(_unitId))
+            return true;
+        if (RigHas(Kit.DoubleTurn) && !(_field?.IsRamp(CellHere) ?? false))
             return true;
         for (int i = 0; i < _parked.Count; i++)
             if (_parked[i].Fate != Fate.Destroyed && SideTo(CellHere, _parked[i].Cell) is not null)
@@ -496,11 +499,13 @@ public sealed partial class Tank3DBench
         HeavyClears();
         Side ending = _mt.Turn;
         int turn = _mt.TurnNo++;
-        // the unit the side moved or acted with, for the auto-extinguisher (Д8)
+        // the unit the side moved or acted with, and whether its bonus act is
+        // spent, for the auto-extinguisher's price (upgrades.md, 2026-11-02)
         int activated = _side == ending && (_mt.Drove || _mt.Fired || _mt.Bonus) ? _unitId : -1;
+        bool bonusSpent = _mt.Bonus;
         HandOver();
         if (!MatchOver)
-            BurnOut(ending, turn, activated);
+            BurnOut(ending, turn, activated, bonusSpent);
     }
 
     /// <summary>To the other side: its first unit able to act on the rig. A

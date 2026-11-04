@@ -10,9 +10,10 @@ namespace TankSpriteTest;
 /// board (<c>Tank3DBench._amphibious</c>) until the match gave each unit its
 /// kit (docs/battle-core-plan.md, Д1).
 ///
-/// <b>All fourteen of upgrades.md are named; read so far</b>: the wading gear,
-/// the trawl and the smoke grenade (Д1, Д8). The rest are fitted from a map's
-/// home (<see cref="Parking.Kit"/>) and wait for their rule, one at a time (Д8).
+/// <b>Fourteen of upgrades.md's twenty-two have a flag here, each read by the
+/// rules</b> (Д1, Д8; the 2026-11-02 revision: the trawl became the mine guard,
+/// the auto-extinguisher and the double turn pay with the bonus act). The
+/// eight added on 2026-11-02 are on the trees (<see cref="QuickSquad"/>) only.
 /// </summary>
 [Flags]
 public enum Kit
@@ -20,8 +21,10 @@ public enum Kit
     None = 0,
     /// <summary>ОПВТ: afloat in deep water, not drowned.</summary>
     Snorkel = 1 << 0,
-    /// <summary>Минный трал: a mine driven over nose first is cleared, not set off.</summary>
-    Trawl = 1 << 1,
+    /// <summary>Противоминная защита: a mine under the hull, however it came on
+    /// to it, goes off and is spent - the hull is set alight, not knocked out,
+    /// and its way ends there (upgrades.md, 2026-11-02; it was the trawl).</summary>
+    MineGuard = 1 << 1,
     /// <summary>Дымовая шашка: smoke on a neighbouring hex, the bonus act.</summary>
     Smoke = 1 << 2,
     /// <summary>Зажигательный снаряд: the attack's round sets alight what it meets.</summary>
@@ -32,7 +35,9 @@ public enum Kit
     Reverse = 1 << 5,
     /// <summary>Противоосколочный подбой: a neighbour's blast does not set it alight.</summary>
     SpallLiner = 1 << 6,
-    /// <summary>Автоматическое тушение: a burning unit not acted with goes out at п. 6.</summary>
+    /// <summary>Автоматическое тушение: a burning unit goes out at п. 6 by
+    /// itself, for its bonus act - this turn's, if it acted and has it still,
+    /// else its next activation's (<see cref="BattleUnit.OwesBonus"/>).</summary>
     Extinguisher = 1 << 7,
     /// <summary>Тепловизор: its shot and its ambush's axis see through smoke.</summary>
     Thermal = 1 << 8,
@@ -42,7 +47,8 @@ public enum Kit
     MineLayer = 1 << 10,
     /// <summary>Ремкомплект: a knocked-out own neighbour back in the fight, the bonus act.</summary>
     RepairKit = 1 << 11,
-    /// <summary>Двойной поворот: the turn's first sixty degrees cost no step.</summary>
+    /// <summary>Двойной поворот: the hull turned sixty degrees with no step,
+    /// the bonus act, after the move (<see cref="Battle.Pivot"/>).</summary>
     DoubleTurn = 1 << 12,
     /// <summary>Стабилизатор засады: the ambush outlives a ram and its first round.</summary>
     AmbushStabilizer = 1 << 13,
@@ -54,7 +60,7 @@ public static class Kits
     /// says - in upgrades.md's order.</summary>
     public static readonly (Kit Kit, string Id, string Name)[] All =
     {
-        (Kit.Trawl, "trawl", L.T("kit.trawl")),
+        (Kit.MineGuard, "mine_guard", L.T("kit.mine_guard")),
         (Kit.Snorkel, "snorkel", L.T("kit.snorkel")),
         (Kit.Smoke, "smoke", L.T("kit.smoke")),
         (Kit.Incendiary, "incendiary", L.T("kit.incendiary")),
@@ -73,7 +79,7 @@ public static class Kits
     /// <summary>
     /// The stub until the meta layer fits them (GDD match.md, «Вход и выход
     /// боя»; the author's Р-4, 2026-10-31): the starting squad's one upgrade
-    /// each - LT the wading gear, MT the trawl, HM the smoke pot. HT and TD
+    /// each - LT the wading gear, MT the mine guard, HM the smoke pot. HT and TD
     /// carry nothing. Read off the class's numbers, as the class's verbs are
     /// (<see cref="MovementProfile.FreeOrder"/>, <see cref="MovementProfile.Lobs"/>).
     /// A home that names its kit (<see cref="Parking.Kit"/>) is not stubbed.
@@ -81,7 +87,7 @@ public static class Kits
     public static Kit Starter(MovementProfile cls) => cls.Might switch
     {
         <= 1 => Kit.Snorkel,
-        2 when cls.Turreted => Kit.Trawl,
+        2 when cls.Turreted => Kit.MineGuard,
         >= 5 => Kit.Smoke,
         _ => Kit.None,
     };
@@ -108,9 +114,12 @@ public static class Kits
         return ids;
     }
 
-    /// <summary>The upgrade a map names, or null for a name no upgrade has.</summary>
+    /// <summary>The upgrade a map names, or null for a name no upgrade has.
+    /// <c>trawl</c> is the mine guard's name from before 2026-11-02.</summary>
     public static Kit? Parse(string id)
     {
+        if (string.Equals(id, "trawl", StringComparison.OrdinalIgnoreCase))
+            return Kit.MineGuard;
         foreach ((Kit k, string name, string _) in All)
             if (string.Equals(name, id, StringComparison.OrdinalIgnoreCase))
                 return k;

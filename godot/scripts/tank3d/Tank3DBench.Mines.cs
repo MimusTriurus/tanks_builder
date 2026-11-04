@@ -133,10 +133,11 @@ public sealed partial class Tank3DBench
                 && UnderHull(mine.At, _rig.Position, ahead, _foot, out float along))
             {
                 Blow(mine);
-                // the trawl ahead takes it, driven nose first (upgrades.md,
-                // «Минный трал»; Д8): the hex cleared, the hull whole
-                if ((KitOf(_unitId) & Kit.Trawl) != 0 && (_speed > 0.0f || RamRunning) && along >= 0.0f)
-                    Log.Print($"tank3d: match: the trawl takes the mine on {MapAt(mine.Cell)}");
+                // the mine guard (upgrades.md, «Противоминная защита», 2026-11-02):
+                // however the hull came on to it, alight rather than knocked out,
+                // and its way ends on the mine's hex (Battle.Arrive)
+                if ((KitOf(_unitId) & Kit.MineGuard) != 0)
+                    GuardedOwn(mine, along);
                 else
                     MinedOwn(mine, along);
             }
@@ -144,9 +145,13 @@ public sealed partial class Tank3DBench
                      && UnderHull(mine.At, o.Rig.Position, o.Ahead, o.Foot, out float alongOther))
             {
                 Blow(mine);
-                // shoved nose first, its trawl takes it too (Battle.Arrive: forward)
-                if (o.Unit && (KitOf(o.Id) & Kit.Trawl) != 0 && o.Ahead.Dot(ahead) > 0.85f && alongOther >= 0.0f)
-                    Log.Print($"tank3d: match: {o.Tag}'s trawl takes the mine on {MapAt(mine.Cell)}");
+                // shoved on to it, the mine guard holds as it does driven (Battle.Arrive)
+                if (Match && o.Unit && o.Fate == Fate.Alive && (KitOf(o.Id) & Kit.MineGuard) != 0)
+                {
+                    o.Pitch.Kick(-MineThrow * (alongOther >= 0.0f ? 1.0f : -1.0f) * 0.15f);
+                    Ignite(o.Id, o.Side, o.Tag, mine.Cell);
+                    Log.Print($"tank3d: match: {o.Tag}'s mine guard holds on {MapAt(mine.Cell)} - alight, not knocked out");
+                }
                 else
                     MinedOther(o, alongOther);
             }
@@ -193,6 +198,27 @@ public sealed partial class Tank3DBench
         FxKnocked();
         RockedOwn(1.0f);
         _note = "knocked out by a mine";
+    }
+
+    /// <summary>The bench's own tank over the charge with the mine guard: the
+    /// end over it jolted, not thrown, the hull alight and «Активен» - and
+    /// its way ends here, rolling on to the mined cell's middle as a knocked
+    /// one does (<see cref="CoastDrive"/>). A ram carries on to its hex.</summary>
+    private void GuardedOwn(Laid mine, float along)
+    {
+        float end = along >= 0.0f ? 1.0f : -1.0f;
+        _kickPitch.Kick(-MineThrow * 0.35f * end);
+        _heave.Kick(0.06f);
+        if (Match)
+            Ignite(_unitId, _side, _modelTag, mine.Cell);
+        Log.Print($"tank3d: match: the mine guard holds on {MapAt(mine.Cell)} - alight, not knocked out, the way ends here");
+        if (RamRunning)
+            return;
+        CancelOrder();
+        _coastTo = CellWorld(mine.Cell);
+        _speed = (_speed < 0.0f ? -1.0f : 1.0f) * Mathf.Max(Mathf.Abs(_speed), 0.2f * MaxSpeed);
+        _driveScripted = 0.0f;
+        _note = "set alight by a mine";
     }
 
     /// <summary>The ram's target shoved over the charge: thrown and left in the

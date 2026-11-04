@@ -61,7 +61,7 @@ public sealed partial class Tank3DBench
     {
         if (_reach is null)
             return null;
-        // the double turn's first 60° is free (Steps.TurnCost)
+        // a step each 60° (Steps.TurnCost): the double turn is a bonus act now
         int cost = Steps.TurnCost(HullSide(), side, _reach.Mover);
         return cost <= _reach.Budget ? cost : null;
     }

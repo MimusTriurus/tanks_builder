@@ -31,7 +31,8 @@ namespace TankSpriteTest;
 /// a tank then rams it, own ones too, and on the hex past the wall the hull
 /// faces rams the wall (Д5; one act, one button since 2026-11-01);
 /// <b>Тушить</b> - at once (J too, <see cref="Douse"/>); the kit's
-/// <b>Дым</b>, <b>Мина</b>, <b>Ремонт</b>, <b>Лебёдка</b> (Д8).</item>
+/// <b>Дым</b>, <b>Мина</b>, <b>Ремонт</b>, <b>Лебёдка</b> (Д8), <b>Поворот</b>
+/// (the double turn, 2026-11-02).</item>
 /// <item><b>A button is an icon</b> (2026-11-01): the act's picture from
 /// <c>Icons/</c> and its key's number beside it, the name in the tooltip;
 /// without the picture on disk the button says the name, as before.</item>
@@ -127,6 +128,7 @@ public sealed partial class Tank3DBench
         _actMine = BonusButton(bonus, "mine", L.T("acts.mine"), toggle: true, () => GearToggle(Gear.Mine));
         _actRepair = BonusButton(bonus, "repair", L.T("acts.repair"), toggle: true, () => GearToggle(Gear.Repair));
         _actWinch = BonusButton(bonus, "winch", L.T("acts.winch"), toggle: true, () => GearToggle(Gear.Winch));
+        _actPivot = BonusButton(bonus, "double_turn", L.T("acts.pivot"), toggle: true, () => GearToggle(Gear.Pivot));
         _actDouse = BonusButton(bonus, "douse", L.T("acts.douse"), toggle: false, () => Execute(new Command(CommandKind.Douse)));
         layer.AddChild(_acts);
         BuildActTip(layer);
@@ -689,6 +691,8 @@ public sealed partial class Tank3DBench
         _actRepair.SetPressedNoSignal(bonus && _gearMode == Gear.Repair);
         _actWinch!.Visible = RigHas(Kit.Winch);
         _actWinch.SetPressedNoSignal(bonus && _gearMode == Gear.Winch);
+        _actPivot!.Visible = RigHas(Kit.DoubleTurn);
+        _actPivot.SetPressedNoSignal(bonus && _gearMode == Gear.Pivot);
         _actDouse!.Visible = Burning(_unitId);
         // each cap with its button: gone with it, grey with it
         for (int i = 0; i < _actKeys.Count; i++)
