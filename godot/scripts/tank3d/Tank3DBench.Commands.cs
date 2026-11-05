@@ -15,6 +15,7 @@ namespace TankSpriteTest;
 /// <item><b>Take</b> - unit by its id; <b>Go</b> - to a hex, turned to a side
 /// at the end if the budget has it; <b>Turn</b> - on the spot; <b>Fire</b> - at
 /// a hex; <b>Burn</b> - the incendiary round at one (Tank3DBench.Incendiary);
+/// <b>SmokeShot</b> - the smoke round at one (Tank3DBench.SmokeShell);
 /// <b>Ram</b> - the unit on a hex, from where it stands or from a hex of
 /// the move beside it; <b>RamWall</b> - through the wall ahead; <b>Ambush</b> -
 /// on an axis, the medium's on two beside each other (Tank3DBench.Ambush); <b>Smoke</b> - the grenade on a
@@ -31,7 +32,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -43,7 +44,7 @@ public sealed partial class Tank3DBench
             CommandKind.Take => $"take #{Unit}",
             CommandKind.Go => $"go ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
             CommandKind.Turn or CommandKind.RamWall or CommandKind.Pivot => $"{Kind.ToString().ToLowerInvariant()} {Side}",
-            CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke
+            CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke or CommandKind.SmokeShot
                 or CommandKind.Mine or CommandKind.Repair or CommandKind.Winch => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
             CommandKind.Ambush => $"ambush {Side}{(Side2 >= 0 ? $"+{Side2}" : "")}",
             CommandKind.Place => $"place #{Unit} ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
@@ -74,11 +75,16 @@ public sealed partial class Tank3DBench
                 return _fate != Fate.Alive ? L.T("commands.why_out", _modelTag) : MatchMoveWhy();
             case CommandKind.Fire:
             case CommandKind.Burn:
+            case CommandKind.SmokeShot:
                 if (_fate != Fate.Alive)
                     return L.T("commands.why_out", _modelTag);
                 if (c.Kind == CommandKind.Burn && !RigBurns)
                     return L.T("commands.why_no_incendiary", _modelTag);
-                return ShotWhy(CellHere, c.Cell, out _, out _, out _);
+                if (c.Kind == CommandKind.SmokeShot && !RigSmokeShells)
+                    return L.T("smokeshell.none", _modelTag);
+                string shot = ShotWhy(CellHere, c.Cell, out int axis, out int cells, out _);
+                return shot.Length > 0 || c.Kind != CommandKind.SmokeShot ? shot
+                    : SmokeShotWhy(CellHere, c.Cell, axis, cells);
             case CommandKind.Ram:
                 if (_fate != Fate.Alive)
                     return L.T("commands.why_out", _modelTag);
@@ -158,8 +164,10 @@ public sealed partial class Tank3DBench
                 break;
             case CommandKind.Fire:
             case CommandKind.Burn:
+            case CommandKind.SmokeShot:
                 // the round is chosen as the button chooses it, and leaves with the shot
                 _fieryMode = c.Kind == CommandKind.Burn;
+                _smokeShotMode = c.Kind == CommandKind.SmokeShot;
                 ShotOrder(c.Cell);
                 break;
             case CommandKind.Ram:
@@ -297,7 +305,7 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary><c>--do cmd=KIND[:Q,R][:SIDE]</c>, map cells: <c>take:ID</c>,
-    /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
+    /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>smokeshot:Q,R</c>, <c>ram:Q,R</c>,
     /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>;
     /// in placement <c>place:ID:Q,R[:SIDE]</c> and <c>ready</c>.</summary>
     private Command? ParseCommand(string text)
@@ -317,6 +325,7 @@ public sealed partial class Tank3DBench
                 "turn" => new Command(CommandKind.Turn, Side: int.Parse(parts[1])),
                 "fire" => new Command(CommandKind.Fire, Cell(parts[1])),
                 "burn" => new Command(CommandKind.Burn, Cell(parts[1])),
+                "smokeshot" => new Command(CommandKind.SmokeShot, Cell(parts[1])),
                 "ram" => new Command(CommandKind.Ram, Cell(parts[1])),
                 "ramwall" => new Command(CommandKind.RamWall, Side: int.Parse(parts[1])),
                 "smoke" => new Command(CommandKind.Smoke, Cell(parts[1])),

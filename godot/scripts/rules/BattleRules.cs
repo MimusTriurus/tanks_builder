@@ -381,9 +381,14 @@ public static partial class Battle
     /// <paramref name="incendiary"/> - the incendiary round (upgrades.md,
     /// «Зажигательный снаряд») in place of the plain one, by the same rules of
     /// aim and axis: a hull it does not pierce catches fire, a living wood it is
-    /// spent in catches; the mortar's bomb the same.
+    /// spent in catches; the mortar's bomb the same. <paramref name="smoke"/> -
+    /// the smoke round (upgrades.md, «Дымовой снаряд»): smoke on the hex aimed
+    /// at, an empty one - no tank, wood, walls, minefield or smoke on it - that
+    /// the line of fire reaches, short of the first thing on the axis; the
+    /// mortar's smoke bomb goes over everything on to a hex 3 to 5 out (3 to 6
+    /// with the bracket).
     /// </summary>
-    public static string? Fire(BattleState s, Vector2I aim, bool incendiary = false)
+    public static string? Fire(BattleState s, Vector2I aim, bool incendiary = false, bool smoke = false)
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
@@ -391,6 +396,10 @@ public static partial class Battle
             return "already fired";
         if (incendiary && (u.Kit & Kit.Incendiary) == 0)
             return "no incendiary rounds";
+        if (smoke && (u.Kit & Kit.SmokeShell) == 0)
+            return "no smoke rounds";
+        if (smoke && incendiary)
+            return "one round at a time";
         (int heading, int range) = s.Board.LaneTo(u.Cell, aim);
         if (heading < 0)
             return "not on an axis";
@@ -404,6 +413,8 @@ public static partial class Battle
             case Gunnery.Distance.MortarBand: return $"the mortar throws {Gunnery.LobShortest} to {reach}, this is {range}";
             case Gunnery.Distance.PointBlank: return "a tank point-blank";
         }
+        if (smoke)
+            return SmokeRound(s, u, aim);
         s.Fired = true;
         Lift(s, u, "fired");
         if (u.Class.Lobs)
@@ -412,6 +423,30 @@ public static partial class Battle
             Fly(s, u.Cell, heading, u.Class.Might, Level(s, u), passes: u.Class.Might >= 4 && !u.Class.Turreted ? 1 : 0,
                 glance: true, aim: aim, fiery: incendiary, thermal: (u.Kit & Kit.Thermal) != 0,
                 woodPass: (u.Kit & Kit.ThroughWood) != 0);
+        return null;
+    }
+
+    /// <summary>The smoke round on <paramref name="aim"/>, the axis and the
+    /// distance already the rules' (<see cref="Fire"/>): the hex empty, the
+    /// gun's lane to it open - a hull, a wood, smoke (unless the imager sees
+    /// through it), the rising ground or a wall stop it short; the mortar's goes
+    /// over them. The shot spent, the smoke laid; nothing else is touched.</summary>
+    private static string? SmokeRound(BattleState s, BattleUnit u, Vector2I aim)
+    {
+        if (s.At(aim) is not null)
+            return "a tank stands there";
+        if (s.Board.CoverAt(aim) != Cover.None)
+            return $"{s.Board.CoverAt(aim)} there";
+        if (s.Board.Smoked(aim))
+            return "smoke there already";
+        if (!u.Class.Lobs
+            && Gunnery.Solve(s.Board, u.Cell, aim, false, c => s.At(c) is not null,
+                             standing: c => s.At(c) is { } t ? Level(s, t) : s.Board.LevelAt(c),
+                             thermal: (u.Kit & Kit.Thermal) != 0).BlockedAt is Vector2I stop)
+            return $"the line of fire is shut at ({stop.X - s.Shift.X},{stop.Y - s.Shift.Y})";
+        s.Fired = true;
+        Lift(s, u, "fired");
+        LaySmoke(s, u, aim, "round");
         return null;
     }
 
@@ -870,10 +905,17 @@ public static partial class Battle
             return "smoke there already";
         s.Bonus = true;
         Lift(s, u, "smoke");
+        LaySmoke(s, u, cell, "grenade");
+        return null;
+    }
+
+    /// <summary>Smoke on <paramref name="cell"/> for two rounds, by the
+    /// grenade or the round (<paramref name="by"/>).</summary>
+    private static void LaySmoke(BattleState s, BattleUnit u, Vector2I cell, string by)
+    {
         s.Board.SetSmoke(cell, true);
         s.Smoke[cell] = SmokeRounds;
-        s.Events.Add(new BattleEvent(BattleEventKind.SmokeLaid, u.Id, cell, SmokeRounds));
-        return null;
+        s.Events.Add(new BattleEvent(BattleEventKind.SmokeLaid, u.Id, cell, SmokeRounds, by));
     }
 
     private const int SmokeRounds = 2;

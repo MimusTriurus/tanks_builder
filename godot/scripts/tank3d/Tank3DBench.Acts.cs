@@ -26,7 +26,8 @@ namespace TankSpriteTest;
 /// right button on an enemy fires with the mode off as ever. Spent with the
 /// round (<c>Launch</c>). <b>Засада</b> (Д7) - a mode, the left button on a
 /// hex picks the axis (Tank3DBench.Ambush). <b>Зажиг.</b> (Д8) - the next
-/// shot is incendiary (Tank3DBench.Incendiary), no key.</item>
+/// shot is incendiary (Tank3DBench.Incendiary), no key; <b>Дым. сн.</b> - the
+/// next shot is the smoke round (Tank3DBench.SmokeShell), no key.</item>
 /// <item>The bonus acts: <b>Таран</b> - a mode (Tab too), the left button on
 /// a tank then rams it, own ones too, and on the hex past the wall the hull
 /// faces rams the wall (Д5; one act, one button since 2026-11-01);
@@ -118,6 +119,8 @@ public sealed partial class Tank3DBench
         _actAmbush = ActButton(attack, "ambush", AmbushText, "3", toggle: true, _ambushAct);
         // the incendiary round (Д8, Tank3DBench.Incendiary): the next shot's, no key
         _actFiery = ActButton(attack, "incendiary", L.T("acts.incendiary"), "", toggle: true, FieryToggle);
+        // the smoke round (upgrades.md, Tank3DBench.SmokeShell): the next shot's, no key
+        _actSmokeShot = ActButton(attack, "smoke_shell", L.T("acts.smoke_shell"), "", toggle: true, SmokeShotToggle);
         HBoxContainer bonus;
         (_groupBonus, bonus) = Group(GroupShape.Triangle, Ui.Extra);
         // a tank or the wall ahead (Д5): a mode, the click says which
@@ -679,12 +682,15 @@ public sealed partial class Tank3DBench
         ActOn(_actAttack!, attack);
         ActOn(_actAmbush!, attack);
         ActOn(_actFiery!, attack);
+        ActOn(_actSmokeShot!, attack);
         for (int i = 0; i < _bonusActs.Count; i++)
             ActOn(_bonusActs[i].Button, bonus && !(_mt.Drove && _bonusActs[i].Button == _actOverdrive));
         _actAttack!.SetPressedNoSignal(attack && _attackMode);
         _actAmbush!.SetPressedNoSignal(attack && _ambushMode);
         _actFiery!.Visible = RigBurns;
         _actFiery.SetPressedNoSignal(attack && _fieryMode);
+        _actSmokeShot!.Visible = RigSmokeShells;
+        _actSmokeShot.SetPressedNoSignal(attack && _smokeShotMode);
         _actRam!.SetPressedNoSignal(bonus && _ramMode);
         _actSmoke!.Visible = RigSmokes;
         _actSmoke.SetPressedNoSignal(bonus && _smokeMode);

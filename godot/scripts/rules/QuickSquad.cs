@@ -130,7 +130,7 @@ public static class QuickSquad
             {
                 new Branch("support", L.T("squad.branch.support.name"), L.T("squad.branch.support.tag"), new[]
                 {
-                    U("smoke_shell", L.T("squad.up.smoke_round.name"), "squad.kind.ability_attack", L.T("squad.up.smoke_round.text")),
+                    U("smoke_shell", L.T("squad.up.smoke_round.name"), "squad.kind.ability_attack", L.T("squad.up.smoke_round.text"), Kit.SmokeShell),
                     Incendiary,
                     U("fork_36", L.T("squad.up.bracket.name"), "squad.kind.passive_class", L.T("squad.up.bracket.text"), Kit.Bracket),
                 }),

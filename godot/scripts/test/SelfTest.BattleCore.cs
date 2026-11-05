@@ -388,6 +388,44 @@ public static partial class SelfTest
                   $"driven: {Said(driven)}; after a round {afterOne}, after two {left.Board.Smoked(new Vector2I(4, 7))}");
         }
 
+        // upgrades.md «Дымовой снаряд» (2026-11-02): a green medium at (4,8)
+        // fires up the column. The round lays smoke on an empty hex its line of
+        // fire reaches, and it is the shot of the turn; not past a wood or a
+        // hull, not on a wood or a tank, not without the kit. The mortar's goes
+        // over the wood, 3 to 5 out only.
+        {
+            BattleState Shot(string tag, Kit kit, Vector2I aim, out string? why, Vector2I[]? woods = null, bool hull = false)
+            {
+                BattleState t = Probe(9, 10, woods: woods);
+                Put(t, 0, tag, Camp.Green, 4, 8, 90, kit: kit);
+                Put(t, 1, "LTR", Camp.Brown, 0, 0, 90);
+                if (hull)
+                    Put(t, 2, "LTR", Camp.Brown, 4, 6, 270);
+                string? said = null;
+                Act(t, 0, st => said = Battle.Fire(st, aim, smoke: true));
+                why = said;
+                return t;
+            }
+            Vector2I near = new(4, 5), wood = new(4, 6);
+            BattleState laid = Shot("MTR", Kit.SmokeShell, near, out string? laidWhy);
+            string? again = null;
+            Act(laid, 0, st => again = Battle.Fire(st, new Vector2I(4, 4)));
+            Shot("MTR", Kit.None, near, out string? noKit);
+            Shot("MTR", Kit.SmokeShell, near, out string? pastWood, woods: new[] { wood });
+            Shot("MTR", Kit.SmokeShell, wood, out string? onWood, woods: new[] { wood });
+            Shot("MTR", Kit.SmokeShell, near, out string? pastHull, hull: true);
+            Shot("MTR", Kit.SmokeShell, wood, out string? onHull, hull: true);
+            BattleState lob = Shot("HMR", Kit.SmokeShell, new Vector2I(4, 4), out string? lobWhy, woods: new[] { wood });
+            Shot("HMR", Kit.SmokeShell, wood, out string? lobNear);
+            check("the smoke round: smoke on an empty hex the line of fire reaches, the turn's shot; not past or on a wood or a hull, not without the kit; the mortar's over the wood, 3 to 5 out",
+                  laidWhy is null && laid.Board.Smoked(near) && laid.Fired && again is not null
+                  && laid.Events.Any(e => e.Kind == BattleEventKind.SmokeLaid && e.Note == "round")
+                  && noKit is not null && pastWood is not null && onWood is not null && pastHull is not null && onHull is not null
+                  && lobWhy is null && lob.Board.Smoked(new Vector2I(4, 4)) && lobNear is not null,
+                  $"laid {laidWhy ?? "ok"}, again {again}; no kit {noKit}; past the wood {pastWood}; on it {onWood}; "
+                  + $"past a hull {pastHull}; on it {onHull}; mortar {lobWhy ?? "ok"}, 2 out {lobNear}; {Said(laid)}");
+        }
+
         // upgrades.md «Противоминная защита» (2026-11-02): driven on nose first
         // or backed on, the mine goes off and is spent, the hull is alight and
         // not knocked out, and the way ends on the mine's hex; shoved on by a

@@ -108,15 +108,18 @@ public sealed partial class Tank3DBench
         MatchFired();
         // the incendiary round (Tank3DBench.Incendiary)
         bool fiery = FieryLaunch();
+        // or the smoke round (Tank3DBench.SmokeShell): the hex it lays smoke on
+        Vector2I? smokeOn = SmokeShotLaunch();
+        bool smoke = smokeOn is not null;
         // «Атака» is spent with the round (Tank3DBench.Acts)
         _attackMode = false;
         if (_shadowAim is Vector2I aim)
-            ShadowAct($"fire{(fiery ? " incendiary" : "")} at {MapAt(aim)}", s => Battle.Fire(s, aim, fiery));
+            ShadowAct($"fire{(fiery ? " incendiary" : smoke ? " smoke" : "")} at {MapAt(aim)}", s => Battle.Fire(s, aim, fiery, smoke));
         // a destroyer's round laid past a hull goes through it (HullPass)
-        Leg? holes = !_profile.Lobs && _shadowAim is Vector2I laid && HullPass(CellHere, laid) is { } hull
+        Leg? holes = !_profile.Lobs && !smoke && _shadowAim is Vector2I laid && HullPass(CellHere, laid) is { } hull
             ? HoledLeg(CellHere, AxisTo(CellHere, laid).Axis, hull) : null;
         // or through a wood on the way (upgrades.md, «Сквозь лес»): on at one less
-        bool wood = !_profile.Lobs && !fiery && _shadowAim is Vector2I past && WoodPass(CellHere, past);
+        bool wood = !_profile.Lobs && !fiery && !smoke && _shadowAim is Vector2I past && WoodPass(CellHere, past);
         _shadowAim = null;
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
@@ -126,7 +129,7 @@ public sealed partial class Tank3DBench
         if (_profile.Lobs && _chargeFor is Vector3 to && Charge(muzzle, bore, to, fall) is float v)
             speed = v;
         _chargeFor = null;
-        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, true, _profile.Lobs, holes, wood);
+        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, !smoke, _profile.Lobs, holes, wood, smokeOn);
     }
 
     /// <summary>Where the bomb being fired was laid on, for its charge.</summary>
@@ -229,9 +232,12 @@ public sealed partial class Tank3DBench
     /// struck as the round gets to it, the round on with one less.
     /// <paramref name="woodPassed"/>: the pass is a wood's on the way
     /// (<see cref="WoodPass"/>) - spent, the round one less from the muzzle.
+    /// <paramref name="smokeOn"/>: the smoke round (Tank3DBench.SmokeShell) -
+    /// it strikes nothing, walls included, and where it ends the smoke goes up
+    /// on that hex.
     /// </summary>
     private CelShell.Round Throw(Vector3 from, Vector3 v, float fall, float longest, bool strikes, bool lob,
-                                 Leg? holes = null, bool woodPassed = false)
+                                 Leg? holes = null, bool woodPassed = false, Vector2I? smokeOn = null)
     {
         var path = new List<Vector3> { from };
         var g = new Vector3(0.0f, -fall, 0.0f);
@@ -312,7 +318,7 @@ public sealed partial class Tank3DBench
                              : () => Strike(o, hit.Part, hit.At, hit.N, way, with, passing: pass);
                 break;
             }
-            if (!lob && WallMeets(p, next) is { } wall)
+            if (!lob && smokeOn is null && WallMeets(p, next) is { } wall)
             {
                 bool pass = passes > 0 && !wall.Prop.Concrete;
                 System.Action struck = WallStruck(wall.Prop, wall.At, seg.Normalized(),
@@ -344,7 +350,7 @@ public sealed partial class Tank3DBench
                 // (GDD classes.md, "HM - Навес").
                 // The shot's own round set a wood alight if it was incendiary
                 // (Tank3DBench.Incendiary).
-                landed = lob && !wet ? () => { Lands(at, wet, spent); WallsBlown(at, "the bomb", WallForce * BlownShare); FieryWood(at); }
+                landed = lob && !wet && strikes ? () => { Lands(at, wet, spent); WallsBlown(at, "the bomb", WallForce * BlownShare); FieryWood(at); }
                        : strikes ? () => { Lands(at, wet, spent); FieryWood(at); }
                        : () => Lands(at, wet, spent);
                 break;
@@ -354,6 +360,15 @@ public sealed partial class Tank3DBench
             p = next;
             if (!OnBoard(p))
                 break;
+        }
+        if (smokeOn is Vector2I puff)
+        {
+            System.Action? then = landed;
+            landed = () =>
+            {
+                then?.Invoke();
+                SmokeShotLands(puff);
+            };
         }
         CelShell.Round round = _shells!.Fly(path, v.Length(), TracerCal, SmokeCal, lob, landed, h);
         foreach ((float along, System.Action struck) in through)
@@ -711,6 +726,9 @@ public sealed partial class Tank3DBench
         Vector2I own = CellHere;
         Other? tank = _other is { } o && OtherCell(o) == cell ? o : null;
         string why = ShotWhy(own, cell, out int axis, out int cells, out _);
+        // the smoke round's own gates (Tank3DBench.SmokeShell)
+        if (why.Length == 0 && _smokeShotMode)
+            why = SmokeShotWhy(own, cell, axis, cells);
         Vector3 mid = CellWorld(cell);
         Vector3 ground = new(mid.X, ShellGround(mid, out _), mid.Z);
         if (why.Length > 0)

@@ -531,6 +531,7 @@ public sealed partial class Tank3DBench
         _ramMode = false;
         _smokeMode = false;
         _fieryMode = _fiery = false;
+        _smokeShotMode = false;
         _gearMode = Gear.None;
         _ambushMode = _attackMode = false;
         _ambushPick = null;

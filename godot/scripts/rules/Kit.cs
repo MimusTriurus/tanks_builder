@@ -10,11 +10,11 @@ namespace TankSpriteTest;
 /// board (<c>Tank3DBench._amphibious</c>) until the match gave each unit its
 /// kit (docs/battle-core-plan.md, Д1).
 ///
-/// <b>Nineteen of upgrades.md's twenty-two have a flag here, each read by the
+/// <b>Twenty of upgrades.md's twenty-two have a flag here, each read by the
 /// rules</b> (Д1, Д8; the 2026-11-02 revision: the trawl became the mine guard,
 /// the auto-extinguisher and the double turn pay with the bonus act; 2026-11-04:
 /// the 3-6 bracket, through the wood, the ram blade, the forced engine, the
-/// push of two). The smoke round, the wide sector and the shot on the move are
+/// push of two, the smoke round). The wide sector and the shot on the move are
 /// on the trees (<see cref="QuickSquad"/>) only.
 /// </summary>
 [Flags]
@@ -71,6 +71,10 @@ public enum Kit
     /// <summary>Толчок на два гекса: the ram throws its target two hexes, hex
     /// by hex (<see cref="Ramming.Of"/>, <c>two</c>).</summary>
     PushTwo = 1 << 18,
+    /// <summary>Дымовой снаряд: the attack's round lays smoke on an empty hex
+    /// of the axis it reaches, the mortar's on one 3 to 5 out
+    /// (<see cref="Battle.Fire"/>, <c>smoke</c>).</summary>
+    SmokeShell = 1 << 19,
 }
 
 public static class Kits
@@ -83,6 +87,7 @@ public static class Kits
         (Kit.Snorkel, "snorkel", L.T("kit.snorkel")),
         (Kit.Smoke, "smoke", L.T("kit.smoke")),
         (Kit.Incendiary, "incendiary", L.T("kit.incendiary")),
+        (Kit.SmokeShell, "smoke_shell", L.T("kit.smoke_shell")),
         (Kit.WideTracks, "wide_tracks", L.T("kit.wide_tracks")),
         (Kit.Reverse, "reverse", L.T("kit.reverse")),
         (Kit.SpallLiner, "spall_liner", L.T("kit.spall_liner")),

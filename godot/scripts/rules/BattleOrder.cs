@@ -4,13 +4,13 @@ using Godot;
 
 namespace TankSpriteTest;
 
-public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive }
+public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot }
 
 /// <summary>
 /// An order to the core (docs/battle-core-plan.md, Д10): the bench's command
 /// (Tank3DBench.Commands) as data, in the board's cells, written and read in
 /// the same words as <c>--commands</c> - <c>take:ID</c>, <c>go:Q,R[:SIDE]</c>,
-/// <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>ram:Q,R</c>,
+/// <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>smokeshot:Q,R</c>, <c>ram:Q,R</c>,
 /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>,
 /// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>, <c>overdrive</c>,
 /// <c>pass</c>, <c>undo</c>, <c>place:ID:Q,R[:SIDE]</c>, <c>ready</c>. What a
@@ -25,7 +25,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
         OrderKind.Turn or OrderKind.RamWall or OrderKind.Pivot => $"{Kind.ToString().ToLowerInvariant()}:{Side}",
         OrderKind.Ambush => $"ambush:{Side}{(Side2 >= 0 ? $":{Side2}" : "")}",
         OrderKind.Place => $"place:{Unit}:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
-        OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke
+        OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke or OrderKind.SmokeShot
             or OrderKind.Mine or OrderKind.Repair or OrderKind.Winch => $"{Kind.ToString().ToLowerInvariant()}:{Cell.X},{Cell.Y}",
         _ => Kind.ToString().ToLowerInvariant(),
     };
@@ -36,7 +36,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
     public Order Moved(Vector2I by) => Kind switch
     {
         OrderKind.Go or OrderKind.Place or OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke
-            or OrderKind.Mine or OrderKind.Repair or OrderKind.Winch => this with { Cell = Cell + by },
+            or OrderKind.SmokeShot or OrderKind.Mine or OrderKind.Repair or OrderKind.Winch => this with { Cell = Cell + by },
         _ => this,
     };
 
@@ -59,6 +59,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
                 "turn" => new Order(OrderKind.Turn, Side: int.Parse(parts[1])),
                 "fire" => new Order(OrderKind.Fire, Cell(parts[1])),
                 "burn" => new Order(OrderKind.Burn, Cell(parts[1])),
+                "smokeshot" => new Order(OrderKind.SmokeShot, Cell(parts[1])),
                 "ram" => new Order(OrderKind.Ram, Cell(parts[1])),
                 "ramwall" => new Order(OrderKind.RamWall, Side: int.Parse(parts[1])),
                 "ambush" => new Order(OrderKind.Ambush, Side: int.Parse(parts[1]), Side2: Arg(2)),
@@ -127,6 +128,7 @@ public static partial class Battle
         OrderKind.Turn => Turn(s, o.Side),
         OrderKind.Fire => Fire(s, o.Cell),
         OrderKind.Burn => Fire(s, o.Cell, incendiary: true),
+        OrderKind.SmokeShot => Fire(s, o.Cell, smoke: true),
         OrderKind.Ram => RamTo(s, o.Cell),
         OrderKind.RamWall => RamWall(s, o.Side),
         OrderKind.Ambush => Ambush(s, o.Side, o.Side2),
