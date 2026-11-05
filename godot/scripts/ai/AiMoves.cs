@@ -81,6 +81,17 @@ public static class AiMoves
                     gen.Moves(s1, head, attacked: true);
                     head.RemoveAt(head.Count - 1);
                 }
+            // the forced engine, said before the move, where an enemy watches an axis
+            if ((u.Kit & Kit.Overdrive) != 0 && EnemyWatching(root, u.Side))
+            {
+                BattleState so = Copy(s0);
+                if (Battle.Overdrive(so) is null)
+                {
+                    head.Add(new Order(OrderKind.Overdrive));
+                    gen.Moves(so, head, attacked: false);
+                    head.RemoveAt(head.Count - 1);
+                }
+            }
             gen.Moves(s0, head, attacked: false);
             n += gen.Count;
         }
@@ -130,6 +141,8 @@ public static class AiMoves
                         After(s1, head, attacked);
                         head.RemoveAt(head.Count - 1);
                     }
+                    if (!attacked && !s.Fired && (u.Kit & Kit.FireOnMove) != 0)
+                        OnTheWay(s, u, route, cell, head);
                 }
                 // a turn on the spot: a casemate to any side, a turret to the enemy
                 foreach (int face in HexField.EdgeHeadings)
@@ -147,6 +160,41 @@ public static class AiMoves
             After(s, head, attacked);
         }
 
+        /// <summary>
+        /// The shot on the move (upgrades.md, «Выстрел на ходу»): for each
+        /// enemy, the first hex of the route it can be shot from - said before
+        /// the move, the move as the bench's <c>go</c> drives it.
+        /// </summary>
+        private void OnTheWay(BattleState s, BattleUnit u, Steps.Route route, Vector2I end, List<Order> head)
+        {
+            List<Vector2I> cells = route.Cells();
+            int lobReach = Gunnery.LobReachOf(u.Kit);
+            foreach (BattleUnit e in s.Units)
+            {
+                if (e.Side == u.Side || !e.Standing)
+                    continue;
+                foreach (Vector2I at in cells)
+                {
+                    if (at == u.Cell || !HexField.OnAxis(at, e.Cell))
+                        continue;
+                    (int heading, int range) = s.Board.LaneTo(at, e.Cell);
+                    if (heading < 0 || (!u.Class.Turreted && heading != u.Heading)
+                        || Gunnery.MayTarget(u.Class.Lobs, range, true, lobReach) != Gunnery.Distance.Fits
+                        || !LaneOpen(s, u, e.Cell, at))
+                        continue;
+                    BattleState s1 = Copy(s);
+                    if (Battle.OnTheWay(s1, at, e.Cell) is not null
+                        || Battle.Move(s1, cells, route.End.Heading, route.Back) is not null)
+                        break;
+                    head.Add(new Order(OrderKind.OnWay, at, Aim: e.Cell));
+                    head.Add(new Order(OrderKind.Go, end));
+                    After(s1, head, attacked: true);
+                    head.RemoveRange(head.Count - 2, 2);
+                    break;
+                }
+            }
+        }
+
         /// <summary>The attack after the move (owned state).</summary>
         private void After(BattleState s, List<Order> head, bool attacked)
         {
@@ -162,15 +210,44 @@ public static class AiMoves
                     Bonus(s1, head);
                     head.RemoveAt(head.Count - 1);
                 }
+                // The acts the turn's end does not wait for (Battle.TurnDone
+                // waits only for a fire, a hull beside, the double turn): once
+                // the shot is fired the turn goes by itself on the bench, so
+                // the smoke, the mine, the winch and the wall's ram come
+                // before the attack.
+                if (Battle.BonusLeft(s, u))
+                    foreach (Order b in Bonuses(s, u))
+                    {
+                        if (b.Kind is not (OrderKind.Smoke or OrderKind.Mine or OrderKind.Winch or OrderKind.RamWall))
+                            continue;
+                        BattleState s1 = Copy(s);
+                        if (Battle.Apply(s1, b) is not null)
+                            continue;
+                        head.Add(b);
+                        BattleUnit u1 = s1.Unit(_id)!;
+                        if (u1.Fate == UnitFate.Alive && !s1.Over && !s1.Fired)
+                            foreach (Order a in Attacks(s1, u1))
+                            {
+                                BattleState s2 = Copy(s1);
+                                if (Battle.Apply(s2, a) is not null)
+                                    continue;
+                                head.Add(a);
+                                Finish(s2, head);
+                                head.RemoveAt(head.Count - 1);
+                            }
+                        // without the attack it is one of Bonus' plays below
+                        head.RemoveAt(head.Count - 1);
+                    }
             }
             Bonus(s, head);
         }
 
-        /// <summary>The bonus act (owned state), then the end of the turn.</summary>
+        /// <summary>The bonus act (owned state) - only while the turn has not
+        /// gone by itself (<see cref="Battle.TurnDone"/>) - then the end of the turn.</summary>
         private void Bonus(BattleState s, List<Order> head)
         {
             BattleUnit u = s.Unit(_id)!;
-            if (u.Fate == UnitFate.Alive && !s.Over && Battle.BonusLeft(s, u))
+            if (u.Fate == UnitFate.Alive && !s.Over && Battle.BonusLeft(s, u) && !Battle.TurnDone(s))
                 foreach (Order b in Bonuses(s, u))
                 {
                     BattleState s1 = Copy(s);
@@ -269,12 +346,12 @@ public static class AiMoves
     /// the target, a destroyer's one pass through a hull let by. The core
     /// would let the round fly and be spent; the bench refuses the order, so
     /// the AI never gives it. The mortar goes over everything.</summary>
-    public static bool LaneOpen(BattleState s, BattleUnit u, Vector2I aim)
+    public static bool LaneOpen(BattleState s, BattleUnit u, Vector2I aim, Vector2I? from = null)
     {
         if (u.Class.Lobs)
             return true;
         bool passes = u.Class.Might >= 4 && !u.Class.Turreted;
-        Shot shot = Gunnery.Solve(s.Board, u.Cell, aim, false, c => s.At(c) is not null, masonry: false,
+        Shot shot = Gunnery.Solve(s.Board, from ?? u.Cell, aim, false, c => s.At(c) is not null, masonry: false,
                                           standing: c => s.At(c) is { } t ? Battle.Level(s, t) : s.Board.LevelAt(c),
                                           thermal: (u.Kit & Kit.Thermal) != 0, passes: passes ? 1 : 0,
                                           passable: c => s.At(c) is not null, woodPass: (u.Kit & Kit.ThroughWood) != 0);
@@ -287,9 +364,27 @@ public static class AiMoves
     private static List<Order> Attacks(BattleState s, BattleUnit u)
     {
         List<Order> all = Shots(s, u);
+        Glances(s, u, all);
         int to = Toward(s, u, u.Cell);
         if (to < 0)
             return all;
+        // the smoke round on the first empty hex toward the enemy (upgrades.md, «Дымовой снаряд»)
+        if ((u.Kit & Kit.SmokeShell) != 0 && (u.Class.Turreted || to == u.Heading))
+        {
+            Vector2I c = u.Cell;
+            for (int k = 1; k <= 3; k++)
+            {
+                c = HexField.Step(c, to);
+                if (!s.Board.InBounds(c) || s.At(c) is not null)
+                    break;
+                if (s.Board.CoverAt(c) == Cover.None && !s.Board.Smoked(c)
+                    && Gunnery.MayTarget(u.Class.Lobs, k, false, Gunnery.LobReachOf(u.Kit)) == Gunnery.Distance.Fits)
+                {
+                    all.Add(new Order(OrderKind.SmokeShot, c));
+                    break;
+                }
+            }
+        }
         if (!u.Class.Turreted)
             all.Add(new Order(OrderKind.Ambush, Side: u.Heading));
         else if (u.Class.WatchesSector)
@@ -305,13 +400,97 @@ public static class AiMoves
         return all;
     }
 
-    /// <summary>The bonus acts worth trying: the fire put out, a ram at each
-    /// enemy beside, the repair kit at each own unit beside out of the fight.</summary>
+    /// <summary>
+    /// The shot along an axis whose first hull is one of the unit's own able
+    /// to fight, a side to it that holds: the round glances off it on to
+    /// what lies past (units.md, «Рикошет»; the playtest PT-4). The rules let
+    /// the round go at any hex of the axis; the bench too. Never at an own
+    /// hull out of the fight (meta.md).
+    /// </summary>
+    private static void Glances(BattleState s, BattleUnit u, List<Order> all)
+    {
+        if (u.Class.Lobs)
+            return;
+        foreach (int h in HexField.EdgeHeadings)
+        {
+            if (!u.Class.Turreted && h != u.Heading)
+                continue;
+            Vector2I c = u.Cell;
+            for (int k = 1; k < 32; k++)
+            {
+                c = HexField.Step(c, h);
+                if (!s.Board.InBounds(c))
+                    break;
+                if (s.At(c) is not { } first)
+                    continue;
+                if (first.Side == u.Side && first.Fate == UnitFate.Alive
+                    && Gunnery.MayTarget(false, k, true) == Gunnery.Distance.Fits
+                    && Gunnery.Ricochets(Battle.PlateOf(h, first.Heading, false))
+                    && Gunnery.Penetration(u.Class.Might, first.Class, Gunnery.Plate.Side) == 0
+                    && LaneOpen(s, u, c) && Takes(s, u, h, c))
+                    all.Add(new Order(OrderKind.Fire, c));
+                break;
+            }
+        }
+    }
+
+    /// <summary>The round along <paramref name="heading"/> harms an enemy
+    /// (<see cref="Battle.Probe"/>): a glance worth giving, not one that only
+    /// puts the stalemate's clock back.</summary>
+    private static bool Takes(BattleState s, BattleUnit u, int heading, Vector2I aim)
+    {
+        var marks = new int[s.Units.Count];
+        Battle.Probe(s, u, u.Cell, heading, aim, marks);
+        for (int i = 0; i < marks.Length; i++)
+            if (marks[i] != Battle.ProbeNone && s.Units[i].Side != u.Side)
+                return true;
+        return false;
+    }
+
+    /// <summary>An enemy unit is watching an axis.</summary>
+    private static bool EnemyWatching(BattleState s, Camp side)
+    {
+        foreach (BattleUnit o in s.Units)
+            if (o.Side != side && o.Ambushing && o.Fate == UnitFate.Alive)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// The bonus acts worth trying: the fire put out; a ram at each enemy
+    /// beside; the repair kit at each own unit beside out of the fight; the
+    /// smoke grenade and the mine layer on the hex toward the nearest enemy;
+    /// the winch at each hull two out; the double turn either way; the ram of
+    /// the wall ahead.
+    /// </summary>
     private static List<Order> Bonuses(BattleState s, BattleUnit u)
     {
         var acts = new List<Order>();
         if (u.Burning)
             acts.Add(new Order(OrderKind.Douse));
+        int to = Toward(s, u, u.Cell);
+        if (to >= 0)
+        {
+            Vector2I near = HexField.Step(u.Cell, to);
+            if ((u.Kit & Kit.Smoke) != 0)
+                acts.Add(new Order(OrderKind.Smoke, near));
+            if ((u.Kit & Kit.MineLayer) != 0)
+                acts.Add(new Order(OrderKind.Mine, near));
+        }
+        if ((u.Kit & Kit.Winch) != 0)
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I two = HexField.Step(HexField.Step(u.Cell, h), h);
+                if (s.At(two) is not null)
+                    acts.Add(new Order(OrderKind.Winch, two));
+            }
+        if ((u.Kit & Kit.DoubleTurn) != 0)
+        {
+            acts.Add(new Order(OrderKind.Pivot, Side: (u.Heading + 60) % 360));
+            acts.Add(new Order(OrderKind.Pivot, Side: (u.Heading + 300) % 360));
+        }
+        if (s.Board.Walled(u.Cell, u.Heading))
+            acts.Add(new Order(OrderKind.RamWall, Side: u.Heading));
         foreach (int h in HexField.EdgeHeadings)
         {
             Vector2I c = HexField.Step(u.Cell, h);

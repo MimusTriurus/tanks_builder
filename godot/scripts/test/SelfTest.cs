@@ -22584,6 +22584,9 @@ public static partial class SelfTest
         // The same boards as plain arrays, against the bench's (SelfTest.Battle).
         BattleBoardTwins(Check);
         BattleCore(Check);
+        // the AI's tactical problems (AiTasks, docs/ai-plan.md, «Проверка»)
+        Theme("ai");
+        AiTasks.Run(Check);
 
         Theme("the authored boards");
         foreach (string name in BoardMap.Names)

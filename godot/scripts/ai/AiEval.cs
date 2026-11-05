@@ -25,10 +25,17 @@ public static class AiEval
 
     /// <summary>A draw, for the side asking: it would rather fight on.</summary>
     private const double Drawn = -4.0;
+    /// <summary>Rounds with nobody harmed after which a draw costs nothing more.</summary>
+    private const int Stale = 8;
     /// <summary>A quiet round on the stalemate's clock.</summary>
     private const double Quiet = 0.4;
     /// <summary>A step short of (or past) where a unit wants to be from the nearest enemy.</summary>
     private const double Approach = 0.2;
+    /// <summary>Two own active hulls side by side.</summary>
+    private const double Huddle = 0.15;
+    /// <summary>The control point: the points left (scaled up as they run
+    /// out), holding it, a step of the nearest unit toward it.</summary>
+    private const double PointLeft = 1.0, Hold = 1.5, ToPoint = 0.15;
     /// <summary>A quiet round's extra weight on a point of material lead.</summary>
     private const double Lead = 0.15;
     /// <summary>The enemy's best activation, and the rest of its units' best:
@@ -68,14 +75,20 @@ public static class AiEval
         if (s.Won is Camp w)
             return w == me ? Decided : -Decided;
         // a draw: the AI fights to the end (meta.md, «ИИ противника и мета») -
-        // worse than level, better only when well behind
+        // worse than level, better only when well behind; but once nobody has
+        // been harmed for long, the match is going nowhere and the draw costs
+        // what is on the board, no more - else the AI would keep a dead match
+        // alive with rounds that glance off a tank (each puts the
+        // stalemate's clock back, match.md)
         if (s.Drawn)
-            return Drawn;
+            return s.HarmlessRounds >= Stale ? Material(s, me) : Drawn;
         double score = Material(s, me);
-        // the stalemate's clock (match.md, «Пат — ничья»): quiet rounds weigh
-        // on the side asking, so it goes and shoots at a tank - the more, the
+        // the stalemate's clock, read as rounds with nobody harmed - a round
+        // that glances off a tank does not wind it back: quiet rounds weigh on
+        // the side asking, so it goes and takes something - the more, the
         // further ahead it is (ai-plan.md, «Пат»: the leader has a win to lose)
-        score -= s.QuietRounds * (Quiet + Lead * Math.Max(0.0, score));
+        int quiet = s.HarmlessRounds;
+        score -= quiet * (Quiet + Lead * Math.Max(0.0, score));
         foreach (BattleUnit u in s.Units)
         {
             if (u.Fate != UnitFate.Alive)
@@ -88,12 +101,52 @@ public static class AiEval
                 int want = u.Class.Lobs ? 4 : u.Class.Turreted ? 2 : 3;
                 // the pull grows with the stalemate's clock: a side that sits
                 // still the whole match is drawn
-                score -= sign * Approach * (1.0 + 0.5 * s.QuietRounds) * Math.Abs(near - want);
+                score -= sign * Approach * (1.0 + 0.5 * Math.Min(quiet, 4)) * Math.Abs(near - want);
             }
-            // the control point: standing on it
-            if (s.Point is { } point && Array.IndexOf(point, u.Cell) >= 0)
-                score += sign * 0.4;
+            // the formation: an own hull beside is a chain waiting for a spark
+            // (states.md, «Уничтожен»), each pair once
+            foreach (BattleUnit o in s.Units)
+                if (o.Id > u.Id && o.Side == u.Side && o.Fate == UnitFate.Alive && HexField.Distance(u.Cell, o.Cell) == 1)
+                    score -= sign * Huddle;
         }
+        if (s.Point is { } point && point.Length > 0)
+            score += PointScore(s, me, point);
+        return score;
+    }
+
+    /// <summary>
+    /// The control point (match.md, «Удержание точки»): the points left on
+    /// either side, the more the fewer are left; holding it - the side that
+    /// does not loses a point a round; the nearest active unit of each side
+    /// drawn to it.
+    /// </summary>
+    private static double PointScore(BattleState s, Camp me, Vector2I[] point)
+    {
+        Camp enemy = Across(me);
+        int mine = s.Score[(int)me], theirs = s.Score[(int)enemy];
+        double score = PointLeft * (1.0 / Math.Max(1, theirs) - 1.0 / Math.Max(1, mine)) * 4.0;
+        Camp? held = Battle.HeldBy(s);
+        if (held == me)
+            score += Hold;
+        else if (held == enemy)
+            score -= Hold;
+        int nearMe = int.MaxValue, nearThem = int.MaxValue;
+        foreach (BattleUnit u in s.Units)
+        {
+            if (u.Fate != UnitFate.Alive)
+                continue;
+            int d = int.MaxValue;
+            foreach (Vector2I c in point)
+                d = Math.Min(d, HexField.Distance(u.Cell, c));
+            if (u.Side == me)
+                nearMe = Math.Min(nearMe, d);
+            else
+                nearThem = Math.Min(nearThem, d);
+        }
+        if (nearMe < int.MaxValue)
+            score -= ToPoint * nearMe;
+        if (nearThem < int.MaxValue)
+            score += ToPoint * nearThem;
         return score;
     }
 
@@ -108,7 +161,7 @@ public static class AiEval
         if (s.Over)
             return score;
         (double worst, double others) = threats.Of(s, Across(me));
-        double fear = Math.Max(0.3, 1.0 - 0.25 * s.QuietRounds);
+        double fear = Math.Max(0.3, 1.0 - 0.25 * s.HarmlessRounds);
         score -= fear * (Worst * worst + Others * others);
         return score + Initiative * threats.Of(s, me).Worst;
     }

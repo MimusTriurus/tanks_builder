@@ -277,6 +277,12 @@ public sealed partial class Tank3DBench : Node3D
             GetTree().Quit(BattleRun.Main(OS.GetCmdlineUserArgs()));
             return;
         }
+        // --ai-tasks: the AI's tactical problems, nothing of the scene built (AiTasks)
+        if (AiTasks.Asked(OS.GetCmdlineUserArgs()))
+        {
+            GetTree().Quit(AiTasks.Main(OS.GetCmdlineUserArgs()));
+            return;
+        }
         // --map-fair: is a duel map fair - a reading on the core, no scene (MapFair)
         if (MapFair.Asked(OS.GetCmdlineUserArgs()))
         {

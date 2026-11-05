@@ -29,7 +29,12 @@ public sealed partial class Tank3DBench
     /// <summary><c>--ai</c>'s sides, null for the match's own rule (the quick
     /// battle's other side, nobody elsewhere).</summary>
     private string? _aiSides;
-    private AiLevel _aiLevel = AiLevel.Fighter;
+    /// <summary><c>--ai SIDE:LEVEL</c>'s level, null when not said.</summary>
+    private AiLevel? _aiLevelSaid;
+
+    /// <summary>The level the AI plays at: the flag's, else the quick
+    /// battle's choice (<see cref="QuickSetup.Level"/>), else the fighter.</summary>
+    private AiLevel _aiLevel => _aiLevelSaid ?? _quick?.Level ?? AiLevel.Fighter;
     private Random? _aiRng;
     private int _aiSeed = -1;
     private Task<AiChoice>? _aiThink;
@@ -57,7 +62,7 @@ public sealed partial class Tank3DBench
             if (parts.Length > 1)
             {
                 if (AiBrain.LevelOf(parts[1]) is AiLevel level)
-                    _aiLevel = level;
+                    _aiLevelSaid = level;
                 else
                     GD.PrintErr($"tank3d: --ai: no level {parts[1]} - recruit, fighter, veteran");
             }

@@ -58,6 +58,9 @@ public sealed partial class Tank3DBench
         public int Budget = QuickSquad.BudgetDefault, AiBudget = QuickSquad.BudgetDefault;
         /// <summary>The AI's doctrine, an index into <see cref="QuickSquad.Doctrines"/>; null, random.</summary>
         public int? Doctrine;
+        /// <summary>How far the AI sees (docs/ai-plan.md, «Сложность»): the
+        /// difficulty's second axis, the budget the first.</summary>
+        public AiLevel Level = AiLevel.Fighter;
         public QuickSquad.Slot[] Squad = QuickSquad.Empty();
         /// <summary>The ready squad the squad was last taken from; null, none since it was cleared.</summary>
         public QuickSquad.Company? Preset;
@@ -602,6 +605,21 @@ public sealed partial class Tank3DBench
             ? $"{QuickSquad.Doctrines[d].Play}: {string.Join(", ", QuickSquad.Doctrines[d].Pool.Select(c => QuickSquad.ClassOf(c).Short))}."
             : L.T("quick.doctrine_hidden"), wrap: true));
         grid.AddChild(QParam(L.T("quick.ai_doctrine"), doctrine));
+
+        // the AI's level: how far it sees (Tank3DBench.Ai)
+        var level = new VBoxContainer();
+        level.AddThemeConstantOverride("separation", 10);
+        var levels = new HFlowContainer();
+        levels.AddThemeConstantOverride("h_separation", 6);
+        levels.AddThemeConstantOverride("v_separation", 6);
+        foreach (AiLevel l in Enum.GetValues<AiLevel>())
+        {
+            AiLevel at = l;
+            levels.AddChild(QBtn(AiLevelName(l), () => { q.Level = at; QuickShow(); }, pressed: q.Level == l, small: true));
+        }
+        level.AddChild(levels);
+        level.AddChild(QHint(L.T($"quick.ai_level_{q.Level.ToString().ToLowerInvariant()}_hint"), wrap: true));
+        grid.AddChild(QParam(L.T("quick.ai_level"), level));
         return grid;
     }
 
@@ -667,6 +685,7 @@ public sealed partial class Tank3DBench
                      (L.T("quick.map"), q.Map), (L.T("quick.mode"), QuickMode(q.Map)), (L.T("quick.your_side"), QuickSideSaid(q.Player)),
                      (L.T("quick.ai_budget"), q.AiBudget.ToString()),
                      (L.T("quick.ai_doctrine"), q.Doctrine is int d ? QuickSquad.Doctrines[d].Name : L.T("quick.random")),
+                     (L.T("quick.ai_level"), AiLevelName(q.Level)),
                  })
             facts.AddChild(QChip($"{label}: {value}", () => { _qModal = QuickModal.Params; QuickShow(); }));
         who.AddChild(facts);
@@ -1612,6 +1631,9 @@ public sealed partial class Tank3DBench
 
     // --- the bits ------------------------------------------------------------------
 
+    /// <summary>The AI's level as the player reads it.</summary>
+    private static string AiLevelName(AiLevel level) => L.T($"quick.ai_level_{level.ToString().ToLowerInvariant()}");
+
     private static Label QEyebrow(string text) => Ui.Text(text.ToUpperInvariant(), 11, Ui.Muted, bold: true);
 
     private static Label QHint(string text, bool wrap = false) => Ui.Text(text, 13, Ui.Muted, wrap: wrap);
@@ -1817,6 +1839,7 @@ public sealed partial class Tank3DBench
                 case "budget" when p.Length > 1: q.Budget = (int)F(p[1], q.Budget); QuickSquad.Trim(q.Squad, q.Budget); break;
                 case "ai-budget" when p.Length > 1: q.AiBudget = (int)F(p[1], q.AiBudget); break;
                 case "doctrine" when p.Length > 1: q.Doctrine = p[1] == "random" ? null : (int)F(p[1], 1) - 1; break;
+                case "ai-level" when p.Length > 1 && AiBrain.LevelOf(p[1]) is AiLevel lv: q.Level = lv; break;
                 case "company" when p.Length > 1:
                     q.Preset = QuickSquad.Companies[Math.Clamp((int)F(p[1], 1) - 1, 0, 3)];
                     q.Squad = QuickSquad.OfCompany(q.Preset);

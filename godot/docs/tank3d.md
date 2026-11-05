@@ -3241,6 +3241,9 @@ back`, и танк стоит на плите.
     («ИИ думает») → приказы через `Execute` по одному. На ходу ИИ у игрока только
     камера. `--ai green|brown|both|off[:recruit|fighter|veteran]` и `--ai-seed N`
     работают на любой партии `Match3D`, не только в быстром бою.
+    **Уровень ИИ** (2026-11-05) — в «Параметрах боя против ИИ» рядом с бюджетом
+    и доктриной (`QuickSetup.Level`, чип над отрядом, `--quick-do ai-level:…`);
+    флаг `--ai SIDE:LEVEL` главнее. Тактические задачи ИИ — `-- --ai-tasks`.
   - `--quick-do "doctrine:1;build;company:2;level:1:ram:3;shot:PATH;go"`
     ведёт экраны для снимка: `lobby`, `build`, `map:`, `budget:`,
     `ai-budget:`, `doctrine:N|random`, `company:N`, `preset:N` (щелчок по роте ангара, с вопросом только после правок), `name:TEXT` (имя отряда), `class:SLOT:TAG`, `params`, `mapview`, `close`, `swap`, `tip:SLOT:BRANCH:L` (подсказка узла, как от указателя), `focus:SLOT:BRANCH:L` (фокус клавиатуры; `L` 0 — заголовок ветки), `try-go` (кнопка «К РАССТАНОВКЕ»), `clear` (вопрос «Очистить отряд?»),

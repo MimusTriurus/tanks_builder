@@ -127,6 +127,11 @@ public sealed class BattleState
     /// <summary>The round of the last shot at a tank, nought for none yet
     /// (match.md, «Пат — ничья»).</summary>
     public int LastStrike;
+    /// <summary>The round a unit was last knocked out, drowned, destroyed or
+    /// set alight, nought for none yet - not a rule: the AI's clock of a
+    /// match going nowhere (docs/ai-plan.md, И2). A round that only glances
+    /// off a tank puts the stalemate's clock back, not this one.</summary>
+    public int LastHarm;
     /// <summary>The control point's hexes (match.md, «Удержание точки»); null in
     /// a match played to the last tank.</summary>
     public Vector2I[]? Point;
@@ -152,6 +157,10 @@ public sealed class BattleState
     /// <summary>Whole rounds played since the last shot at a tank, or the point
     /// changing hands - the stalemate's count, the one under way not yet in it.</summary>
     public int QuietRounds => Math.Max(0, Round - 1 - Math.Max(LastStrike, LastShift));
+
+    /// <summary>Whole rounds since a unit was last harmed or the point changed
+    /// hands (<see cref="LastHarm"/>) - the AI's, not the stalemate's.</summary>
+    public int HarmlessRounds => Math.Max(0, Round - 1 - Math.Max(LastHarm, LastShift));
 
     public BattleUnit? Unit(int id)
     {
