@@ -1599,15 +1599,15 @@ public static partial class Battle
                 WallDown(s, cell, h);
     }
 
-    /// <summary>A side with every unit destroyed has lost (match.md,
-    /// «Уничтожение») - in a match on the point too; with a point, a side whose
-    /// points are spent has lost, and both spent on one tick is a draw (the
-    /// GDD does not say; docs/battle-core-plan.md, Д9).</summary>
+    /// <summary>A side with no unit able to fight has lost (GameModes.md,
+    /// «Общее для всех режимов», 2026-11-02) - in a match on the point too;
+    /// with a point, a side whose points are spent has lost, and both spent on
+    /// one tick is a draw (the GDD does not say; docs/battle-core-plan.md, Д9).</summary>
     private static void Over(BattleState s)
     {
         if (s.Over)
             return;
-        Destroyed(s);
+        Beaten(s);
         if (s.Over || s.Point is null)
             return;
         bool green = s.Score[(int)Camp.Green] <= 0, brown = s.Score[(int)Camp.Brown] <= 0;
@@ -1623,23 +1623,41 @@ public static partial class Battle
         }
     }
 
-    private static void Destroyed(BattleState s)
+    /// <summary>
+    /// A side with no active unit - every one knocked out, drowned or
+    /// destroyed - has lost (GameModes.md, «Сторона без активных машин
+    /// проигрывает в любом режиме», 2026-11-02; until then it took every unit
+    /// destroyed). A unit alight is still active: its activation may put the
+    /// fire out. Both sides at once - one blast taking the last of each - is a
+    /// draw: the GDD does not say (undefined.md).
+    /// </summary>
+    private static void Beaten(BattleState s)
     {
-        foreach (Camp side in new[] { Camp.Green, Camp.Brown })
+        bool green = Fights(s, Camp.Green), brown = Fights(s, Camp.Brown);
+        if (green && brown)
+            return;
+        if (!green && !brown)
         {
-            bool any = false, alive = false;
-            foreach (BattleUnit u in s.Units)
-                if (u.Side == side)
-                {
-                    any = true;
-                    alive |= u.Standing;
-                }
-            if (any && !alive)
-            {
-                s.Won = side == Camp.Green ? Camp.Brown : Camp.Green;
-                s.Events.Add(new BattleEvent(BattleEventKind.Won, -1, default, (int)s.Won.Value));
-                return;
-            }
+            s.Drawn = true;
+            s.Events.Add(new BattleEvent(BattleEventKind.Drawn, -1, default, 0, "nobody able to fight"));
+            return;
         }
+        s.Won = green ? Camp.Green : Camp.Brown;
+        s.Events.Add(new BattleEvent(BattleEventKind.Won, -1, default, (int)s.Won.Value));
+    }
+
+    /// <summary><paramref name="side"/> has a unit able to fight - or no units
+    /// at all, a board set up without it (the self test's).</summary>
+    private static bool Fights(BattleState s, Camp side)
+    {
+        bool any = false;
+        foreach (BattleUnit u in s.Units)
+            if (u.Side == side)
+            {
+                if (u.Fate == UnitFate.Alive)
+                    return true;
+                any = true;
+            }
+        return !any;
     }
 }

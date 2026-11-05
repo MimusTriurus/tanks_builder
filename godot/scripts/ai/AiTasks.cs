@@ -139,6 +139,11 @@ public static class AiTasks
             Put(s, 1, "LTR", Camp.Brown, 4, 4, 270, fate: UnitFate.Knocked);
             Put(s, 2, "HTR", Camp.Brown, 3, 3, 270);
             Put(s, 3, "MTR", Camp.Brown, 5, 3, 270);
+            // a second green unit, pinned out of it in the corner: with the
+            // medium alone, the heavy's reply knocking it out would lose the
+            // match (GameModes.md, a side with none able to fight)
+            Put(s, 4, "LTR", Camp.Green, 8, 9, 30);
+            s.Unit(4)!.Pinned = true;
             return s;
         }, (_, a) => a.Unit(1)!.Fate == UnitFate.Destroyed);
 

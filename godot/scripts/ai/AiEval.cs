@@ -174,9 +174,8 @@ public static class AiEval
     public static Camp Across(Camp c) => c == Camp.Green ? Camp.Brown : Camp.Green;
 
     /// <summary>Steps from <paramref name="u"/> to the nearest enemy able to
-    /// fight - with none left, the nearest still standing, out of the fight:
-    /// the match is won only once every enemy is destroyed (match.md) - or
-    /// <see cref="int.MaxValue"/> for none.</summary>
+    /// fight - with none left the match is over (GameModes.md), the nearest
+    /// still standing is a fallback only - or <see cref="int.MaxValue"/> for none.</summary>
     public static int Nearest(BattleState s, BattleUnit u) =>
         NearestEnemy(s, u, u.Cell) is { } e ? HexField.Distance(u.Cell, e.Cell) : int.MaxValue;
 

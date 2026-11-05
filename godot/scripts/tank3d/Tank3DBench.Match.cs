@@ -615,20 +615,31 @@ public sealed partial class Tank3DBench
                .OrderBy(p => Array.IndexOf(Roster, p.Tag))
                .FirstOrDefault();
 
-    /// <summary>A side with every unit destroyed has lost.</summary>
+    /// <summary>A side with no unit able to fight - every one knocked out,
+    /// drowned or destroyed - has lost (GameModes.md, 2026-11-02; the core's
+    /// <c>Battle.Beaten</c>); both at once is a draw.</summary>
     private bool MatchCheckEnd()
     {
         if (MatchOver)
             return true;
         var all = Units().ToList();
-        foreach (Side s in new[] { Side.Green, Side.Brown })
+        bool green = all.Any(u => u.Side == Side.Green && u.Fate == Fate.Alive);
+        bool brown = all.Any(u => u.Side == Side.Brown && u.Fate == Fate.Alive);
+        if (!green && !brown)
         {
-            if (!all.Where(u => u.Side == s).All(u => u.Fate == Fate.Destroyed))
-                continue;
+            _mt.Drawn = true;
+            _passIn = null;
+            Banner(L.T("match.draw_nobody"), Colors.White, stay: true);
+            Log.Print($"tank3d: match: neither side has a unit able to fight - drawn in round {_mt.Round}");
+            return true;
+        }
+        if (!green || !brown)
+        {
+            Side s = green ? Side.Brown : Side.Green;
             _mt.Won = Across(s);
             _passIn = null;
             Banner(L.T("match.victory_round", SideName(_mt.Won.Value), _mt.Round), SideInk(_mt.Won.Value), stay: true);
-            Log.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_mt.Won.Value)} win in round {_mt.Round}");
+            Log.Print($"tank3d: match: {SideName(s)} have no unit able to fight - {SideName(_mt.Won.Value)} win in round {_mt.Round}");
             return true;
         }
         // out of points on the control point (Tank3DBench.Point)
