@@ -159,6 +159,8 @@ public static partial class Battle
             return why;
         if ((u.Kit & Kit.FireOnMove) == 0)
             return "no fire on the move";
+        if (Held(s))
+            return "the first turn holds fire";
         if (s.Fired)
             return "already fired";
         if (s.Drove)
@@ -484,6 +486,8 @@ public static partial class Battle
             return why;
         if (s.Fired)
             return "already fired";
+        if (Held(s))
+            return "the first turn holds fire";
         if (incendiary && (u.Kit & Kit.Incendiary) == 0)
             return "no incendiary rounds";
         if (smoke && (u.Kit & Kit.SmokeShell) == 0)
@@ -739,6 +743,9 @@ public static partial class Battle
             return Ramming.Because(push.Why);
         }
         s.Bonus = true;
+        // a ram of a tank puts the stalemate's clock back, as a hit does
+        // (GameModes.md, «Пат — ничья», decided 2026-11-05)
+        s.LastStrike = s.Round;
         if (!(u.Class.FreeOrder && !s.Drove))
             s.Drove = true;
         // an order to the rammer, a ram to the rammed: both ambushes off
@@ -1341,15 +1348,42 @@ public static partial class Battle
         s.Active = null;
         s.Drove = s.Fired = s.Bonus = s.Overdrive = false;
         s.OnWay = null;
-        // the round over once player 2 has moved (match.md, «Ход и раунд»)
-        if (s.Turn == s.First)
+        // the round over once the side after its lead has moved (match.md,
+        // «Ход и раунд»), and the next round's lead to move
+        if (ending != Leader(s))
         {
             FieldTick(s);
             s.Round++;
+            s.Turn = Leader(s);
         }
         Over(s);
         Stalemate(s);
     }
+
+    /// <summary>The side that moves first in this round: player 1 - but in
+    /// every even round player 2 with the snake (<see cref="Handicap.Snake"/>).</summary>
+    public static Camp Leader(BattleState s) =>
+        s.Handicap == Handicap.Snake && s.Round % 2 == 0 ? (s.First == Camp.Green ? Camp.Brown : Camp.Green) : s.First;
+
+    /// <summary>The ambush head start (<see cref="Handicap.Ambush"/>): player
+    /// 2's guns - the mortar aside - watch along their hulls from the start,
+    /// a round each, two with the stabilizer, as <see cref="Ambush"/> sets it.</summary>
+    public static void AmbushAtStart(BattleState s)
+    {
+        Camp second = s.First == Camp.Green ? Camp.Brown : Camp.Green;
+        foreach (BattleUnit u in s.Units)
+        {
+            if (u.Side != second || u.Fate != UnitFate.Alive || u.Class.Lobs)
+                continue;
+            u.Watch = u.Heading;
+            u.Watch2 = u.Watch3 = -1;
+            u.WatchShots = (u.Kit & Kit.AmbushStabilizer) != 0 ? 2 : 1;
+            s.Events.Add(new BattleEvent(BattleEventKind.AmbushSet, u.Id, u.Cell, u.Heading, "at the start"));
+        }
+    }
+
+    /// <summary>The hold head start (<see cref="Handicap.Hold"/>): no round in the match's first turn.</summary>
+    private static bool Held(BattleState s) => s.Handicap == Handicap.Hold && s.TurnNo == 0;
 
     /// <summary>Пат (match.md, «Пат — ничья»): <see cref="MatchRules.QuietRoundsDraw"/>
     /// whole rounds without a shot at a tank - a round into the ground, a wall

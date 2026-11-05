@@ -9,6 +9,15 @@ namespace TankSpriteTest;
 /// name is <c>Godot.Side</c>.</summary>
 public enum Camp { Green, Brown }
 
+/// <summary>A head start for player 2 under trial (docs/ai-plan.md, вопрос 7):
+/// not a rule yet, only <c>--battle-run --handicap</c> sets it.
+/// <list type="bullet">
+/// <item><b>Ambush</b> - player 2's guns start the match in ambush along the hull;</item>
+/// <item><b>Hold</b> - the match's first turn fires no round;</item>
+/// <item><b>Snake</b> - the round's lead swaps each round: 1-2, 2-1, 1-2…</item>
+/// </list></summary>
+public enum Handicap { None, Ambush, Hold, Snake }
+
 /// <summary>A unit's state by the rules (GDD states.md). <see cref="Knocked"/>
 /// and <see cref="Drowned"/> are both «выведен из строя»: they stand, block and
 /// go up at the next round; the drowned cannot be put right (upgrades.md).</summary>
@@ -110,6 +119,8 @@ public sealed class BattleState
     /// that moves first in every round - a toss in the quick battle. The round and the
     /// field's tick end after the other side's turn.</summary>
     public Camp First = Camp.Green;
+    /// <summary>Player 2's head start under trial; <see cref="Handicap.None"/> is the GDD.</summary>
+    public Handicap Handicap;
     public int Round = 1;
     /// <summary>Turns played, the first nought: a fire's clock.</summary>
     public int TurnNo;
@@ -124,8 +135,9 @@ public sealed class BattleState
     /// ходу»): the move fires at <c>Aim</c> as the hull comes on to
     /// <c>At</c> (<see cref="Battle.OnTheWay"/>).</summary>
     public (Vector2I At, Vector2I Aim)? OnWay;
-    /// <summary>The round of the last shot at a tank, nought for none yet
-    /// (match.md, «Пат — ничья»).</summary>
+    /// <summary>The round of the last hit on a tank or ram of one, nought for
+    /// none yet - the first is the contact the stalemate's clock waits for
+    /// (GameModes.md, «Пат — ничья»).</summary>
     public int LastStrike;
     /// <summary>The round a unit was last knocked out, drowned, destroyed or
     /// set alight, nought for none yet - not a rule: the AI's clock of a
@@ -154,9 +166,12 @@ public sealed class BattleState
 
     public bool Over => Won is not null || Drawn;
 
-    /// <summary>Whole rounds played since the last shot at a tank, or the point
-    /// changing hands - the stalemate's count, the one under way not yet in it.</summary>
-    public int QuietRounds => Math.Max(0, Round - 1 - Math.Max(LastStrike, LastShift));
+    /// <summary>Whole rounds played since the last hit on a tank, a ram of
+    /// one or the point changing hands - the stalemate's count, the one under
+    /// way not yet in it; nought before the first of them, the contact
+    /// (GameModes.md, «Пат — ничья», decided 2026-11-05).</summary>
+    public int QuietRounds => LastStrike == 0 && LastShift == 0
+        ? 0 : Math.Max(0, Round - 1 - Math.Max(LastStrike, LastShift));
 
     /// <summary>Whole rounds since a unit was last harmed or the point changed
     /// hands (<see cref="LastHarm"/>) - the AI's, not the stalemate's.</summary>

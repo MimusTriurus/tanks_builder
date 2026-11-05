@@ -47,6 +47,8 @@ public static class BattleRun
         string? ai = null;
         int aiSeed = 1, aiTurns = 300;
         bool probeCheck = false;
+        Handicap handicap = Handicap.None;
+        bool swap = false, rotCheck = false;
         for (int i = 0; i < args.Length; i++)
         {
             bool more = i + 1 < args.Length;
@@ -62,11 +64,14 @@ public static class BattleRun
             else if (a == "--ai-seed" && more) aiSeed = int.TryParse(args[++i], out int seed) ? seed : 1;
             else if (a == "--ai-turns" && more) aiTurns = int.TryParse(args[++i], out int turns) ? turns : 300;
             else if (a == "--probe-check") probeCheck = true;
+            else if (a == "--swap-sides") swap = true;
+            else if (a == "--rot-check") rotCheck = true;
+            else if (a == "--handicap" && more && Enum.TryParse(args[++i], true, out Handicap h)) handicap = h;
         }
         try
         {
             if (ai is not null)
-                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck);
+                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck, handicap, swap, rotCheck);
             return Run(mapName, scriptPath, commands, outDir, first, measure, slopes);
         }
         catch (Exception e)
@@ -146,7 +151,8 @@ public static class BattleRun
     /// code 2 when an order of the AI's own was refused.
     /// </summary>
     private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes,
-                             bool probeCheck = false)
+                             bool probeCheck = false, Handicap handicap = Handicap.None,
+                             bool swap = false, bool rotCheck = false)
     {
         if (mapName is null)
             return Refuse("--battle-run wants a map");
@@ -170,13 +176,30 @@ public static class BattleRun
 
         var place = new Placing(Played(map, slopes), first);
         BattleState s = Start(map, first, slopes);
-        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units");
+        s.Handicap = handicap;
+        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}");
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();
         // the placement as the homes stand
         if (place.Side is not null)
             Play(s, new List<Order> { new(OrderKind.Ready), new(OrderKind.Ready) }, place, said);
+        // --swap-sides: the colours change places, the units stay - a side's
+        // edge from the map stays with the place, one from the code with the colour
+        if (swap)
+        {
+            foreach (BattleUnit u in s.Units)
+                u.Side = u.Side == Camp.Green ? Camp.Brown : Camp.Green;
+            s.Active = Battle.FirstReady(s, s.Turn)?.Id;
+            Log.Print("battle-run: sides swapped - green on brown's places, brown on green's");
+        }
+        if (handicap == Handicap.Ambush)
+        {
+            Battle.AmbushAtStart(s);
+            foreach (BattleUnit u in s.Units)
+                if (u.Ambushing)
+                    Log.Print($"battle-run: at the start {u.Say(s.Shift)} watching {u.Watch}");
+        }
 
         var rng = new Random(seed);
         int refused = 0, turns = 0, plays = 0;
@@ -192,6 +215,8 @@ public static class BattleRun
                 probesWrong += wrong;
             }
             Camp side = s.Turn;
+            if (rotCheck)
+                RotCheck(s, side, said, map);
             List<Order> orders;
             if (Plays(side))
             {
@@ -227,6 +252,75 @@ public static class BattleRun
         if (probeCheck)
             Log.Print($"battle-run: probe-check - {probes} shots probed, {probesWrong} not as fired");
         return refused > 0 || probesWrong > 0 ? 2 : 0;
+    }
+
+    /// <summary>The cell half a turn about the board's middle, odd columns
+    /// shifted down (<c>MapFair.Twin</c>).</summary>
+    private static Vector2I Twin(BoardMap map, Vector2I shift, Vector2I board)
+    {
+        Vector2I cell = board - shift;
+        int y2 = 2 * cell.Y + (cell.X & 1);
+        int q = map.Columns - 1 - cell.X;
+        int y = ((map.Columns - 1) & 1) == 1 ? 2 * map.Rows - 1 - y2 : 2 * map.Rows - 2 - y2;
+        return new Vector2I(q, (y - (q & 1)) / 2) + shift;
+    }
+
+    /// <summary>
+    /// <c>--rot-check</c>, on a map with its half-turn twin (<c>--map-fair</c>):
+    /// the match as it stands and turned half round must read alike to the
+    /// AI - the score, the threats, the plays, the best play's score. A
+    /// difference is the code taking one way of the board for another.
+    /// </summary>
+    private static void RotCheck(BattleState s, Camp side, List<string> said, BoardMap map)
+    {
+        BattleState r = AiMoves.Copy(s);
+        Vector2I Twin(Vector2I c) => BattleRun.Twin(map, s.Shift, c);
+        int Turned(int h) => h < 0 ? h : (h + 180) % 360;
+        foreach (BattleUnit u in r.Units)
+        {
+            u.Cell = Twin(u.Cell);
+            u.Heading = Turned(u.Heading);
+            u.Watch = Turned(u.Watch);
+            u.Watch2 = Turned(u.Watch2);
+            u.Watch3 = Turned(u.Watch3);
+        }
+        r.Fires = r.Fires.ToDictionary(kv => Twin(kv.Key), kv => kv.Value);
+        r.Smoke = r.Smoke.ToDictionary(kv => Twin(kv.Key), kv => kv.Value);
+        if (r.Point is { } pt)
+            r.Point = pt.Select(c => Twin(c)).ToArray();
+        var notes = new List<string>();
+        void Same(string what, double a, double b)
+        {
+            if (Math.Abs(a - b) > 1e-6)
+                notes.Add(FormattableString.Invariant($"{what} {a:F3} turned {b:F3}"));
+        }
+        Same("quick", AiEval.Quick(s, side), AiEval.Quick(r, side));
+        foreach (Camp c in new[] { Camp.Green, Camp.Brown })
+        {
+            (double w1, double o1) = new AiThreat(true).Of(s, c);
+            (double w2, double o2) = new AiThreat(true).Of(r, c);
+            Same($"threat {c} worst", w1, w2);
+            Same($"threat {c} others", o1, o2);
+        }
+        var plays1 = new List<double>();
+        var plays2 = new List<double>();
+        AiMoves.Each(s, (p, after) => plays1.Add(AiEval.Quick(after, side)));
+        AiMoves.Each(r, (p, after) => plays2.Add(AiEval.Quick(after, side)));
+        plays1.Sort();
+        plays2.Sort();
+        Same("plays", plays1.Count, plays2.Count);
+        if (plays1.Count > 0 && plays2.Count > 0)
+            Same("best quick play", plays1[^1], plays2[^1]);
+        AiChoice c1 = AiBrain.Choose(s, AiLevel.Veteran, new Random(1));
+        AiChoice c2 = AiBrain.Choose(r, AiLevel.Veteran, new Random(1));
+        Same("veteran's play", c1.Play.Score, c2.Play.Score);
+        if (notes.Count > 0)
+        {
+            string line = $"battle-run: rot-check round {s.Round} {side}: {string.Join("; ", notes)}"
+                          + $" | {c1.Play.Say(s.Shift)} | turned {c2.Play.Say(r.Shift)}";
+            said.Add(line);
+            Log.Print(line);
+        }
     }
 
     /// <summary>

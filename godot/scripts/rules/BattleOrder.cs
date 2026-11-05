@@ -288,11 +288,13 @@ public static partial class Battle
             if (tries == 1)
                 break;
             s.Events.Add(new BattleEvent(BattleEventKind.TurnEnded, -1, default, s.TurnNo, $"{s.Turn} have nobody able to act"));
-            s.Turn = s.Turn == Camp.Green ? Camp.Brown : Camp.Green;
-            if (s.Turn == s.First)
+            Camp skipped = s.Turn;
+            s.Turn = skipped == Camp.Green ? Camp.Brown : Camp.Green;
+            if (skipped != Leader(s))
             {
                 FieldTick(s);
                 s.Round++;
+                s.Turn = Leader(s);
             }
             Over(s);
             Stalemate(s);

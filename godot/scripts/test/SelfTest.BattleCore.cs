@@ -200,9 +200,11 @@ public static partial class SelfTest
                   $"LT {light ?? "ok"}; MT {medium}; MT turned {late}");
         }
 
-        // Д6, match.md «Пат — ничья»: so many whole rounds without a shot at a
-        // tank and the match is drawn; a round into a wall is no such shot, a
-        // round on a tank - glanced off the front or not - puts the clock back.
+        // Д6, GameModes.md «Пат — ничья»: so many whole rounds without a hit on
+        // a tank and the match is drawn - counted from the first contact
+        // (decided 2026-11-05): before it, passes never draw; a round into a
+        // wall is no contact; a round on a tank - glanced off the front or
+        // not - starts the clock and puts it back.
         {
             int quiet = MatchRules.QuietRoundsDraw;
             BattleState Facing(bool wall)
@@ -213,14 +215,12 @@ public static partial class SelfTest
                 return s;
             }
             BattleState passes = Facing(false);
-            Turns(passes, 2 * quiet - 1);
-            bool early = passes.Drawn;
-            Turns(passes, 1);
+            Turns(passes, 4 * quiet);
             BattleState walled = Facing(true);
             Turns(walled, 2);
             Act(walled, 0, st => Battle.Fire(st, new Vector2I(4, 3)));
             bool wallHit = walled.Unit(1)!.Fate == UnitFate.Alive && walled.LastStrike == 0;
-            Turns(walled, 2 * quiet - 2);
+            Turns(walled, 4 * quiet);
             BattleState struck = Facing(false);
             Turns(struck, 4);
             Act(struck, 0, st => Battle.Fire(st, new Vector2I(4, 5)));
@@ -228,10 +228,12 @@ public static partial class SelfTest
             Turns(struck, 2 * quiet + 1);
             bool held = !struck.Drawn;
             Turns(struck, 1);
-            check($"{quiet} rounds without a shot at a tank draw the match; a wall's shot does not hold it off, a tank's does",
-                  !early && passes.Drawn && passes.Events.Any(e => e.Kind == BattleEventKind.Drawn)
-                  && wallHit && walled.Drawn && strikeRound == 3 && held && struck.Drawn,
-                  $"passes: early {early}, at {passes.Round} {passes.Drawn}; wall: {wallHit} drawn {walled.Drawn}; "
+            check($"{quiet} rounds without a hit on a tank draw the match, from the first contact: passes and a wall's shot "
+                  + "never draw, a tank's hit starts the clock",
+                  !passes.Drawn && passes.QuietRounds == 0
+                  && wallHit && !walled.Drawn && strikeRound == 3 && held && struck.Drawn
+                  && struck.Events.Any(e => e.Kind == BattleEventKind.Drawn),
+                  $"passes: at {passes.Round} drawn {passes.Drawn}; wall: {wallHit} drawn {walled.Drawn}; "
                   + $"struck in round {strikeRound}, held {held}, then {struck.Drawn}: {Said(struck)}");
         }
 

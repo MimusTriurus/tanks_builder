@@ -527,6 +527,8 @@ public sealed partial class Tank3DBench
         Log.Print($"ram: frame {_frame}, {_modelTag} shoves {o.Tag} {MapAt(o.Cell)} -> {MapAt(push.Legs, " -> ")} along {heading}, "
                  + $"keep {keep:F2}, at {Mathf.Abs(_speed):F0} px/s");
         _ramNote = L.T("ram.pushed", _modelTag, o.Tag, MapAt(o.Cell), MapAt(push.Legs[^1]));
+        // a ram of a tank puts the stalemate's clock back, as a hit does
+        TankShot();
         o.Legs.Clear();
         foreach (Vector2I c in push.Legs)
             o.Legs.Add(CellWorld(c));

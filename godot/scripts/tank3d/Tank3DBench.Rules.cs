@@ -135,8 +135,9 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>A round on a tank - the shot's, a ricochet's, a pass's, the
-    /// mortar's bomb - puts the stalemate's clock back (match.md, «Пат —
-    /// ничья»). A mine, a fire, a blast are not shots, and do not.</summary>
+    /// mortar's bomb - or a ram of one puts the stalemate's clock back, the
+    /// first starts it (GameModes.md, «Пат — ничья»). A mine, a fire, a blast
+    /// are not shots, and do not.</summary>
     private void TankShot()
     {
         if (Match)
@@ -154,7 +155,7 @@ public sealed partial class Tank3DBench
             return;
         _mt.Drawn = true;
         _commands.Clear();
-        Banner($"Ничья по пату · раундов без выстрела по танку{(_pointCells is null ? "" : " и смены удержания")}: {_mt.QuietRounds}",
+        Banner($"Ничья по пату · раундов без попадания и тарана{(_pointCells is null ? "" : " и смены удержания")}: {_mt.QuietRounds}",
                Colors.White, stay: true);
         Log.Print($"tank3d: match: {_mt.QuietRounds} rounds without a shot at a tank"
                  + (_pointCells is null ? "" : " or the point changing hands") + $" - drawn in round {_mt.Round}");

@@ -355,7 +355,7 @@
   "match.victory": "Победа: {0}",
   "match.round_tail": " · раунд {0}",
   "match.round": "Раунд {0}",
-  "match.quiet": " (без выстрела по танку {0} из {1})",
+  "match.quiet": " (без попадания и тарана {0} из {1})",
   "match.turn_state": " · ходят {0} · {1}: ход {2}, атака {3}, доп. действие {4}",
   "match.state_move_done": "сделан",
   "match.state_left": "есть",

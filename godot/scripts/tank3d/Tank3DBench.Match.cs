@@ -109,9 +109,11 @@ public sealed partial class Tank3DBench
         public Side? Won;
         public bool Drawn;
 
-        /// <summary>Whole rounds since the last shot at a tank or the point
-        /// changing hands (<see cref="BattleState.QuietRounds"/>).</summary>
-        public int QuietRounds => Mathf.Max(0, Round - 1 - Mathf.Max(LastStrike, LastShift));
+        /// <summary>Whole rounds since the last hit on a tank, a ram of one or
+        /// the point changing hands; nought before the first of them
+        /// (<see cref="BattleState.QuietRounds"/>).</summary>
+        public int QuietRounds => LastStrike == 0 && LastShift == 0
+            ? 0 : Mathf.Max(0, Round - 1 - Mathf.Max(LastStrike, LastShift));
     }
 
     private readonly MatchTurn _mt = new();

@@ -353,7 +353,7 @@
   "match.victory": "Victory: {0}",
   "match.round_tail": " · round {0}",
   "match.round": "Round {0}",
-  "match.quiet": " (no shot at a tank: {0} of {1})",
+  "match.quiet": " (no hit or ram: {0} of {1})",
   "match.turn_state": " · {0} to move · {1}: move {2}, attack {3}, bonus action {4}",
   "match.state_move_done": "done",
   "match.state_left": "ready",
