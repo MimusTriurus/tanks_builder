@@ -494,7 +494,7 @@ public sealed partial class Tank3DBench
         _ambushMode = !_ambushMode;
         _ambushPick = null;
         if (_ambushMode)
-            _smokeMode = _fieryMode = _smokeShotMode = false;
+            _smokeMode = _fieryMode = _smokeShotMode = _onWayMode = false;
         if (_ambushMode)
             _gearMode = Gear.None;
         if (_ambushMode)

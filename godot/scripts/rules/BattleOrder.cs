@@ -4,7 +4,7 @@ using Godot;
 
 namespace TankSpriteTest;
 
-public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot }
+public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot, OnWay }
 
 /// <summary>
 /// An order to the core (docs/battle-core-plan.md, Д10): the bench's command
@@ -12,11 +12,11 @@ public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke,
 /// the same words as <c>--commands</c> - <c>take:ID</c>, <c>go:Q,R[:SIDE]</c>,
 /// <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>smokeshot:Q,R</c>, <c>ram:Q,R</c>,
 /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>,
-/// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>, <c>overdrive</c>,
+/// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>, <c>overdrive</c>, <c>onway:Q,R:AQ,AR</c>,
 /// <c>pass</c>, <c>undo</c>, <c>place:ID:Q,R[:SIDE]</c>, <c>ready</c>. What a
 /// script gives <see cref="BattleRun"/> and, next, what the AI gives.
 /// </summary>
-public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int Side = -1, int Unit = -1, int Side2 = -1)
+public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int Side = -1, int Unit = -1, int Side2 = -1, Vector2I Aim = default)
 {
     public override string ToString() => Kind switch
     {
@@ -24,6 +24,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
         OrderKind.Go => $"go:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
         OrderKind.Turn or OrderKind.RamWall or OrderKind.Pivot => $"{Kind.ToString().ToLowerInvariant()}:{Side}",
         OrderKind.Ambush => $"ambush:{Side}{(Side2 >= 0 ? $":{Side2}" : "")}",
+        OrderKind.OnWay => $"onway:{Cell.X},{Cell.Y}:{Aim.X},{Aim.Y}",
         OrderKind.Place => $"place:{Unit}:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
         OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke or OrderKind.SmokeShot
             or OrderKind.Mine or OrderKind.Repair or OrderKind.Winch => $"{Kind.ToString().ToLowerInvariant()}:{Cell.X},{Cell.Y}",
@@ -37,6 +38,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
     {
         OrderKind.Go or OrderKind.Place or OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke
             or OrderKind.SmokeShot or OrderKind.Mine or OrderKind.Repair or OrderKind.Winch => this with { Cell = Cell + by },
+        OrderKind.OnWay => this with { Cell = Cell + by, Aim = Aim + by },
         _ => this,
     };
 
@@ -70,6 +72,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
                 "douse" => new Order(OrderKind.Douse),
                 "pivot" => new Order(OrderKind.Pivot, Side: int.Parse(parts[1])),
                 "overdrive" => new Order(OrderKind.Overdrive),
+                "onway" => new Order(OrderKind.OnWay, Cell(parts[1]), Aim: Cell(parts[2])),
                 "pass" => new Order(OrderKind.Pass),
                 "undo" => new Order(OrderKind.Undo),
                 "place" => new Order(OrderKind.Place, Cell(parts[2]), Arg(3), int.Parse(parts[1])),
@@ -139,6 +142,7 @@ public static partial class Battle
         OrderKind.Douse => Douse(s),
         OrderKind.Pivot => Pivot(s, o.Side),
         OrderKind.Overdrive => Overdrive(s),
+        OrderKind.OnWay => OnTheWay(s, o.Cell, o.Aim),
         OrderKind.Pass => s.Over ? "the match is over" : PassNow(s),
         OrderKind.Undo => "the core keeps no undo",
         _ => "the placement is before the first turn",

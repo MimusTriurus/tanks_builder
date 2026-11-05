@@ -325,7 +325,9 @@ public sealed partial class Tank3DBench
         // a hull on the winch's cable (Tank3DBench.Gear)
         || _pull is not null
         // an ambush round waiting for its hull (Tank3DBench.Ambush)
-        || _ambushDue.Count > 0;
+        || _ambushDue.Count > 0
+        // the rest of a move stopped for its shot (Tank3DBench.OnWay)
+        || _onWayRest is not null;
 
     private bool MatchOver => _mt.Won is not null || _mt.Drawn;
 
@@ -532,6 +534,7 @@ public sealed partial class Tank3DBench
         _smokeMode = false;
         _fieryMode = _fiery = false;
         _smokeShotMode = false;
+        OnWayDrop();
         _gearMode = Gear.None;
         _ambushMode = _attackMode = false;
         _ambushPick = null;
@@ -642,6 +645,7 @@ public sealed partial class Tank3DBench
         using (Prof.Measure("match.blast"))
             BlastTick(dt);
         RamWaitTick();
+        OnWayTick();
         if (_banner is not null && _bannerLeft > 0.0f)
         {
             _bannerLeft -= dt;

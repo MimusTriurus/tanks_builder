@@ -64,6 +64,7 @@ public sealed partial class Tank3DBench
         ["ambush"] = L.T("acttips.text_ambush"),
         ["incendiary"] = L.T("acttips.text_incendiary"),
         ["smoke_shell"] = L.T("acttips.text_smoke_shell"),
+        ["fire_on_move"] = L.T("acttips.text_fire_on_move"),
         ["ram"] = L.T("acttips.text_ram"),
         ["smoke"] = L.T("acttips.text_smoke"),
         ["mine"] = L.T("acttips.text_mine"),

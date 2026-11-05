@@ -87,10 +87,87 @@ public static partial class Battle
         // the forced engine is a bonus act said before the move, not after it
         if ((s.Fired || (s.Bonus && !s.Overdrive)) && !u.Class.FreeOrder)
             return "only LT moves after acting";
+        if (s.OnWay is { } way && OnWayWhy(s, u, path, face, back, way) is { } no)
+            return no;
         s.Drove = true;
         Lift(s, u, "moved");
         Dictionary<int, Queue<int>>? picks = AmbushPicks(s, u, path, face, back, stopOnly: s.Overdrive);
-        return Walk(s, u, path, face, back, pose => picks is null || AmbushesAt(s, u, pose, picks));
+        bool onWayShot = false;
+        string? said = Walk(s, u, path, face, back,
+                            pose => (picks is null || AmbushesAt(s, u, pose, picks)) && FireOnWay(s, u, ref onWayShot));
+        // knocked out or stopped short of its hex, it does not fire (upgrades.md)
+        if (s.OnWay is not null && !onWayShot)
+            s.Fired = true;
+        s.OnWay = null;
+        return said;
+    }
+
+    /// <summary>
+    /// The shot on the move said before it (<see cref="OnTheWay"/>): fired once,
+    /// at the first pose the hull is on its hex - after what the hex did to it
+    /// and after the ambushes whose moment that pose is. False once the match
+    /// is over. <paramref name="shot"/>: whether it is fired yet.
+    /// </summary>
+    private static bool FireOnWay(BattleState s, BattleUnit u, ref bool shot)
+    {
+        if (shot || s.OnWay is not { } way || u.Cell != way.At || u.Fate != UnitFate.Alive)
+            return true;
+        shot = true;
+        Fire(s, way.Aim);
+        Over(s);
+        return !s.Over;
+    }
+
+    /// <summary>Why the shot said for the move may not be had on
+    /// <paramref name="path"/>: its hex not on the way, or the round refused
+    /// from it - tried on a copy, walked there with nothing firing at it. A way
+    /// that stops short of the hex on its own (a mine, the deep) is let go: it
+    /// just does not fire.</summary>
+    private static string? OnWayWhy(BattleState s, BattleUnit u, IReadOnlyList<Vector2I> path, int face, bool? back,
+                                    (Vector2I At, Vector2I Aim) way)
+    {
+        bool on = u.Cell == way.At;
+        foreach (Vector2I c in path)
+            on |= c == way.At;
+        if (!on)
+            return $"({way.At.X - s.Shift.X},{way.At.Y - s.Shift.Y}) is not on the way";
+        BattleState t = s.Clone();
+        t.OnWay = null;
+        BattleUnit tu = t.Unit(u.Id)!;
+        string? why = null;
+        Walk(t, tu, path, face, back, pose =>
+        {
+            if (tu.Cell != way.At)
+                return true;
+            why = Fire(t, way.Aim);
+            return false;
+        });
+        return why is null ? null : $"on the way: {why}";
+    }
+
+    /// <summary>
+    /// The shot on the move (upgrades.md, «Выстрел на ходу»; LT, «Рейд» 3):
+    /// the turn's attack fired at <paramref name="aim"/> as the hull comes on
+    /// to <paramref name="at"/>, a hex of the move that follows - said before
+    /// it, as the forced engine is. What the hexes before it do comes first; a
+    /// hull knocked out or stopped short of it does not fire, and the move
+    /// goes on past it. Not an ambush: that stays the last thing.
+    /// </summary>
+    public static string? OnTheWay(BattleState s, Vector2I at, Vector2I aim)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if ((u.Kit & Kit.FireOnMove) == 0)
+            return "no fire on the move";
+        if (s.Fired)
+            return "already fired";
+        if (s.Drove)
+            return "said before the move";
+        if (u.Pinned)
+            return "pinned by a ram blade";
+        s.OnWay = (at, aim);
+        s.Events.Add(new BattleEvent(BattleEventKind.OnWay, u.Id, at, 0, $"at ({aim.X - s.Shift.X},{aim.Y - s.Shift.Y})"));
+        return null;
     }
 
     /// <summary>
@@ -202,6 +279,9 @@ public static partial class Battle
         BattleUnit tu = t.Unit(u.Id)!;
         var seen = new Dictionary<int, List<(int Pose, bool Knocks)>>();
         int last = -1;
+        // the shot on the move is fired on the copy too: an ambusher it knocks
+        // out picks its moment only among the poses before it (units.md)
+        bool onWayShot = false;
         Walk(t, tu, path, face, back, pose =>
         {
             last = Math.Max(last, pose);
@@ -219,7 +299,7 @@ public static partial class Battle
                     seen[w.Id] = poses = new List<(int, bool)>();
                 poses.Add((pose, target.Fate != UnitFate.Alive));
             }
-            return true;
+            return FireOnWay(t, tu, ref onWayShot) || true;
         });
         if (stopOnly)
             foreach (var poses in seen.Values)
@@ -1197,6 +1277,7 @@ public static partial class Battle
         s.Turn = ending == Camp.Green ? Camp.Brown : Camp.Green;
         s.Active = null;
         s.Drove = s.Fired = s.Bonus = s.Overdrive = false;
+        s.OnWay = null;
         // the round over once player 2 has moved (match.md, «Ход и раунд»)
         if (s.Turn == s.First)
         {

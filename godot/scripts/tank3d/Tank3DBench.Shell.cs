@@ -113,7 +113,8 @@ public sealed partial class Tank3DBench
         bool smoke = smokeOn is not null;
         // «Атака» is spent with the round (Tank3DBench.Acts)
         _attackMode = false;
-        if (_shadowAim is Vector2I aim)
+        // the shot on the move is the core's already, fired in the move (Tank3DBench.OnWay)
+        if (_shadowAim is Vector2I aim && !OnWayLaunch())
             ShadowAct($"fire{(fiery ? " incendiary" : smoke ? " smoke" : "")} at {MapAt(aim)}", s => Battle.Fire(s, aim, fiery, smoke));
         // a destroyer's round laid past a hull goes through it (HullPass)
         Leg? holes = !_profile.Lobs && !smoke && _shadowAim is Vector2I laid && HullPass(CellHere, laid) is { } hull

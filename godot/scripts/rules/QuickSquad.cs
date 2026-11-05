@@ -89,7 +89,7 @@ public static class QuickSquad
             new[]
             {
                 new Branch("raid", L.T("squad.branch.raid.name"), L.T("squad.branch.raid.tag"), new[] { Snorkel, WideTracks,
-                    U("fire_on_move", L.T("squad.up.shoot_on_move.name"), "squad.kind.passive_class", L.T("squad.up.shoot_on_move.text")) }),
+                    U("fire_on_move", L.T("squad.up.shoot_on_move.name"), "squad.kind.passive_class", L.T("squad.up.shoot_on_move.text"), Kit.FireOnMove) }),
                 new Branch("sabotage", L.T("squad.branch.sabotage.name"), L.T("squad.branch.sabotage.tag"), new[] { SmokePot, Incendiary, MineLayer }),
             }),
         new("MTP", "MT", L.T("squad.class.MTP.name"), L.T("squad.class.MTP.duty"),

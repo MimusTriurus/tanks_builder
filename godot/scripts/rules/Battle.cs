@@ -76,6 +76,8 @@ public enum BattleEventKind
     Pinned,
     /// <summary>The forced engine said: the move to come is fired on only where it stops.</summary>
     Overdrive,
+    /// <summary>The shot on the move said: fired as the move comes on to Cell; Note the aim.</summary>
+    OnWay,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench
@@ -115,6 +117,10 @@ public sealed class BattleState
     /// двигатель»): the move's crossings of ambush axes draw no fire, only
     /// where it stops (<see cref="Battle.Overdrive"/>).</summary>
     public bool Overdrive;
+    /// <summary>The shot on the move said this turn (upgrades.md, «Выстрел на
+    /// ходу»): the move fires at <c>Aim</c> as the hull comes on to
+    /// <c>At</c> (<see cref="Battle.OnTheWay"/>).</summary>
+    public (Vector2I At, Vector2I Aim)? OnWay;
     /// <summary>The round of the last shot at a tank, nought for none yet
     /// (match.md, «Пат — ничья»).</summary>
     public int LastStrike;

@@ -1922,6 +1922,8 @@ public sealed partial class Tank3DBench : Node3D
                         FieryToggle();
                     if ((what[4..] == "smokeshell") != _smokeShotMode)
                         SmokeShotToggle();
+                    if ((what[4..] == "onway") != _onWayMode)
+                        OnWayToggle();
                     if ((what[4..] == "ram") != _ramMode)
                         RamToggle();
                     if ((what[4..] == "ambush") != _ambushMode)
@@ -2661,6 +2663,7 @@ public sealed partial class Tank3DBench : Node3D
                     else if (_smokeMode) SmokeToggle();
                     else if (_fieryMode) FieryToggle();
                     else if (_smokeShotMode) SmokeShotToggle();
+                    else if (_onWayMode) OnWayToggle();
                     else if (_gearMode != Gear.None) GearToggle(_gearMode);
                     else if (_ramMode && _ramWaiting is null) RamToggle();
                     else if (_lockCell is not null && !_ramLock) Unlock();

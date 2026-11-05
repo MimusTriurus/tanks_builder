@@ -705,6 +705,60 @@ public static partial class SelfTest
                   $"plain: {Said(plain)}; forced: {Said(forced)}; stopped: {Said(stopped)}; after the move: {late}");
         }
 
+        // upgrades.md «Выстрел на ходу» (2026-11-02): a green light drives up
+        // the column from (4,8) to (4,4) and fires at a brown medium three hexes
+        // off (4,6) on its 30 axis - on no axis from the start or the end. The
+        // round flies as it stands on (4,6), between the steps, and the move
+        // goes on; not with its hex off the way, not from a hex the target is off
+        // the axis of, not without the kit, not said after the move; a mine
+        // short of the hex stops it before it fires; the medium in ambush on that
+        // axis fires first, as the light comes on to the hex.
+        {
+            var mid = new Vector2I(4, 6);
+            Vector2I target = HexField.Step(HexField.Step(HexField.Step(mid, 30), 30), 30);
+            Vector2I[] up = { new(4, 7), mid, new(4, 5), new(4, 4) };
+            BattleState Run(Kit kit, Vector2I at, Vector2I[]? mines = null, bool watch = false)
+            {
+                BattleState t = Probe(9, 10, mines: mines);
+                Put(t, 0, "LTR", Camp.Green, 4, 8, 90, kit: kit);
+                Put(t, 1, "MTR", Camp.Brown, target.X, target.Y, 210);
+                if (watch)
+                {
+                    t.Unit(1)!.Watch = 210;
+                    t.Unit(1)!.WatchShots = 1;
+                }
+                Act(t, 0, st => Battle.OnTheWay(st, at, target) ?? Battle.Move(st, up, -1));
+                return t;
+            }
+            static bool Refused(BattleState t) => t.Events.Any(e => e.Note == "REFUSED");
+            static int First(BattleState t, Func<BattleEvent, bool> what) => t.Events.FindIndex(e => what(e));
+            static bool OnTarget(BattleEvent e) => e.Unit == 1 && e.Kind is BattleEventKind.Hit or BattleEventKind.Glanced
+                                                   or BattleEventKind.Ricochet or BattleEventKind.Knocked;
+            BattleState shot = Run(Kit.FireOnMove, mid);
+            int onMid = First(shot, e => e.Kind == BattleEventKind.Moved && e.Cell == mid);
+            int past = First(shot, e => e.Kind == BattleEventKind.Moved && e.Cell == up[2]);
+            int hit = First(shot, OnTarget);
+            BattleState offWay = Run(Kit.FireOnMove, new Vector2I(2, 2)), offAxis = Run(Kit.FireOnMove, up[0]),
+                        noKit = Run(Kit.None, mid), mined = Run(Kit.FireOnMove, mid, mines: new[] { up[0] }),
+                        watched = Run(Kit.FireOnMove, mid, watch: true);
+            BattleState late = Probe(9, 10);
+            Put(late, 0, "LTR", Camp.Green, 4, 8, 90, kit: Kit.FireOnMove);
+            Put(late, 1, "MTR", Camp.Brown, target.X, target.Y, 210);
+            string? lateWhy = null;
+            Act(late, 0, st => Battle.Move(st, new[] { up[0] }, -1));
+            lateWhy = Battle.OnTheWay(late, mid, target);
+            int ambushed = First(watched, e => e.Kind == BattleEventKind.AmbushFired);
+            int answered = First(watched, OnTarget);
+            check("the shot on the move: fired on its hex between the steps, the move goes on; not off the way, not off the axis, not without the kit, not after the move; a mine short of it stops it; an ambush on the axis fires first",
+                  !Refused(shot) && shot.Fired && onMid >= 0 && hit > onMid && past > hit && shot.Unit(0)!.Cell == up[3]
+                  && Refused(offWay) && offWay.Unit(0)!.Cell == new Vector2I(4, 8) && Refused(offAxis) && Refused(noKit)
+                  && lateWhy is not null
+                  && mined.Unit(0)!.Fate != UnitFate.Alive && First(mined, OnTarget) < 0
+                  && ambushed >= 0 && (answered < 0 || answered > ambushed),
+                  $"shot: {Said(shot)}; off the way: {Said(offWay)}; off the axis: {Said(offAxis)}; no kit: {Said(noKit)}; "
+                  + $"after the move: {lateWhy}; mined: {Said(mined)}; watched: {Said(watched)}");
+        }
+
         // Д8, upgrades.md «Противоосколочный подбой»: the mortar's bomb sets off
         // a knocked medium at (4,5); of the two lights beside it the lined one
         // does not catch.

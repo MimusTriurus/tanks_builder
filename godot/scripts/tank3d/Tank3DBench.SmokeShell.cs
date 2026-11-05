@@ -39,7 +39,7 @@ public sealed partial class Tank3DBench
         }
         _smokeShotMode = !_smokeShotMode;
         if (_smokeShotMode)
-            _ambushMode = _fieryMode = false;
+            _ambushMode = _fieryMode = _onWayMode = false;
         _orderNote = _smokeShotMode ? L.T("smokeshell.mode_on") : L.T("smokeshell.mode_off");
     }
 

@@ -121,6 +121,8 @@ public sealed partial class Tank3DBench
         _actFiery = ActButton(attack, "incendiary", L.T("acts.incendiary"), "", toggle: true, FieryToggle);
         // the smoke round (upgrades.md, Tank3DBench.SmokeShell): the next shot's, no key
         _actSmokeShot = ActButton(attack, "smoke_shell", L.T("acts.smoke_shell"), "", toggle: true, SmokeShotToggle);
+        // the shot on the move (upgrades.md, Tank3DBench.OnWay): said before the move, no key
+        _actOnWay = ActButton(attack, "fire_on_move", L.T("acts.fire_on_move"), "", toggle: true, OnWayToggle);
         HBoxContainer bonus;
         (_groupBonus, bonus) = Group(GroupShape.Triangle, Ui.Extra);
         // a tank or the wall ahead (Д5): a mode, the click says which
@@ -683,6 +685,7 @@ public sealed partial class Tank3DBench
         ActOn(_actAmbush!, attack);
         ActOn(_actFiery!, attack);
         ActOn(_actSmokeShot!, attack);
+        ActOn(_actOnWay!, attack && !_mt.Drove);
         for (int i = 0; i < _bonusActs.Count; i++)
             ActOn(_bonusActs[i].Button, bonus && !(_mt.Drove && _bonusActs[i].Button == _actOverdrive));
         _actAttack!.SetPressedNoSignal(attack && _attackMode);
@@ -691,6 +694,8 @@ public sealed partial class Tank3DBench
         _actFiery.SetPressedNoSignal(attack && _fieryMode);
         _actSmokeShot!.Visible = RigSmokeShells;
         _actSmokeShot.SetPressedNoSignal(attack && _smokeShotMode);
+        _actOnWay!.Visible = RigFiresOnMove;
+        _actOnWay.SetPressedNoSignal(attack && _onWayMode);
         _actRam!.SetPressedNoSignal(bonus && _ramMode);
         _actSmoke!.Visible = RigSmokes;
         _actSmoke.SetPressedNoSignal(bonus && _smokeMode);

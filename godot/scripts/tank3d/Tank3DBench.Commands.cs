@@ -16,6 +16,8 @@ namespace TankSpriteTest;
 /// at the end if the budget has it; <b>Turn</b> - on the spot; <b>Fire</b> - at
 /// a hex; <b>Burn</b> - the incendiary round at one (Tank3DBench.Incendiary);
 /// <b>SmokeShot</b> - the smoke round at one (Tank3DBench.SmokeShell);
+/// <b>OnWay</b> - the shot on the move said for the next <b>Go</b>: its hex
+/// and target (Tank3DBench.OnWay);
 /// <b>Ram</b> - the unit on a hex, from where it stands or from a hex of
 /// the move beside it; <b>RamWall</b> - through the wall ahead; <b>Ambush</b> -
 /// on an axis, the medium's on two beside each other (Tank3DBench.Ambush); <b>Smoke</b> - the grenade on a
@@ -32,12 +34,12 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot, OnWay }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
     /// <paramref name="Side2"/> the medium's second axis.</summary>
-    private readonly record struct Command(CommandKind Kind, Vector2I Cell = default, int Side = -1, int Unit = -1, int Side2 = -1)
+    private readonly record struct Command(CommandKind Kind, Vector2I Cell = default, int Side = -1, int Unit = -1, int Side2 = -1, Vector2I Aim = default)
     {
         public override string ToString() => Kind switch
         {
@@ -46,6 +48,7 @@ public sealed partial class Tank3DBench
             CommandKind.Turn or CommandKind.RamWall or CommandKind.Pivot => $"{Kind.ToString().ToLowerInvariant()} {Side}",
             CommandKind.Fire or CommandKind.Burn or CommandKind.Ram or CommandKind.Smoke or CommandKind.SmokeShot
                 or CommandKind.Mine or CommandKind.Repair or CommandKind.Winch => $"{Kind.ToString().ToLowerInvariant()} ({Cell.X},{Cell.Y})",
+            CommandKind.OnWay => $"onway ({Cell.X},{Cell.Y}) at ({Aim.X},{Aim.Y})",
             CommandKind.Ambush => $"ambush {Side}{(Side2 >= 0 ? $"+{Side2}" : "")}",
             CommandKind.Place => $"place #{Unit} ({Cell.X},{Cell.Y}){(Side >= 0 ? $" facing {Side}" : "")}",
             _ => Kind.ToString().ToLowerInvariant(),
@@ -114,6 +117,13 @@ public sealed partial class Tank3DBench
                 return _fate != Fate.Alive ? L.T("commands.why_out", _modelTag) : PivotWhy(c.Side);
             case CommandKind.Overdrive:
                 return OverdriveWhy();
+            case CommandKind.OnWay:
+                if (_fate != Fate.Alive)
+                    return L.T("commands.why_out", _modelTag);
+                if (OnWayWhy() is { Length: > 0 } onWay)
+                    return onWay;
+                return c.Cell == CellHere ? L.T("onway.own_hex")
+                    : AxisTo(c.Cell, c.Aim).Axis < 0 ? L.T("onway.off_axis", MapAt(c.Aim), MapAt(c.Cell)) : "";
             case CommandKind.Douse:
                 return !Burning(_unitId) ? L.T("commands.why_not_burning", _modelTag)
                     : _side != _mt.Turn ? L.T("commands.why_turn", SideName(_mt.Turn))
@@ -202,6 +212,14 @@ public sealed partial class Tank3DBench
                 break;
             case CommandKind.Overdrive:
                 OverdriveGo();
+                break;
+            case CommandKind.OnWay:
+                // the clicks' picks, made at once: the next go is the move (OnWayClick)
+                SetRules(true, " (command)");
+                if (!_onWayMode)
+                    OnWayToggle();
+                _onWayAt = c.Cell;
+                _onWayAim = c.Aim;
                 break;
             case CommandKind.Douse:
                 Douse();
@@ -306,7 +324,7 @@ public sealed partial class Tank3DBench
 
     /// <summary><c>--do cmd=KIND[:Q,R][:SIDE]</c>, map cells: <c>take:ID</c>,
     /// <c>go:Q,R[:SIDE]</c>, <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>smokeshot:Q,R</c>, <c>ram:Q,R</c>,
-    /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pass</c>, <c>undo</c>;
+    /// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>, <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>onway:Q,R:AQ,AR</c>, <c>pass</c>, <c>undo</c>;
     /// in placement <c>place:ID:Q,R[:SIDE]</c> and <c>ready</c>.</summary>
     private Command? ParseCommand(string text)
     {
@@ -337,6 +355,7 @@ public sealed partial class Tank3DBench
                 "douse" => new Command(CommandKind.Douse),
                 "pivot" => new Command(CommandKind.Pivot, Side: int.Parse(parts[1])),
                 "overdrive" => new Command(CommandKind.Overdrive),
+                "onway" => new Command(CommandKind.OnWay, Cell(parts[1]), Aim: Cell(parts[2])),
                 "pass" => new Command(CommandKind.Pass),
                 "undo" => new Command(CommandKind.Undo),
                 // the placement before the first turn (Tank3DBench.Deploy)

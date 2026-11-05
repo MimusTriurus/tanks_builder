@@ -104,6 +104,9 @@ public sealed partial class Tank3DBench
             _orderNote = L.T("orders.ram_not_in_match");
             return;
         }
+        // the shot on the move picks its hexes by the left button (Tank3DBench.OnWay)
+        if (!ram && OnWayClick(cell, face))
+            return;
         Vector2I here = CellHere;
         // the target and the standing tanks (Tank3DBench.Parked)
         HashSet<Vector2I> barred = Barred(ram);
@@ -451,6 +454,9 @@ public sealed partial class Tank3DBench
     /// for the stop; standing, it is laid now.</summary>
     private void ShotOrder(Vector2I cell)
     {
+        // the shot on the move's target (Tank3DBench.OnWay)
+        if (OnWayAimClick(cell))
+            return;
         // With a cell fixed the shot is fired from it: the move is ordered and
         // the shot waits for the stop. LT fires first and keeps the cell
         // (classes.md, «Свободный порядок LT»; Tank3DBench.Aim).
