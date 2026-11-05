@@ -31,7 +31,7 @@ public sealed partial class Tank3DBench
         public bool Fired, Bonus;
         public int Razed, MinesSpent, AmbushShots, SmokeDispersed;
         /// <summary>Its ambush before the move lifted it (Tank3DBench.Ambush).</summary>
-        public (int A, int B, int Shots)? Watch;
+        public (int A, int B, int C, int Shots)? Watch;
     }
 
     private MoveSnap? _moveSnap;

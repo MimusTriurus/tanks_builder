@@ -759,6 +759,53 @@ public static partial class SelfTest
                   + $"after the move: {lateWhy}; mined: {Said(mined)}; watched: {Said(watched)}");
         }
 
+        // units/mt.md «Секторная засада» (2026-11-02) and upgrades.md «Широкий
+        // сектор»: a green medium at (4,5) set by the rules; brown lights step
+        // on to a hex three out on an axis, from off every axis. The sector
+        // fires once an axis: the axis spent is struck off, the other watches
+        // on. The wide sector watches three side by side and fires any two,
+        // then is off; not without the kit, not three apart.
+        {
+            BattleState Watching(Kit kit, int a, int b, int c, out string? why)
+            {
+                BattleState t = Probe(9, 10);
+                Put(t, 0, "MTR", Camp.Green, 4, 5, 90, kit: kit);
+                string? said = null;
+                Act(t, 0, st => said = Battle.Ambush(st, a, b, c));
+                why = said;
+                return t;
+            }
+            static void Come(BattleState t, int id, int axis, int out3 = 3)
+            {
+                Vector2I c = new(4, 5);
+                for (int k = 0; k < out3; k++)
+                    c = HexField.Step(c, axis);
+                Vector2I n = HexField.Step(c, (axis + 120) % 360);
+                Put(t, id, "LTR", Camp.Brown, n.X, n.Y, (axis + 300) % 360);
+                // each light its own turn
+                t.Drove = t.Fired = t.Bonus = false;
+                Act(t, id, st => Battle.Move(st, new[] { c }, -1));
+            }
+            static int Rounds(BattleState t) => t.Events.Count(e => e.Kind == BattleEventKind.AmbushFired);
+            BattleState sector = Watching(Kit.None, 90, 30, -1, out string? sectorWhy);
+            Come(sector, 1, 90);
+            bool struck = sector.Unit(0)!.Ambushing && sector.Unit(0)!.Watch == 30 && sector.Unit(0)!.Watch2 < 0;
+            Come(sector, 2, 90, 2);
+            int again = Rounds(sector);
+            Come(sector, 3, 30);
+            BattleState wide = Watching(Kit.WideSector, 90, 30, 150, out string? wideWhy);
+            Come(wide, 1, 150);
+            Come(wide, 2, 30);
+            Come(wide, 3, 90);
+            Watching(Kit.None, 90, 30, 150, out string? noKit);
+            Watching(Kit.WideSector, 90, 30, 210, out string? apart);
+            check("the sector fires once an axis, the other watching on; the wide sector watches three side by side and fires any two; not without the kit, not apart",
+                  sectorWhy is null && struck && again == 1 && Rounds(sector) == 2 && !sector.Unit(0)!.Ambushing
+                  && wideWhy is null && Rounds(wide) == 2 && !wide.Unit(0)!.Ambushing
+                  && noKit is not null && apart is not null,
+                  $"sector: {Said(sector)}; wide {wideWhy ?? "ok"}: {Said(wide)}; no kit {noKit}; apart {apart}");
+        }
+
         // Д8, upgrades.md «Противоосколочный подбой»: the mortar's bomb sets off
         // a knocked medium at (4,5); of the two lights beside it the lined one
         // does not catch.

@@ -277,7 +277,7 @@ public static partial class Battle
             return null;
         BattleState t = s.Clone();
         BattleUnit tu = t.Unit(u.Id)!;
-        var seen = new Dictionary<int, List<(int Pose, bool Knocks)>>();
+        var seen = new Dictionary<int, List<(int Pose, bool Knocks, int Axis)>>();
         int last = -1;
         // the shot on the move is fired on the copy too: an ambusher it knocks
         // out picks its moment only among the poses before it (units.md)
@@ -296,8 +296,8 @@ public static partial class Battle
                 BattleUnit target = tried.Unit(tu.Id)!;
                 Shoot(tried, tried.Unit(w.Id)!, target, axis);
                 if (!seen.TryGetValue(w.Id, out var poses))
-                    seen[w.Id] = poses = new List<(int, bool)>();
-                poses.Add((pose, target.Fate != UnitFate.Alive));
+                    seen[w.Id] = poses = new List<(int, bool, int)>();
+                poses.Add((pose, target.Fate != UnitFate.Alive, axis));
             }
             return FireOnWay(t, tu, ref onWayShot) || true;
         });
@@ -311,26 +311,35 @@ public static partial class Battle
         {
             var queue = new Queue<int>();
             int after = -1;
+            BattleUnit watcher = s.Unit(id)!;
             // nought reads as one (BattleUnit.WatchShots), as Ambushes spends it
-            int shots = Math.Max(1, s.Unit(id)!.WatchShots);
+            int shots = Math.Max(1, watcher.WatchShots);
+            // a sector's axis fires once (units/mt.md): its next round is another's
+            bool sector = watcher.Watch2 >= 0;
+            var spent = new List<int>();
             for (int shot = 0; shot < shots; shot++)
             {
-                int pick = -1;
-                foreach ((int pose, bool knocks) in poses)
+                int pick = -1, pickAxis = -1;
+                foreach ((int pose, bool knocks, int axis) in poses)
                 {
-                    if (pose <= after)
+                    if (pose <= after || (sector && spent.Contains(axis)))
                         continue;
                     if (pick < 0)
+                    {
                         pick = pose;
+                        pickAxis = axis;
+                    }
                     if (knocks)
                     {
                         pick = pose;
+                        pickAxis = axis;
                         break;
                     }
                 }
                 if (pick < 0)
                     break;
                 queue.Enqueue(pick);
+                spent.Add(pickAxis);
                 after = pick;
             }
             picks[id] = queue;
@@ -903,12 +912,15 @@ public static partial class Battle
     /// <summary>
     /// The ambush (units.md, «Режим засады»; п. 5а): the attack of the turn
     /// held back on <paramref name="axis"/> - for the medium (classes.md,
-    /// «Секторная засада») and its <paramref name="second"/> beside it too. Set
-    /// last: the turn is spent with it, the move and the bonus act as well, for
-    /// any act of the unit after it would lift it. A casemate watches along its
-    /// hull - turned to the axis first, out of the move's steps.
+    /// «Секторная засада») and its <paramref name="second"/> beside it too, a
+    /// round on each (units/mt.md, 2026-11-02); with the wide sector
+    /// (upgrades.md, «Широкий сектор») a <paramref name="third"/>, the three
+    /// side by side, still two rounds. Set last: the turn is spent with it, the
+    /// move and the bonus act as well, for any act of the unit after it would
+    /// lift it. A casemate watches along its hull - turned to the axis first,
+    /// out of the move's steps.
     /// </summary>
-    public static string? Ambush(BattleState s, int axis, int second = -1)
+    public static string? Ambush(BattleState s, int axis, int second = -1, int third = -1)
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
@@ -924,15 +936,64 @@ public static partial class Battle
             if (apart != 60 && apart != 300)
                 return "the two axes must be neighbours";
         }
+        if (third >= 0)
+        {
+            if (second < 0)
+                return "a third axis wants a second";
+            if ((u.Kit & Kit.WideSector) == 0)
+                return "no wide sector";
+            if (!Wedge(axis, second, third))
+                return "the three axes must be side by side";
+        }
         if (!u.Class.Turreted && axis != u.Heading)
             return "a casemate watches along its hull";
         s.Fired = s.Drove = s.Bonus = true;
         u.Watch = axis;
         u.Watch2 = second;
-        // the stabilizer watches on past the first round (upgrades.md)
-        u.WatchShots = (u.Kit & Kit.AmbushStabilizer) != 0 ? 2 : 1;
-        s.Events.Add(new BattleEvent(BattleEventKind.AmbushSet, u.Id, u.Cell, axis, second >= 0 ? $"and {second}" : ""));
+        u.Watch3 = third;
+        // a sector's round an axis, two of the wide one's three; the
+        // stabilizer watches on past the first round (upgrades.md) - on the
+        // sector it adds none (units/mt.md)
+        u.WatchShots = second >= 0 || (u.Kit & Kit.AmbushStabilizer) != 0 ? 2 : 1;
+        s.Events.Add(new BattleEvent(BattleEventKind.AmbushSet, u.Id, u.Cell, axis,
+                                     second < 0 ? "" : third < 0 ? $"and {second}" : $"and {second}, {third}"));
         return null;
+    }
+
+    /// <summary>Three sides that make a wedge of 120 degrees: one of them with
+    /// both the next two clockwise among them.</summary>
+    public static bool Wedge(int a, int b, int c)
+    {
+        static int N(int h) => ((h % 360) + 360) % 360;
+        int[] all = { N(a), N(b), N(c) };
+        foreach (int x in all)
+            if (Array.IndexOf(all, N(x + 60)) >= 0 && Array.IndexOf(all, N(x + 120)) >= 0)
+                return true;
+        return false;
+    }
+
+    /// <summary>Ambush <paramref name="w"/> has fired along <paramref name="axis"/>:
+    /// a round spent, the watch off with the last - a sector's axis struck off
+    /// with its own (units/mt.md), the rest moved up.</summary>
+    public static void Spend(BattleUnit w, int axis)
+    {
+        if (--w.WatchShots <= 0)
+        {
+            w.Watch = w.Watch2 = w.Watch3 = -1;
+            return;
+        }
+        if (w.Watch2 < 0)
+            return;
+        if (w.Watch == axis)
+        {
+            w.Watch = w.Watch2;
+            w.Watch2 = w.Watch3;
+        }
+        else if (w.Watch2 == axis)
+            w.Watch2 = w.Watch3;
+        else if (w.Watch3 != axis)
+            return;
+        w.Watch3 = -1;
     }
 
     /// <summary>A cell's effects on a hull that came on to it (<see cref="Arrive"/>),
@@ -1152,8 +1213,7 @@ public static partial class Battle
     /// stabilizer, at its second round (upgrades.md).</summary>
     private static void Shoot(BattleState s, BattleUnit w, BattleUnit target, int axis)
     {
-        if (--w.WatchShots <= 0)
-            w.Watch = w.Watch2 = -1;
+        Spend(w, axis);
         // the hull's heading as it was caught, for the bench to fire as it takes it
         s.Events.Add(new BattleEvent(BattleEventKind.AmbushFired, w.Id, target.Cell, axis,
                                      $"at #{target.Id} facing {target.Heading}" + (w.Ambushing ? ", watching on" : "")));
@@ -1176,7 +1236,7 @@ public static partial class Battle
     public static int Sees(BattleState s, BattleUnit w, BattleUnit target)
     {
         (int heading, int range) = s.Board.LaneTo(w.Cell, target.Cell);
-        if (heading < 0 || (heading != w.Watch && heading != w.Watch2))
+        if (heading < 0 || (heading != w.Watch && heading != w.Watch2 && heading != w.Watch3))
             return -1;
         if (Gunnery.MayTarget(w.Class.Lobs, range, true) != Gunnery.Distance.Fits)
             return -1;
@@ -1208,7 +1268,7 @@ public static partial class Battle
     {
         if (!u.Ambushing)
             return;
-        u.Watch = u.Watch2 = -1;
+        u.Watch = u.Watch2 = u.Watch3 = -1;
         s.Events.Add(new BattleEvent(BattleEventKind.AmbushLifted, u.Id, u.Cell, 0, why));
     }
 

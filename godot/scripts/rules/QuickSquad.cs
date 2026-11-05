@@ -98,7 +98,7 @@ public static class QuickSquad
             new[]
             {
                 new Branch("sentry", L.T("squad.branch.sentry.name"), L.T("squad.branch.sentry.tag"), new[] { Stabilizer, Thermal,
-                    U("wide_sector", L.T("squad.up.wide_sector.name"), "squad.kind.passive_class", L.T("squad.up.wide_sector.text")) }),
+                    U("wide_sector", L.T("squad.up.wide_sector.name"), "squad.kind.passive_class", L.T("squad.up.wide_sector.text"), Kit.WideSector) }),
                 new Branch("prop", L.T("squad.branch.prop.name"), L.T("squad.branch.prop.tag"), new[] { MineGuard, Winch, RepairKit }),
             }),
         new("HTP", "HT", L.T("squad.class.HTP.name"), L.T("squad.class.HTP.duty"),

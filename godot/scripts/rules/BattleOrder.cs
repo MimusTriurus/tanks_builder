@@ -11,19 +11,19 @@ public enum OrderKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke,
 /// (Tank3DBench.Commands) as data, in the board's cells, written and read in
 /// the same words as <c>--commands</c> - <c>take:ID</c>, <c>go:Q,R[:SIDE]</c>,
 /// <c>turn:SIDE</c>, <c>fire:Q,R</c>, <c>burn:Q,R</c>, <c>smokeshot:Q,R</c>, <c>ram:Q,R</c>,
-/// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2]</c>, <c>smoke:Q,R</c>,
+/// <c>ramwall:SIDE</c>, <c>ambush:SIDE[:SIDE2[:SIDE3]]</c>, <c>smoke:Q,R</c>,
 /// <c>mine:Q,R</c>, <c>repair:Q,R</c>, <c>winch:Q,R</c>, <c>douse</c>, <c>pivot:SIDE</c>, <c>overdrive</c>, <c>onway:Q,R:AQ,AR</c>,
 /// <c>pass</c>, <c>undo</c>, <c>place:ID:Q,R[:SIDE]</c>, <c>ready</c>. What a
 /// script gives <see cref="BattleRun"/> and, next, what the AI gives.
 /// </summary>
-public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int Side = -1, int Unit = -1, int Side2 = -1, Vector2I Aim = default)
+public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int Side = -1, int Unit = -1, int Side2 = -1, Vector2I Aim = default, int Side3 = -1)
 {
     public override string ToString() => Kind switch
     {
         OrderKind.Take => $"take:{Unit}",
         OrderKind.Go => $"go:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
         OrderKind.Turn or OrderKind.RamWall or OrderKind.Pivot => $"{Kind.ToString().ToLowerInvariant()}:{Side}",
-        OrderKind.Ambush => $"ambush:{Side}{(Side2 >= 0 ? $":{Side2}" : "")}",
+        OrderKind.Ambush => $"ambush:{Side}{(Side2 >= 0 ? $":{Side2}" : "")}{(Side3 >= 0 ? $":{Side3}" : "")}",
         OrderKind.OnWay => $"onway:{Cell.X},{Cell.Y}:{Aim.X},{Aim.Y}",
         OrderKind.Place => $"place:{Unit}:{Cell.X},{Cell.Y}{(Side >= 0 ? $":{Side}" : "")}",
         OrderKind.Fire or OrderKind.Burn or OrderKind.Ram or OrderKind.Smoke or OrderKind.SmokeShot
@@ -64,7 +64,7 @@ public readonly record struct Order(OrderKind Kind, Vector2I Cell = default, int
                 "smokeshot" => new Order(OrderKind.SmokeShot, Cell(parts[1])),
                 "ram" => new Order(OrderKind.Ram, Cell(parts[1])),
                 "ramwall" => new Order(OrderKind.RamWall, Side: int.Parse(parts[1])),
-                "ambush" => new Order(OrderKind.Ambush, Side: int.Parse(parts[1]), Side2: Arg(2)),
+                "ambush" => new Order(OrderKind.Ambush, Side: int.Parse(parts[1]), Side2: Arg(2), Side3: Arg(3)),
                 "smoke" => new Order(OrderKind.Smoke, Cell(parts[1])),
                 "mine" => new Order(OrderKind.Mine, Cell(parts[1])),
                 "repair" => new Order(OrderKind.Repair, Cell(parts[1])),
@@ -134,7 +134,7 @@ public static partial class Battle
         OrderKind.SmokeShot => Fire(s, o.Cell, smoke: true),
         OrderKind.Ram => RamTo(s, o.Cell),
         OrderKind.RamWall => RamWall(s, o.Side),
-        OrderKind.Ambush => Ambush(s, o.Side, o.Side2),
+        OrderKind.Ambush => Ambush(s, o.Side, o.Side2, o.Side3),
         OrderKind.Smoke => Smoke(s, o.Cell),
         OrderKind.Mine => LayMine(s, o.Cell),
         OrderKind.Repair => Repair(s, o.Cell),

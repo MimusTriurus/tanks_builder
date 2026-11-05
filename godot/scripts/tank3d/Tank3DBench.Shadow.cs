@@ -98,6 +98,7 @@ public sealed partial class Tank3DBench
                 Kit = id < _kits.Length ? _kits[id] : Kit.None,
                 Watch = _ambush.TryGetValue(id, out var w) ? w.A : -1,
                 Watch2 = _ambush.TryGetValue(id, out var w2) ? w2.B : -1,
+                Watch3 = _ambush.TryGetValue(id, out var w4) ? w4.C : -1,
                 WatchShots = _ambush.TryGetValue(id, out var w3) ? w3.Shots : 0,
                 OwesBonus = _owesBonus.Contains(id),
                 Pinned = _pinned.Contains(id),

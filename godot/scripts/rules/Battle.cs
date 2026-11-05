@@ -30,10 +30,13 @@ public sealed class BattleUnit
     public int BurnSince;
     public Kit Kit;
     /// <summary>The ambush's axis and, for the medium's sector, the second one
-    /// beside it (units.md, «Режим засады»; classes.md, «MT»); -1 for none.</summary>
-    public int Watch = -1, Watch2 = -1;
+    /// beside it (units.md, «Режим засады»; classes.md, «MT») and, with the
+    /// wide sector (upgrades.md), the third; -1 for none. A sector's axis that
+    /// has fired is struck off, the rest moved up (units/mt.md).</summary>
+    public int Watch = -1, Watch2 = -1, Watch3 = -1;
     /// <summary>Rounds the ambush has left: one, two with the stabilizer
-    /// (upgrades.md, «Стабилизатор засады»); nought reads as one.</summary>
+    /// (upgrades.md, «Стабилизатор засады»), two for a sector - one an axis,
+    /// any two of the wide sector's three; nought reads as one.</summary>
     public int WatchShots;
     /// <summary>The auto-extinguisher put its fire out on credit (upgrades.md,
     /// «Автоматическое тушение»): its next activation goes without the bonus
@@ -55,7 +58,7 @@ public sealed class BattleUnit
     /// <summary>The unit in a line, its cell less <paramref name="shift"/> -
     /// the map's cell on a board in a sea (<see cref="BattleState.Shift"/>).</summary>
     public string Say(Vector2I shift) => $"{Side} {Tag}#{Id} ({Cell.X - shift.X},{Cell.Y - shift.Y}) h{Heading} {Fate}{(Burning ? " burning" : "")}"
-                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "")
+                                         + (Ambushing ? $" watching {Watch}{(Watch2 >= 0 ? $"+{Watch2}" : "")}{(Watch3 >= 0 ? $"+{Watch3}" : "")}{(WatchShots > 1 ? $" x{WatchShots}" : "")}" : "")
                                          + (OwesBonus ? " owes the bonus act" : "")
                                          + (Pinned ? " pinned" : "");
 }

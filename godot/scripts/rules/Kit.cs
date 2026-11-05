@@ -10,12 +10,12 @@ namespace TankSpriteTest;
 /// board (<c>Tank3DBench._amphibious</c>) until the match gave each unit its
 /// kit (docs/battle-core-plan.md, Д1).
 ///
-/// <b>Twenty-one of upgrades.md's twenty-two have a flag here, each read by the
+/// <b>All twenty-two of upgrades.md's have a flag here, each read by the
 /// rules</b> (Д1, Д8; the 2026-11-02 revision: the trawl became the mine guard,
 /// the auto-extinguisher and the double turn pay with the bonus act; 2026-11-04:
 /// the 3-6 bracket, through the wood, the ram blade, the forced engine, the
-/// push of two, the smoke round; 2026-11-05: the shot on the move). The wide
-/// sector is on the trees (<see cref="QuickSquad"/>) only.
+/// push of two, the smoke round; 2026-11-05: the shot on the move, the wide
+/// sector).
 /// </summary>
 [Flags]
 public enum Kit
@@ -78,6 +78,9 @@ public enum Kit
     /// <summary>Выстрел на ходу: LT's attack on any hex of its way, between
     /// steps, said before the move (<see cref="Battle.OnTheWay"/>).</summary>
     FireOnMove = 1 << 20,
+    /// <summary>Широкий сектор: the medium's sector on three axes side by
+    /// side, 120 degrees, still two rounds (<see cref="Battle.Ambush"/>).</summary>
+    WideSector = 1 << 21,
 }
 
 public static class Kits
@@ -106,6 +109,7 @@ public static class Kits
         (Kit.RamBlade, "ram_blade", L.T("kit.ram_blade")),
         (Kit.Overdrive, "overdrive", L.T("kit.overdrive")),
         (Kit.FireOnMove, "fire_on_move", L.T("kit.fire_on_move")),
+        (Kit.WideSector, "wide_sector", L.T("kit.wide_sector")),
         (Kit.PushTwo, "push_two", L.T("kit.push_two")),
     };
 

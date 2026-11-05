@@ -13,11 +13,13 @@ namespace TankSpriteTest;
 /// <item><b>Set</b>: the button «Засада» (no key - none is free), then a
 /// click: the axis under the pointer (<see cref="AmbushAxisAt"/> - the hex's
 /// own, else the nearest of the six; a casemate's hull's); the medium takes a
-/// second beside it for its sector, or the same again (or Enter) for one. In
+/// second beside it for its sector, or the same again (or Enter) for one - with
+/// the wide sector (upgrades.md) a third beside the two, or one of them again
+/// (or Enter) for two. In
 /// the mode the move is not shown nor given, the turret comes round to the
 /// axis under the pointer and it is drawn as a red line out of the muzzle to
 /// what cuts it (<see cref="AxisLinesTick"/>), its hexes red as the move's zone (<see cref="AmbushZone"/>). A command
-/// too: <c>ambush:SIDE[:SIDE2]</c>. The turn is spent with it: set last
+/// too: <c>ambush:SIDE[:SIDE2[:SIDE3]]</c>. The turn is spent with it: set last
 /// (units.md); the turret is laid along the axis and stays so.</item>
 /// <item><b>Lifted</b> by any order to the unit (<c>ShadowAct</c>), a ram into
 /// it, its knocking out or destruction (<see cref="AmbushTick"/>).</item>
@@ -34,9 +36,10 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    /// <summary>Who watches: unit id to its axis, the sector's second (-1 for none)
-    /// and the rounds it has left - two with the stabilizer (Д8).</summary>
-    private readonly Dictionary<int, (int A, int B, int Shots)> _ambush = new();
+    /// <summary>Who watches: unit id to its axis, the sector's second and the
+    /// wide sector's third (-1 for none) and the rounds it has left - two with
+    /// the stabilizer (Д8), two for a sector, one an axis (units/mt.md).</summary>
+    private readonly Dictionary<int, (int A, int B, int C, int Shots)> _ambush = new();
     /// <summary>Ambush rounds fired in the match: a move one was fired on is
     /// not taken back (Tank3DBench.Undo).</summary>
     private int _ambushShots;
@@ -44,8 +47,12 @@ public sealed partial class Tank3DBench
     private bool _aimHold;
     /// <summary>The panel's «Засада» on: a click on a hex picks the axis.</summary>
     private bool _ambushMode;
-    /// <summary>The medium's first axis, waiting for a second or the confirm.</summary>
-    private int? _ambushPick;
+    /// <summary>The medium's first axis, waiting for a second or the confirm;
+    /// with the wide sector its second, waiting for a third (read only with a first).</summary>
+    private int? _ambushPick, _ambushPick2;
+
+    /// <summary>The wide sector (upgrades.md): three axes side by side.</summary>
+    private bool RigWideSector => (KitOf(_unitId) & Kit.WideSector) != 0;
     private Button? _actAmbush;
 
     private static string AmbushText => L.T("ambush.button");
@@ -55,8 +62,8 @@ public sealed partial class Tank3DBench
     private bool RigHasStabilizer => (KitOf(_unitId) & Kit.AmbushStabilizer) != 0;
 
     /// <summary>Why the unit on the rig may not watch <paramref name="axis"/>
-    /// (and <paramref name="second"/>) now, or empty.</summary>
-    private string AmbushWhy(int axis, int second)
+    /// (and <paramref name="second"/>, <paramref name="third"/>) now, or empty.</summary>
+    private string AmbushWhy(int axis, int second, int third = -1)
     {
         if (_fate != Fate.Alive)
             return L.T("ambush.why_out", _modelTag);
@@ -74,6 +81,13 @@ public sealed partial class Tank3DBench
             if (apart != 60 && apart != 300)
                 return L.T("ambush.why_sector_adjacent");
         }
+        if (third >= 0)
+        {
+            if (second < 0 || !RigWideSector)
+                return L.T("ambush.why_wide_kit", _modelTag);
+            if (!Battle.Wedge(axis, second, third))
+                return L.T("ambush.why_wide_wedge");
+        }
         if (!_profile.Turreted && axis != HullSide())
             return L.T("ambush.why_casemate");
         return "";
@@ -81,13 +95,15 @@ public sealed partial class Tank3DBench
 
     /// <summary>The ambush set (the command's executor): the core told, the
     /// turn spent, the turret laid along the axis.</summary>
-    private void AmbushSet(int axis, int second)
+    private void AmbushSet(int axis, int second, int third = -1)
     {
-        ShadowAct($"ambush {axis}{(second >= 0 ? $"+{second}" : "")}", s => Battle.Ambush(s, axis, second));
-        _ambush[_unitId] = (axis, second, RigHasStabilizer ? 2 : 1);
+        ShadowAct($"ambush {axis}{(second >= 0 ? $"+{second}" : "")}{(third >= 0 ? $"+{third}" : "")}",
+                  s => Battle.Ambush(s, axis, second, third));
+        // a sector's round an axis (units/mt.md), as the core counts them
+        _ambush[_unitId] = (axis, second, third, second >= 0 || RigHasStabilizer ? 2 : 1);
         _mt.Fired = _mt.Drove = _mt.Bonus = true;
         _ambushMode = false;
-        _ambushPick = null;
+        _ambushPick = _ambushPick2 = null;
         _ramMode = false;
         if (_model.Turreted && _field is not null)
         {
@@ -97,9 +113,9 @@ public sealed partial class Tank3DBench
             _aimRound = null;
             _aimHold = true;
         }
-        _matchNote = second >= 0 ? L.T("ambush.set_two") : L.T("ambush.set");
+        _matchNote = third >= 0 ? L.T("ambush.set_three") : second >= 0 ? L.T("ambush.set_two") : L.T("ambush.set");
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} in ambush on {MapAt(CellHere)} along {axis}"
-                  + (second >= 0 ? $" and {second}" : ""));
+                  + (second >= 0 ? $" and {second}" : "") + (third >= 0 ? $" and {third}" : ""));
     }
 
     /// <summary>Unit <paramref name="id"/>'s ambush off, saying why.</summary>
@@ -144,7 +160,7 @@ public sealed partial class Tank3DBench
         if (SideOfUnit(id) is not Side side)
             return;
         bool any = false;
-        foreach (KeyValuePair<int, (int A, int B, int Shots)> w in _ambush)
+        foreach (KeyValuePair<int, (int A, int B, int C, int Shots)> w in _ambush)
             any |= SideOfUnit(w.Key) is Side ws && ws != side;
         if (!any)
             return;
@@ -410,9 +426,12 @@ public sealed partial class Tank3DBench
             {
                 case BattleEventKind.AmbushFired:
                     Fly();
-                    // spent - the stabilizer's at its second round (Д8)
-                    if (_ambush.TryGetValue(e.Unit, out var left) && left.Shots > 1)
-                        _ambush[e.Unit] = (left.A, left.B, left.Shots - 1);
+                    // spent - the stabilizer's at its second round (Д8), a
+                    // sector's axis with its own (Battle.Spend)
+                    if (_ambush.TryGetValue(e.Unit, out var left)
+                        && new BattleUnit { Watch = left.A, Watch2 = left.B, Watch3 = left.C, WatchShots = left.Shots } is var w
+                        && SpendOn(w, e.Value))
+                        _ambush[e.Unit] = (w.Watch, w.Watch2, w.Watch3, w.WatchShots);
                     else
                         _ambush.Remove(e.Unit);
                     _ambushShots++;
@@ -466,6 +485,14 @@ public sealed partial class Tank3DBench
         }
     }
 
+    /// <summary>The core's spending of a round along <paramref name="axis"/>:
+    /// true while the watch goes on.</summary>
+    private static bool SpendOn(BattleUnit w, int axis)
+    {
+        Battle.Spend(w, axis);
+        return w.Ambushing;
+    }
+
     private Vector3 MuzzleOf(int id)
     {
         TankModel? m = ModelOf(id);
@@ -492,7 +519,7 @@ public sealed partial class Tank3DBench
             return;
         }
         _ambushMode = !_ambushMode;
-        _ambushPick = null;
+        _ambushPick = _ambushPick2 = null;
         if (_ambushMode)
             _smokeMode = _fieryMode = _smokeShotMode = _onWayMode = false;
         if (_ambushMode)
@@ -563,21 +590,45 @@ public sealed partial class Tank3DBench
                 return true;
             }
             _ambushPick = axis;
+            _ambushPick2 = null;
             _orderNote = L.T("ambush.pick_second");
             return true;
         }
         int a = _ambushPick ?? axis;
+        // the wide sector: two picked, the third beside them or one of them again
+        if (_ambushPick2 is int b2 && _ambushPick is not null)
+        {
+            if (axis == a || axis == b2)
+                Execute(new Command(CommandKind.Ambush, Side: a, Side2: b2));
+            else if (AmbushWhy(a, b2, axis) is { Length: > 0 } no)
+                _orderNote = no;
+            else
+                Execute(new Command(CommandKind.Ambush, Side: a, Side2: b2, Side3: axis));
+            return true;
+        }
         int b = _ambushPick is int f && f != axis ? axis : -1;
+        if (b >= 0 && RigWideSector)
+        {
+            if (AmbushWhy(a, b) is { Length: > 0 } no)
+            {
+                _orderNote = no;
+                return true;
+            }
+            _ambushPick2 = b;
+            _orderNote = L.T("ambush.pick_third");
+            return true;
+        }
         Execute(new Command(CommandKind.Ambush, Side: a, Side2: b));
         return true;
     }
 
-    /// <summary>Enter with the medium's first axis picked: one axis.</summary>
+    /// <summary>Enter with the medium's first axis picked: one axis - or the
+    /// two picked of the wide sector.</summary>
     private bool AmbushConfirm()
     {
         if (!_ambushMode || _ambushPick is not int a)
             return false;
-        Execute(new Command(CommandKind.Ambush, Side: a));
+        Execute(new Command(CommandKind.Ambush, Side: a, Side2: _ambushPick2 ?? -1));
         return true;
     }
 
@@ -721,7 +772,7 @@ public sealed partial class Tank3DBench
         if (!Match || _field is null)
             return;
         bool begun = false;
-        foreach (KeyValuePair<int, (int A, int B, int Shots)> w in _ambush)
+        foreach (KeyValuePair<int, (int A, int B, int C, int Shots)> w in _ambush)
         {
             int id = w.Key;
             Vector2I? cell = id == _unitId ? CellHere
@@ -733,15 +784,22 @@ public sealed partial class Tank3DBench
             AxisLine(mesh, ref begun, c, MuzzleOf(id), w.Value.A, SideInk(side), thermal);
             if (w.Value.B >= 0)
                 AxisLine(mesh, ref begun, c, MuzzleOf(id), w.Value.B, SideInk(side), thermal);
+            if (w.Value.C >= 0)
+                AxisLine(mesh, ref begun, c, MuzzleOf(id), w.Value.C, SideInk(side), thermal);
         }
         if (_ambushMode && _fate == Fate.Alive)
         {
             bool thermal = (KitOf(_unitId) & Kit.Thermal) != 0;
             if (_ambushPick is int pick)
                 AxisLine(mesh, ref begun, CellHere, TipAt(CellHere), pick, AimPierce, thermal);
-            if (_ambushAxis is int axis && axis != _ambushPick)
+            int? pick2 = _ambushPick is not null ? _ambushPick2 : null;
+            if (pick2 is int p2)
+                AxisLine(mesh, ref begun, CellHere, TipAt(CellHere), p2, AimPierce, thermal);
+            if (_ambushAxis is int axis && axis != _ambushPick && axis != pick2)
             {
-                string why = _ambushPick is int first ? AmbushWhy(first, axis) : AmbushWhy(axis, -1);
+                string why = _ambushPick is int first
+                    ? pick2 is int second ? AmbushWhy(first, second, axis) : AmbushWhy(first, axis)
+                    : AmbushWhy(axis, -1);
                 AxisLine(mesh, ref begun, CellHere, TipAt(CellHere), axis, why.Length == 0 ? AimPierce : AimOff, thermal);
             }
         }
