@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace TankSpriteTest;
 
@@ -9,8 +10,10 @@ namespace TankSpriteTest;
 public enum AiLevel { Recruit, Fighter, Veteran }
 
 /// <summary>The AI's turn chosen, and what it cost: plays tried, the enemy's
-/// replies tried behind the best of them, milliseconds.</summary>
-public sealed record AiChoice(AiPlay Play, int Plays, double Ms, int Replies = 0);
+/// replies tried behind the best of them, milliseconds; the activations it
+/// looked through (one, two, three) and the turns generated past the second
+/// (<see cref="AiBrain"/>, the veteran's search).</summary>
+public sealed record AiChoice(AiPlay Play, int Plays, double Ms, int Replies = 0, int Depth = 1, int Deep = 0);
 
 /// <summary>
 /// The AI's mind (docs/ai-plan.md, И1-И2). The side to move's plays
@@ -27,15 +30,21 @@ public sealed record AiChoice(AiPlay Play, int Plays, double Ms, int Replies = 0
 /// The recruit stops at the first sieve and picks among its five best with
 /// a temperature; the fighter sees the shot that strikes and nothing after
 /// it (no ricochet, no chain) and picks among three with a little; the
-/// veteran sees everything and takes the best. Knows only the core, works on
-/// its own copy - safe off the main thread. Deterministic for a seed.
+/// veteran sees everything, and its best plays go on to a third activation
+/// (<see cref="Search"/>, И3): the enemy's likeliest replies and its own
+/// best turn after each - the two-turn plan (a wood ground for a gun behind
+/// it, a fork). Knows only the core, works on its own copies - safe off the
+/// main thread, the veteran's roots on threads of their own. Deterministic for
+/// a seed: a root's worth depends on nothing but its state.
 /// </summary>
 public static class AiBrain
 {
     /// <summary>How many plays the full score is asked of.</summary>
     private const int Shortlist = 40;
 
-    public static AiChoice Choose(BattleState state, AiLevel level, Random rng)
+    /// <param name="shallow">The veteran without its third activation - the
+    /// И2 veteran, for <c>--battle-run --ai …:veteran@2</c> to measure the search by.</param>
+    public static AiChoice Choose(BattleState state, AiLevel level, Random rng, bool shallow = false)
     {
         var watch = Stopwatch.StartNew();
         Camp me = state.Turn;
@@ -82,8 +91,118 @@ public static class AiBrain
         }
         best.RemoveRange(deep, best.Count - deep);
         best.Sort((a, b) => b.Play.Score.CompareTo(a.Play.Score));
-        AiPlay chosen = level == AiLevel.Fighter ? Tempered(best, 3, 0.15, rng) : best[0].Play;
-        return new AiChoice(chosen, plays, watch.Elapsed.TotalMilliseconds, replies);
+        if (level == AiLevel.Fighter)
+            return new AiChoice(Tempered(best, 3, 0.15, rng), plays, watch.Elapsed.TotalMilliseconds, replies, 2);
+        if (shallow)
+            return new AiChoice(best[0].Play, plays, watch.Elapsed.TotalMilliseconds, replies, 2);
+        (AiPlay chosen, int searched, bool whole) = Search(best, me, watch);
+        return new AiChoice(chosen, plays, watch.Elapsed.TotalMilliseconds, replies, whole ? 3 : 2, searched);
+    }
+
+    /// <summary>The veteran's roots: its best plays by the second sieve.</summary>
+    private const int Roots = 8;
+    /// <summary>The enemy's replies looked past, its likeliest by the cheap score.</summary>
+    private const int Replies = 6;
+    /// <summary>Our turns after a reply given the full score, the best by the cheap one.</summary>
+    private const int Answers = 4;
+    /// <summary>Past this many milliseconds the third activation is given up
+    /// and the second's play stands.</summary>
+    private const double Budget = 4000.0;
+
+    /// <summary>
+    /// The third activation (docs/ai-plan.md, И3): each of the
+    /// <see cref="Roots"/> best plays is worth the least of its
+    /// <see cref="Replies"/> likeliest replies, and each reply the most of
+    /// our <see cref="Answers"/> best turns after it by the full score - a
+    /// minimax on a beam. The first root sets the bar; the others, on
+    /// threads, leave a reply as soon as it is under it (alpha-beta: such a
+    /// root cannot be the best). A side that moves twice running (the enemy
+    /// has nobody, the round turns) is asked as it comes. Over the budget it
+    /// stands down to the second activation's choice, the first of
+    /// <paramref name="ranked"/>. Returns the play, the turns generated, and
+    /// whether the search was whole.
+    /// </summary>
+    private static (AiPlay Play, int Searched, bool Whole) Search(List<(AiPlay Play, BattleState After)> ranked, Camp me,
+                                                                  Stopwatch watch)
+    {
+        int n = Math.Min(Roots, ranked.Count);
+        if (n < 2 || Math.Abs(ranked[0].Play.Score) >= AiEval.Decided / 2)
+            return (ranked[0].Play, 0, false);
+        var worth = new double[n];
+        var turns = new int[n];
+        double deadline = watch.Elapsed.TotalMilliseconds + Budget;
+        int first = 0;
+        worth[0] = Node(ranked[0].After, me, 2, double.NegativeInfinity, new AiThreat(full: true), ref first, watch, deadline);
+        turns[0] = first;
+        double bar = worth[0];
+        Parallel.For(1, n, i =>
+        {
+            int count = 0;
+            worth[i] = Node(ranked[i].After, me, 2, bar, new AiThreat(full: true), ref count, watch, deadline);
+            turns[i] = count;
+        });
+        int searched = 0;
+        foreach (int c in turns)
+            searched += c;
+        if (watch.Elapsed.TotalMilliseconds > deadline)
+            return (ranked[0].Play, searched, false);
+        int at = 0;
+        for (int i = 1; i < n; i++)
+            if (worth[i] > worth[at])
+                at = i;
+        AiPlay chosen = ranked[at].Play;
+        chosen.Score = worth[at];
+        return (chosen, searched, true);
+    }
+
+    /// <summary>What <paramref name="s"/> is worth to <paramref name="me"/>
+    /// with <paramref name="depth"/> activations still to look through: ours
+    /// the best, the enemy's the worst; the last of ours by the full score.
+    /// <paramref name="alpha"/>: below it an enemy's node is not worth
+    /// finishing.</summary>
+    private static double Node(BattleState s, Camp me, int depth, double alpha, AiThreat threats, ref int turns,
+                               Stopwatch watch, double deadline)
+    {
+        if (s.Over)
+            return AiEval.Quick(s, me);
+        if (depth == 0 || watch.Elapsed.TotalMilliseconds > deadline)
+            return s.Turn == me ? AiEval.AfterReply(s, me, threats) : AiEval.Full(s, me, threats);
+        bool mine = s.Turn == me;
+        int keep = mine ? Answers : Replies;
+        var kept = new List<(double Key, BattleState After)>(keep + 1);
+        turns++;
+        AiMoves.Each(s, (_, after) =>
+        {
+            // ours the highest, the enemy's the lowest by our cheap score
+            double q = AiEval.Quick(after, me);
+            double key = mine ? q : -q;
+            if (kept.Count == keep && key <= kept[^1].Key)
+                return;
+            int at = kept.Count;
+            while (at > 0 && kept[at - 1].Key < key)
+                at--;
+            kept.Insert(at, (key, after));
+            if (kept.Count > keep)
+                kept.RemoveAt(kept.Count - 1);
+        });
+        if (kept.Count == 0)
+            return mine ? AiEval.Full(s, me, threats) : AiEval.AfterReply(s, me, threats);
+        double value = mine ? double.NegativeInfinity : double.PositiveInfinity;
+        foreach ((double _, BattleState after) in kept)
+        {
+            double v = mine && depth == 1
+                ? (after.Over ? AiEval.Quick(after, me) : AiEval.Full(after, me, threats))
+                : Node(after, me, depth - 1, alpha, threats, ref turns, watch, deadline);
+            if (mine)
+                value = Math.Max(value, v);
+            else
+            {
+                value = Math.Min(value, v);
+                if (value <= alpha)
+                    return value;
+            }
+        }
+        return value;
     }
 
     /// <summary>The play into the sorted list of the <paramref name="most"/> best.</summary>

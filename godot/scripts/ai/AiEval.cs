@@ -81,13 +81,13 @@ public static class AiEval
         // alive with rounds that glance off a tank (each puts the
         // stalemate's clock back, match.md)
         if (s.Drawn)
-            return s.HarmlessRounds >= Stale ? Material(s, me) : Drawn;
+            return s.HarmlessFor(me) >= Stale ? Material(s, me) : Drawn;
         double score = Material(s, me);
         // the stalemate's clock, read as rounds with nobody harmed - a round
         // that glances off a tank does not wind it back: quiet rounds weigh on
         // the side asking, so it goes and takes something - the more, the
         // further ahead it is (ai-plan.md, «Пат»: the leader has a win to lose)
-        int quiet = s.HarmlessRounds;
+        int quiet = s.HarmlessFor(me);
         score -= quiet * (Quiet + Lead * Math.Max(0.0, score));
         foreach (BattleUnit u in s.Units)
         {
@@ -161,7 +161,7 @@ public static class AiEval
         if (s.Over)
             return score;
         (double worst, double others) = threats.Of(s, Across(me));
-        double fear = Math.Max(0.3, 1.0 - 0.25 * s.HarmlessRounds);
+        double fear = Math.Max(0.3, 1.0 - 0.25 * s.HarmlessFor(me));
         score -= fear * (Worst * worst + Others * others);
         return score + Initiative * threats.Of(s, me).Worst;
     }

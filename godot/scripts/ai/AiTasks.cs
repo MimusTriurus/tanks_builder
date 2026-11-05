@@ -46,21 +46,54 @@ public static class AiTasks
         return failed;
     }
 
-    /// <summary>Every problem at both levels, into <paramref name="check"/>.</summary>
+    /// <summary>Every problem at both levels, into <paramref name="check"/>;
+    /// the plans over two turns (<see cref="Plans"/>) at the veteran's.</summary>
     public static void Run(Action<string, bool, string> check)
     {
         foreach (AiLevel level in new[] { AiLevel.Fighter, AiLevel.Veteran })
             foreach ((string name, Func<BattleState> setup, Func<BattleState, BattleState, bool> ok) in Problems())
             {
-                BattleState start = setup();
-                start.Turn = Camp.Green;
-                start.Active = Battle.FirstReady(start, Camp.Green)?.Id;
-                AiChoice c = AiBrain.Choose(start, level, new Random(7));
+                BattleState start = Ready(setup());
+                AiChoice c;
+                try
+                {
+                    c = AiBrain.Choose(start, level, new Random(7));
+                }
+                finally
+                {
+                    // a problem's setup may let the own glance in (AiMoves.OwnGlances)
+                    AiMoves.OwnGlances = false;
+                }
                 (BattleState after, string? refused) = Play(start, c.Play);
                 bool good = refused is null && ok(start, after);
                 check($"{level}: {name}", good,
                       $"{c.Play} {(refused is null ? "" : $"refused: {refused}; ")}events: {string.Join(", ", after.Events)}");
             }
+        foreach ((string name, Func<BattleState> setup, Func<BattleState, BattleState, bool> ok) in Plans())
+        {
+            // green the veteran, the enemy's reply the fighter's, green again
+            BattleState start = Ready(setup());
+            BattleState s = start;
+            var said = new List<string>();
+            string? refused = null;
+            var rng = new Random(7);
+            for (int turn = 0; turn < 3 && refused is null && !s.Over; turn++)
+            {
+                AiChoice c = AiBrain.Choose(s, s.Turn == Camp.Green ? AiLevel.Veteran : AiLevel.Fighter, rng);
+                said.Add($"{s.Turn}: {c.Play}");
+                (s, refused) = Play(s, c.Play);
+            }
+            check($"{AiLevel.Veteran}: {name}", refused is null && ok(start, s),
+                  $"{string.Join("; ", said)} {(refused is null ? "" : $"refused: {refused}; ")}events: {string.Join(", ", s.Events)}");
+        }
+    }
+
+    /// <summary>Green to move, its first unit able to act taken.</summary>
+    private static BattleState Ready(BattleState s)
+    {
+        s.Turn = Camp.Green;
+        s.Active = Battle.FirstReady(s, Camp.Green)?.Id;
+        return s;
     }
 
     /// <summary>The play on a copy, as the bench gives it: each order, the
@@ -142,6 +175,8 @@ public static class AiTasks
             Put(s, 2, "HMR", Camp.Brown, past.X, past.Y, 90);
             // neither may move: the glance is the only way at the mortar
             s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
+            // off in play until the bench has it (AiMoves.OwnGlances)
+            AiMoves.OwnGlances = true;
             return s;
         }, (_, a) => a.Unit(2)!.Fate != UnitFate.Alive && a.Unit(1)!.Fate == UnitFate.Alive);
 
@@ -200,12 +235,39 @@ public static class AiTasks
         }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive);
     }
 
+    /// <summary>Problems a turn does not settle: green's play, the enemy's
+    /// reply, green's next play, and what they come to (docs/ai-plan.md, И3).</summary>
+    private static IEnumerable<(string, Func<BattleState>, Func<BattleState, BattleState, bool>)> Plans()
+    {
+        // 12. the heavy stands in the destroyer's lane: it steps aside, the
+        // destroyer fires through the wall next turn (the wall takes one off
+        // its IV, the mortar's front is I). The mortar is pinned and six out of
+        // the destroyer, past its own reach; woods at its sides shut the
+        // flanks, the wall the heavy's round, deep water behind the wall the
+        // heavy's ram through it (И2's veteran rammed it and shot from beside).
+        yield return ("HT steps out of the TD's lane, the TD fires through the wall next turn", () =>
+        {
+            Vector2I at = new(4, 3);
+            var woods = new List<Vector2I>();
+            foreach (int h in new[] { 30, 150, 210, 330 })
+                woods.Add(HexField.Step(at, h));
+            BattleState s = Board(woods: woods.ToArray(), walls: new[] { (new Vector2I(4, 5), 90) },
+                                  deep: new[] { new Vector2I(4, 4) });
+            Put(s, 0, "TDR", Camp.Green, 4, 9, 90);
+            Put(s, 1, "HTR", Camp.Green, 4, 8, 90);
+            Put(s, 2, "HMR", Camp.Brown, at.X, at.Y, 270);
+            s.Unit(2)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Unit(2)!.Fate != UnitFate.Alive);
+    }
+
     private const int Columns = 9, Rows = 10;
 
     /// <summary>A board of its own (the self test's probe board): flat ground,
-    /// the woods, mines, walls (a cell and an edge) and levels asked for.</summary>
+    /// the woods, mines, walls (a cell and an edge), deep water and levels asked for.</summary>
     private static BattleState Board(Vector2I[]? woods = null, Vector2I[]? mines = null,
-                                     (Vector2I Cell, int Heading)[]? walls = null, int[]? levels = null)
+                                     (Vector2I Cell, int Heading)[]? walls = null, int[]? levels = null,
+                                     Vector2I[]? deep = null)
     {
         var field = new HexField { Trees = false, Columns = Columns, Rows = Rows };
         var cover = new Cover[Columns * Rows];
@@ -216,6 +278,8 @@ public static class AiTasks
             cover[m.Y * Columns + m.X] = Cover.Minefield;
         foreach ((Vector2I c, int _) in walls ?? Array.Empty<(Vector2I, int)>())
             cover[c.Y * Columns + c.X] = Cover.Walls;
+        foreach (Vector2I d in deep ?? Array.Empty<Vector2I>())
+            ground[d.Y * Columns + d.X] = Foundation.Deep;
         field.SetGround(ground);
         field.SetCover(cover);
         if (levels is not null)

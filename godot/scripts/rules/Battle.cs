@@ -139,11 +139,12 @@ public sealed class BattleState
     /// none yet - the first is the contact the stalemate's clock waits for
     /// (GameModes.md, «Пат — ничья»).</summary>
     public int LastStrike;
-    /// <summary>The round a unit was last knocked out, drowned, destroyed or
-    /// set alight, nought for none yet - not a rule: the AI's clock of a
-    /// match going nowhere (docs/ai-plan.md, И2). A round that only glances
-    /// off a tank puts the stalemate's clock back, not this one.</summary>
-    public int LastHarm;
+    /// <summary>The round a unit of each side was last knocked out, drowned,
+    /// destroyed or set alight, nought for none yet - not a rule: the AI's
+    /// clock of a match going nowhere (docs/ai-plan.md, И2-И3). A round that
+    /// only glances off a tank puts the stalemate's clock back, not this one;
+    /// a side's own loss does not either (<see cref="HarmlessFor"/>).</summary>
+    public int LastHarmGreen, LastHarmBrown;
     /// <summary>The control point's hexes (match.md, «Удержание точки»); null in
     /// a match played to the last tank.</summary>
     public Vector2I[]? Point;
@@ -173,9 +174,22 @@ public sealed class BattleState
     public int QuietRounds => LastStrike == 0 && LastShift == 0
         ? 0 : Math.Max(0, Round - 1 - Math.Max(LastStrike, LastShift));
 
-    /// <summary>Whole rounds since a unit was last harmed or the point changed
-    /// hands (<see cref="LastHarm"/>) - the AI's, not the stalemate's.</summary>
-    public int HarmlessRounds => Math.Max(0, Round - 1 - Math.Max(LastHarm, LastShift));
+    /// <summary>Whole rounds since <paramref name="me"/> last harmed the
+    /// enemy or the point changed hands (<see cref="LastHarmGreen"/>) - the
+    /// AI's clock, not the stalemate's. Its own losses do not wind it back:
+    /// a side ahead, pressed by it, would else throw a tank away to be let
+    /// off (docs/ai-plan.md, И3: a heavy driven into the sea).</summary>
+    public int HarmlessFor(Camp me) =>
+        Math.Max(0, Round - 1 - Math.Max(me == Camp.Green ? LastHarmBrown : LastHarmGreen, LastShift));
+
+    /// <summary><paramref name="u"/> harmed this round (<see cref="HarmlessFor"/>).</summary>
+    public void Harmed(BattleUnit u)
+    {
+        if (u.Side == Camp.Green)
+            LastHarmGreen = Round;
+        else
+            LastHarmBrown = Round;
+    }
 
     public BattleUnit? Unit(int id)
     {

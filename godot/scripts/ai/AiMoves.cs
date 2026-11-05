@@ -407,9 +407,20 @@ public static class AiMoves
     /// the round go at any hex of the axis; the bench too. Never at an own
     /// hull out of the fight (meta.md).
     /// </summary>
+    /// <summary>
+    /// The glance off an own hull is offered (<see cref="Glances"/>). Off:
+    /// the core plays it (units.md, «Рикошет»), the bench cannot yet - its
+    /// round strikes only the tank taken as the target, an own tank is never
+    /// one (a click on it takes it), a round at its hex goes into the ground
+    /// and one past it is refused by the lane (<c>Tank3DBench.LaneShut</c>);
+    /// the shadow diverged (docs/ai-plan.md, И3). On for the tactical problem
+    /// that asks for it (<see cref="AiTasks"/>) until the bench has it.
+    /// </summary>
+    public static bool OwnGlances;
+
     private static void Glances(BattleState s, BattleUnit u, List<Order> all)
     {
-        if (u.Class.Lobs)
+        if (u.Class.Lobs || !OwnGlances)
             return;
         foreach (int h in HexField.EdgeHeadings)
         {

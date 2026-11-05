@@ -446,7 +446,7 @@ public static partial class Battle
                 else
                 {
                     u.Fate = UnitFate.Drowned;
-                    s.LastHarm = s.Round;
+                    s.Harmed(u);
                     s.Events.Add(new BattleEvent(BattleEventKind.Drowned, u.Id, c));
                     Lift(s, u, "drowned");
                 }
@@ -790,7 +790,7 @@ public static partial class Battle
             if (s.Board.IsDeep(at) && victim.Fate == UnitFate.Knocked)
             {
                 victim.Fate = UnitFate.Drowned;
-                s.LastHarm = s.Round;
+                s.Harmed(victim);
                 s.Events.Add(new BattleEvent(BattleEventKind.Drowned, victim.Id, at));
             }
             // a hull out of the fight shoved on to an axis is crossing it too
@@ -1179,7 +1179,7 @@ public static partial class Battle
             if (s.Board.IsDeep(mid) && hull.Fate == UnitFate.Knocked)
             {
                 hull.Fate = UnitFate.Drowned;
-                s.LastHarm = s.Round;
+                s.Harmed(hull);
                 s.Events.Add(new BattleEvent(BattleEventKind.Drowned, hull.Id, mid));
             }
             Disperse(s, hull);
@@ -1496,7 +1496,7 @@ public static partial class Battle
         u.Burning = false;
         bool deep = s.Board.IsDeep(u.Cell) && s.Board.RampHeading(u.Cell) < 0;
         u.Fate = deep ? UnitFate.Drowned : UnitFate.Knocked;
-        s.LastHarm = s.Round;
+        s.Harmed(u);
         s.Events.Add(new BattleEvent(deep ? BattleEventKind.Drowned : BattleEventKind.Knocked, u.Id, u.Cell));
         Lift(s, u, "out of the fight");
         Over(s);
@@ -1513,7 +1513,7 @@ public static partial class Battle
         if (u.Fate == UnitFate.Destroyed)
             return;
         u.Fate = UnitFate.Destroyed;
-        s.LastHarm = s.Round;
+        s.Harmed(u);
         u.Burning = false;
         s.Events.Add(new BattleEvent(BattleEventKind.Exploded, u.Id, u.Cell));
         Lift(s, u, "destroyed");
@@ -1546,7 +1546,7 @@ public static partial class Battle
         if (u.Fate != UnitFate.Alive || u.Burning || s.Board.IsWater(u.Cell))
             return;
         u.Burning = true;
-        s.LastHarm = s.Round;
+        s.Harmed(u);
         u.BurnSince = s.TurnNo;
         s.Events.Add(new BattleEvent(BattleEventKind.Ignited, u.Id, u.Cell, 0, why));
     }

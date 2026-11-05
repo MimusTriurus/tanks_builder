@@ -165,9 +165,13 @@ public static class BattleRun
             return Refuse($"--ai {spec}: both, green or brown");
         string[] words = parts.Length > 1 ? parts[1].Split(',') : new[] { "fighter" };
         var levels = new AiLevel[2];
+        var shallow = new bool[2];
         for (int i = 0; i < 2; i++)
         {
             string w = words[Math.Min(i, words.Length - 1)];
+            // veteran@2: the veteran without its third activation (AiBrain.Choose)
+            shallow[i] = w.EndsWith("@2");
+            w = shallow[i] ? w[..^2] : w;
             if (AiBrain.LevelOf(w) is not AiLevel level)
                 return Refuse($"--ai {spec}: no level {w} - recruit, fighter, veteran");
             levels[i] = level;
@@ -220,12 +224,12 @@ public static class BattleRun
             List<Order> orders;
             if (Plays(side))
             {
-                AiChoice c = AiBrain.Choose(s, levels[side == Camp.Green ? 0 : 1], rng);
+                AiChoice c = AiBrain.Choose(s, levels[side == Camp.Green ? 0 : 1], rng, shallow[side == Camp.Green ? 0 : 1]);
                 plays += c.Plays;
                 ms += c.Ms;
                 worst = Math.Max(worst, c.Ms);
                 string line = FormattableString.Invariant(
-                    $"battle-run: round {s.Round} {side}: {c.Play.Say(s.Shift)} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Replies} replies, {c.Ms:F1} ms");
+                    $"battle-run: round {s.Round} {side}: {c.Play.Say(s.Shift)} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Replies} replies, depth {c.Depth} ({c.Deep} deep), {c.Ms:F1} ms");
                 said.Add(line);
                 Log.Print(line);
                 orders = c.Play.Orders.Select(o => o.Moved(-s.Shift)).ToList();
