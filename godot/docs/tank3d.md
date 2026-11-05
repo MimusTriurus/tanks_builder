@@ -3256,6 +3256,10 @@ back`, и танк стоит на плите.
     **Уровень ИИ** (2026-11-05) — в «Параметрах боя против ИИ» рядом с бюджетом
     и доктриной (`QuickSetup.Level`, чип над отрядом, `--quick-do ai-level:…`);
     флаг `--ai SIDE:LEVEL` главнее. Тактические задачи ИИ — `-- --ai-tasks`.
+    **Расстановка ИИ** (2026-11-05, `AiDeploy`, ai-plan.md, И4): в быстром
+    бою ИИ ставит свою сторону в зоне до расстановки игрока, втёмную; в
+    партии `--ai` с зонами — когда до стороны доходит расстановка, и сразу
+    «В бой» (`AiDeploySide`). Лог: `tank3d: ai: Brown placed - …`.
   - `--quick-do "doctrine:1;build;company:2;level:1:ram:3;shot:PATH;go"`
     ведёт экраны для снимка: `lobby`, `build`, `map:`, `budget:`,
     `ai-budget:`, `doctrine:N|random`, `company:N`, `preset:N` (щелчок по роте ангара, с вопросом только после правок), `name:TEXT` (имя отряда), `class:SLOT:TAG`, `params`, `mapview`, `close`, `swap`, `tip:SLOT:BRANCH:L` (подсказка узла, как от указателя), `focus:SLOT:BRANCH:L` (фокус клавиатуры; `L` 0 — заголовок ветки), `try-go` (кнопка «К РАССТАНОВКЕ»), `clear` (вопрос «Очистить отряд?»),

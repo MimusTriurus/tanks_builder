@@ -49,6 +49,7 @@ public static class BattleRun
         bool probeCheck = false;
         Handicap handicap = Handicap.None;
         bool swap = false, rotCheck = false;
+        string? deploy = null;
         for (int i = 0; i < args.Length; i++)
         {
             bool more = i + 1 < args.Length;
@@ -66,12 +67,14 @@ public static class BattleRun
             else if (a == "--probe-check") probeCheck = true;
             else if (a == "--swap-sides") swap = true;
             else if (a == "--rot-check") rotCheck = true;
+            else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
+            else if (a == "--deploy-lead" && more) AiDeploy.Lead = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
             else if (a == "--handicap" && more && Enum.TryParse(args[++i], true, out Handicap h)) handicap = h;
         }
         try
         {
             if (ai is not null)
-                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck, handicap, swap, rotCheck);
+                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck, handicap, swap, rotCheck, deploy);
             return Run(mapName, scriptPath, commands, outDir, first, measure, slopes);
         }
         catch (Exception e)
@@ -152,7 +155,7 @@ public static class BattleRun
     /// </summary>
     private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes,
                              bool probeCheck = false, Handicap handicap = Handicap.None,
-                             bool swap = false, bool rotCheck = false)
+                             bool swap = false, bool rotCheck = false, string? deploy = null)
     {
         if (mapName is null)
             return Refuse("--battle-run wants a map");
@@ -188,6 +191,22 @@ public static class BattleRun
         // the placement as the homes stand
         if (place.Side is not null)
             Play(s, new List<Order> { new(OrderKind.Ready), new(OrderKind.Ready) }, place, said);
+        // --deploy green|brown|both: the AI places those sides in their zones
+        // (AiDeploy), blind to the other's; the rest stand on their homes
+        if (deploy is not null)
+        {
+            var dice = new Random(seed * 7919 + 17);
+            foreach (Camp c in new[] { first, first == Camp.Green ? Camp.Brown : Camp.Green })
+            {
+                if (deploy != "both" && deploy != (c == Camp.Green ? "green" : "brown"))
+                    continue;
+                List<Vector2I> zone = ZoneOf(map, c, s.Shift), across = ZoneOf(map, c == Camp.Green ? Camp.Brown : Camp.Green, s.Shift);
+                List<AiDeploy.Spot> spots = AiDeploy.Place(s, c, zone, across, dice);
+                AiDeploy.Apply(s, spots);
+                Log.Print($"battle-run: {c} placed by the AI - {string.Join(", ", spots.Select(p => $"#{p.Unit} ({(p.Cell - s.Shift).X},{(p.Cell - s.Shift).Y}) h{p.Heading}"))}");
+            }
+            s.Active = Battle.FirstReady(s, s.Turn)?.Id;
+        }
         // --swap-sides: the colours change places, the units stay - a side's
         // edge from the map stays with the place, one from the code with the colour
         if (swap)
@@ -594,6 +613,15 @@ public static class BattleRun
     /// hex of its zone - its homes where the map draws none - and <c>ready</c>
     /// to hand on. Only on a map with a zone, as on the bench.
     /// </summary>
+    /// <summary>A side's zone on the core's board: the map's, else its homes'.</summary>
+    private static List<Vector2I> ZoneOf(BoardMap map, Camp side, Vector2I shift)
+    {
+        IReadOnlyList<Vector2I> zone = map.Arena.Zone(side == Camp.Brown ? Parking.Brown : Parking.Green);
+        if (zone.Count == 0)
+            zone = Lineup.Of(map.Parked).Where(u => (u.Side == Parking.Brown) == (side == Camp.Brown)).Select(u => u.Cell).ToList();
+        return zone.Select(c => c + shift).ToList();
+    }
+
     private sealed class Placing
     {
         private readonly BoardMap _map;

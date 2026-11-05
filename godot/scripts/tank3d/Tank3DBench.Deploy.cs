@@ -143,8 +143,16 @@ public sealed partial class Tank3DBench
             return;
         Log.Print("tank3d: match: placement - green zone " + Zoned(Side.Green) + ", brown zone " + Zoned(Side.Brown));
         // player 1 first (Tank3DBench.Match, the toss)
-        // a quick battle places the player's side alone, the AI standing on its homes (Tank3DBench.Quick)
-        DeploySide(_quick is { } q ? q.Player : _mt.First);
+        // a quick battle places the player's side alone; the AI's is placed
+        // first, blind, and hidden till the battle (Tank3DBench.Ai, AiDeploy)
+        if (_quick is { } q)
+        {
+            if (AiPlays(Across(q.Player)))
+                AiDeploySide(Across(q.Player));
+            DeploySide(q.Player);
+            return;
+        }
+        DeploySide(_mt.First);
     }
 
     private string Zoned(Side side) =>
@@ -175,6 +183,13 @@ public sealed partial class Tank3DBench
         DeployShow(side);
         _deployCells.Clear();
         _deployCells.AddRange(DeployZone(side));
+        // a side the AI plays places itself and is ready at once
+        if (AiPlays(side) && _quick is null)
+        {
+            AiDeploySide(side);
+            DeployReady();
+            return;
+        }
         // straight down on the board, the side's own edge at the bottom of
         // the screen (the author's note, 2026-11-01) - at once
         DeployLookDown(side);

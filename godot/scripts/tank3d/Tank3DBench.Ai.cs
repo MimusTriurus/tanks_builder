@@ -93,6 +93,37 @@ public sealed partial class Tank3DBench
     /// shut by the player («К бою», Tank3DBench.Quick).</summary>
     private bool AiMayGo => AiTurn && _qReveal is null;
 
+    /// <summary>The AI's dice, seeded once a match (<c>--ai-seed</c>, else the
+    /// clock - logged, so the match plays again).</summary>
+    private Random AiDice()
+    {
+        if (_aiRng is null)
+        {
+            int seed = _aiSeed >= 0 ? _aiSeed : (int)(Time.GetTicksUsec() % int.MaxValue);
+            _aiRng = new Random(seed);
+            Log.Print($"tank3d: ai: seed {seed} (--ai-seed {seed} plays it again), level {_aiLevel}");
+        }
+        return _aiRng;
+    }
+
+    /// <summary>
+    /// The AI places <paramref name="side"/> in its zone, blind to the
+    /// other's (<see cref="AiDeploy"/>; docs/ai-plan.md, И4): a quick battle's
+    /// AI before the player places, a side the AI plays when its placement
+    /// comes. The tanks are set as a «place» sets them.
+    /// </summary>
+    private void AiDeploySide(Side side)
+    {
+        if (_field is null)
+            return;
+        BattleState s = ShadowOfBench();
+        List<AiDeploy.Spot> spots = AiDeploy.Place(s, CampOf(side), DeployZone(side), DeployZone(Across(side)), AiDice());
+        foreach (AiDeploy.Spot p in spots)
+            DeploySet(p.Unit, p.Cell, p.Heading);
+        Log.Print($"tank3d: ai: {SideName(side)} placed - "
+                  + string.Join(", ", spots.ConvertAll(p => $"#{p.Unit} {MapAt(p.Cell)} facing {p.Heading}")));
+    }
+
     /// <summary>Every frame of a match, after the turn's own pacing: think,
     /// then give the play's orders one by one.</summary>
     private void AiTick(bool busy, float dt)
@@ -143,15 +174,9 @@ public sealed partial class Tank3DBench
         if (_aiTurnNo != _mt.TurnNo)
         {
             _aiQueue.Clear();
-            if (_aiRng is null)
-            {
-                int seed = _aiSeed >= 0 ? _aiSeed : (int)(Time.GetTicksUsec() % int.MaxValue);
-                _aiRng = new Random(seed);
-                Log.Print($"tank3d: ai: seed {seed} (--ai-seed {seed} plays it again), level {_aiLevel}");
-            }
             BattleState now = ShadowOfBench();
             AiLevel level = _aiLevel;
-            Random rng = _aiRng;
+            Random rng = AiDice();
             _aiThink = Task.Run(() => AiBrain.Choose(now, level, rng));
             _matchNote = L.T("ai.thinking");
             return;
