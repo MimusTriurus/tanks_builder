@@ -44,9 +44,10 @@ public static class AiBrain
 
     /// <param name="shallow">The veteran without its third activation - the
     /// И2 veteran, for <c>--battle-run --ai …:veteran@2</c> to measure the search by.</param>
-    public static AiChoice Choose(BattleState state, AiLevel level, Random rng, bool shallow = false)
+    public static AiChoice Choose(BattleState state, AiLevel level, Random rng, bool shallow = false, AiStyle? style = null)
     {
         var watch = Stopwatch.StartNew();
+        AiStyle st = style ?? AiStyle.Plain;
         Camp me = state.Turn;
         BattleState root = AiMoves.Copy(state);
         int keep = level == AiLevel.Recruit ? 5 : Shortlist;
@@ -54,7 +55,7 @@ public static class AiBrain
         int plays = AiMoves.Each(root, (play, after) =>
         {
             // a hair of noise so equal plays do not always fall the same way
-            play.Score = AiEval.Quick(after, me) + rng.NextDouble() * 1e-4;
+            play.Score = AiEval.Quick(after, me, st) + rng.NextDouble() * 1e-4;
             Keep(best, keep, play, after);
         });
         if (best.Count == 0)
@@ -64,7 +65,7 @@ public static class AiBrain
 
         var threats = new AiThreat(full: level == AiLevel.Veteran);
         foreach ((AiPlay p, BattleState after) in best)
-            p.Score = AiEval.Full(after, me, threats) + rng.NextDouble() * 1e-4;
+            p.Score = AiEval.Full(after, me, threats, st) + rng.NextDouble() * 1e-4;
         best.Sort((a, b) => b.Play.Score.CompareTo(a.Play.Score));
 
         int deep = Math.Min(best.Count, level == AiLevel.Veteran ? 10 : 6);
@@ -79,7 +80,7 @@ public static class AiBrain
             BattleState? lowState = null;
             replies += AiMoves.Each(after, (_, reply) =>
             {
-                double v = AiEval.Quick(reply, me);
+                double v = AiEval.Quick(reply, me, st);
                 if (v < low)
                 {
                     low = v;
@@ -87,7 +88,7 @@ public static class AiBrain
                 }
             });
             if (lowState is not null)
-                p.Score = AiEval.AfterReply(lowState, me, threats) + rng.NextDouble() * 1e-4;
+                p.Score = AiEval.AfterReply(lowState, me, threats, st) + rng.NextDouble() * 1e-4;
         }
         best.RemoveRange(deep, best.Count - deep);
         best.Sort((a, b) => b.Play.Score.CompareTo(a.Play.Score));
@@ -95,7 +96,7 @@ public static class AiBrain
             return new AiChoice(Tempered(best, 3, 0.15, rng), plays, watch.Elapsed.TotalMilliseconds, replies, 2);
         if (shallow)
             return new AiChoice(best[0].Play, plays, watch.Elapsed.TotalMilliseconds, replies, 2);
-        (AiPlay chosen, int searched, bool whole) = Search(best, me, watch);
+        (AiPlay chosen, int searched, bool whole) = Search(best, me, watch, st);
         return new AiChoice(chosen, plays, watch.Elapsed.TotalMilliseconds, replies, whole ? 3 : 2, searched);
     }
 
@@ -123,7 +124,7 @@ public static class AiBrain
     /// whether the search was whole.
     /// </summary>
     private static (AiPlay Play, int Searched, bool Whole) Search(List<(AiPlay Play, BattleState After)> ranked, Camp me,
-                                                                  Stopwatch watch)
+                                                                  Stopwatch watch, AiStyle st)
     {
         int n = Math.Min(Roots, ranked.Count);
         if (n < 2 || Math.Abs(ranked[0].Play.Score) >= AiEval.Decided / 2)
@@ -132,13 +133,13 @@ public static class AiBrain
         var turns = new int[n];
         double deadline = watch.Elapsed.TotalMilliseconds + Budget;
         int first = 0;
-        worth[0] = Node(ranked[0].After, me, 2, double.NegativeInfinity, new AiThreat(full: true), ref first, watch, deadline);
+        worth[0] = Node(ranked[0].After, me, 2, double.NegativeInfinity, new AiThreat(full: true), ref first, watch, deadline, st);
         turns[0] = first;
         double bar = worth[0];
         Parallel.For(1, n, i =>
         {
             int count = 0;
-            worth[i] = Node(ranked[i].After, me, 2, bar, new AiThreat(full: true), ref count, watch, deadline);
+            worth[i] = Node(ranked[i].After, me, 2, bar, new AiThreat(full: true), ref count, watch, deadline, st);
             turns[i] = count;
         });
         int searched = 0;
@@ -161,12 +162,12 @@ public static class AiBrain
     /// <paramref name="alpha"/>: below it an enemy's node is not worth
     /// finishing.</summary>
     private static double Node(BattleState s, Camp me, int depth, double alpha, AiThreat threats, ref int turns,
-                               Stopwatch watch, double deadline)
+                               Stopwatch watch, double deadline, AiStyle st)
     {
         if (s.Over)
-            return AiEval.Quick(s, me);
+            return AiEval.Quick(s, me, st);
         if (depth == 0 || watch.Elapsed.TotalMilliseconds > deadline)
-            return s.Turn == me ? AiEval.AfterReply(s, me, threats) : AiEval.Full(s, me, threats);
+            return s.Turn == me ? AiEval.AfterReply(s, me, threats, st) : AiEval.Full(s, me, threats, st);
         bool mine = s.Turn == me;
         int keep = mine ? Answers : Replies;
         var kept = new List<(double Key, BattleState After)>(keep + 1);
@@ -174,7 +175,7 @@ public static class AiBrain
         AiMoves.Each(s, (_, after) =>
         {
             // ours the highest, the enemy's the lowest by our cheap score
-            double q = AiEval.Quick(after, me);
+            double q = AiEval.Quick(after, me, st);
             double key = mine ? q : -q;
             if (kept.Count == keep && key <= kept[^1].Key)
                 return;
@@ -186,13 +187,13 @@ public static class AiBrain
                 kept.RemoveAt(kept.Count - 1);
         });
         if (kept.Count == 0)
-            return mine ? AiEval.Full(s, me, threats) : AiEval.AfterReply(s, me, threats);
+            return mine ? AiEval.Full(s, me, threats, st) : AiEval.AfterReply(s, me, threats, st);
         double value = mine ? double.NegativeInfinity : double.PositiveInfinity;
         foreach ((double _, BattleState after) in kept)
         {
             double v = mine && depth == 1
-                ? (after.Over ? AiEval.Quick(after, me) : AiEval.Full(after, me, threats))
-                : Node(after, me, depth - 1, alpha, threats, ref turns, watch, deadline);
+                ? (after.Over ? AiEval.Quick(after, me, st) : AiEval.Full(after, me, threats, st))
+                : Node(after, me, depth - 1, alpha, threats, ref turns, watch, deadline, st);
             if (mine)
                 value = Math.Max(value, v);
             else

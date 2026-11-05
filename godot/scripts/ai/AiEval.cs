@@ -70,8 +70,9 @@ public static class AiEval
     }
 
     /// <summary>The cheap score, asked of every play and every reply.</summary>
-    public static double Quick(BattleState s, Camp me)
+    public static double Quick(BattleState s, Camp me, AiStyle? style = null)
     {
+        AiStyle st = style ?? AiStyle.Plain;
         if (s.Won is Camp w)
             return w == me ? Decided : -Decided;
         // a draw: the AI fights to the end (meta.md, «ИИ противника и мета») -
@@ -96,18 +97,27 @@ public static class AiEval
             double sign = u.Side == me ? 1.0 : -1.0;
             // to the enemy: the mortar to its band, the guns to the nearest
             int near = Nearest(s, u);
+            // the doctrine's (AiStyle) for our own units; the enemy's read plain
+            AiStyle my = u.Side == me ? st : AiStyle.Plain;
             if (near < int.MaxValue)
             {
-                int want = u.Class.Lobs ? 4 : u.Class.Turreted ? 2 : 3;
+                int want = u.Class.Lobs ? 4 : Math.Max(1, (u.Class.Turreted ? 2 : 3) + my.Reach);
                 // the pull grows with the stalemate's clock: a side that sits
                 // still the whole match is drawn
-                score -= sign * Approach * (1.0 + 0.5 * Math.Min(quiet, 4)) * Math.Abs(near - want);
+                score -= sign * my.Pull * Approach * (1.0 + 0.5 * Math.Min(quiet, 4)) * Math.Abs(near - want);
+            }
+            if (u.Side == me)
+            {
+                if (st.Front > 0.0 && Faced(s, u))
+                    score -= st.Front;
+                if (st.Watch > 0.0 && u.Ambushing)
+                    score += st.Watch;
             }
             // the formation: an own hull beside is a chain waiting for a spark
             // (states.md, «Уничтожен»), each pair once
             foreach (BattleUnit o in s.Units)
                 if (o.Id > u.Id && o.Side == u.Side && o.Fate == UnitFate.Alive && HexField.Distance(u.Cell, o.Cell) == 1)
-                    score -= sign * Huddle;
+                    score -= sign * my.Huddle * Huddle;
         }
         if (s.Point is { } point && point.Length > 0)
             score += PointScore(s, me, point);
@@ -155,21 +165,44 @@ public static class AiEval
     /// activation can take - its best most, for one unit acts; the fear eases
     /// as the stalemate nears - and a little for what ours could take after.
     /// </summary>
-    public static double Full(BattleState s, Camp me, AiThreat threats)
+    public static double Full(BattleState s, Camp me, AiThreat threats, AiStyle? style = null)
     {
-        double score = Quick(s, me);
+        double score = Quick(s, me, style);
         if (s.Over)
             return score;
         (double worst, double others) = threats.Of(s, Across(me));
-        double fear = Math.Max(0.3, 1.0 - 0.25 * s.HarmlessFor(me));
+        double fear = (style ?? AiStyle.Plain).Fear * Math.Max(0.3, 1.0 - 0.25 * s.HarmlessFor(me));
         score -= fear * (Worst * worst + Others * others);
         return score + Initiative * threats.Of(s, me).Worst;
     }
 
     /// <summary>The leaf after the enemy's reply: <see cref="Quick"/> and our
     /// best activation, which is next.</summary>
-    public static double AfterReply(BattleState s, Camp me, AiThreat threats) =>
-        s.Over ? Quick(s, me) : Quick(s, me) + Initiative * threats.Of(s, me).Worst;
+    public static double AfterReply(BattleState s, Camp me, AiThreat threats, AiStyle? style = null) =>
+        s.Over ? Quick(s, me, style) : Quick(s, me, style) + Initiative * threats.Of(s, me).Worst;
+
+    /// <summary>Whether <paramref name="u"/> stands on the axis an enemy's
+    /// gun faces, within six cells - its front, where its shots and its
+    /// ambush go (<see cref="AiStyle.Front"/>).</summary>
+    private static bool Faced(BattleState s, BattleUnit u)
+    {
+        foreach (BattleUnit e in s.Units)
+        {
+            if (e.Side == u.Side || e.Fate != UnitFate.Alive || e.Class.Lobs)
+                continue;
+            Vector2I at = e.Cell;
+            for (int k = 0; k < 6; k++)
+            {
+                Vector2I next = HexField.Step(at, e.Heading);
+                if (next == at)
+                    break;
+                if (next == u.Cell)
+                    return true;
+                at = next;
+            }
+        }
+        return false;
+    }
 
     public static Camp Across(Camp c) => c == Camp.Green ? Camp.Brown : Camp.Green;
 

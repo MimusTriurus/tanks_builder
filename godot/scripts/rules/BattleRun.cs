@@ -49,7 +49,7 @@ public static class BattleRun
         bool probeCheck = false;
         Handicap handicap = Handicap.None;
         bool swap = false, rotCheck = false;
-        string? deploy = null;
+        string? deploy = null, doctrine = null;
         for (int i = 0; i < args.Length; i++)
         {
             bool more = i + 1 < args.Length;
@@ -68,13 +68,14 @@ public static class BattleRun
             else if (a == "--swap-sides") swap = true;
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
+            else if (a == "--doctrine" && more) doctrine = args[++i];
             else if (a == "--deploy-lead" && more) AiDeploy.Lead = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
             else if (a == "--handicap" && more && Enum.TryParse(args[++i], true, out Handicap h)) handicap = h;
         }
         try
         {
             if (ai is not null)
-                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck, handicap, swap, rotCheck, deploy);
+                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck, handicap, swap, rotCheck, deploy, doctrine);
             return Run(mapName, scriptPath, commands, outDir, first, measure, slopes);
         }
         catch (Exception e)
@@ -155,7 +156,8 @@ public static class BattleRun
     /// </summary>
     private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes,
                              bool probeCheck = false, Handicap handicap = Handicap.None,
-                             bool swap = false, bool rotCheck = false, string? deploy = null)
+                             bool swap = false, bool rotCheck = false, string? deploy = null,
+                             string? doctrine = null)
     {
         if (mapName is null)
             return Refuse("--battle-run wants a map");
@@ -179,12 +181,17 @@ public static class BattleRun
                 return Refuse($"--ai {spec}: no level {w} - recruit, fighter, veteran");
             levels[i] = level;
         }
+        // --doctrine GREEN[,BROWN]: the sides' styles (AiStyle), plain by default
+        string[] styleWords = (doctrine ?? "plain").Split(',');
+        var styles = new AiStyle[2];
+        for (int i = 0; i < 2; i++)
+            styles[i] = AiStyle.Of(styleWords[Math.Min(i, styleWords.Length - 1)]);
         bool Plays(Camp c) => sides == "both" || (sides == "green") == (c == Camp.Green);
 
         var place = new Placing(Played(map, slopes), first);
         BattleState s = Start(map, first, slopes);
         s.Handicap = handicap;
-        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}");
+        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}");
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();
@@ -243,7 +250,8 @@ public static class BattleRun
             List<Order> orders;
             if (Plays(side))
             {
-                AiChoice c = AiBrain.Choose(s, levels[side == Camp.Green ? 0 : 1], rng, shallow[side == Camp.Green ? 0 : 1]);
+                AiChoice c = AiBrain.Choose(s, levels[side == Camp.Green ? 0 : 1], rng, shallow[side == Camp.Green ? 0 : 1],
+                                            styles[side == Camp.Green ? 0 : 1]);
                 plays += c.Plays;
                 ms += c.Ms;
                 worst = Math.Max(worst, c.Ms);

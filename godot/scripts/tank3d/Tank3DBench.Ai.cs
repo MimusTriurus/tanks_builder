@@ -177,7 +177,9 @@ public sealed partial class Tank3DBench
             BattleState now = ShadowOfBench();
             AiLevel level = _aiLevel;
             Random rng = AiDice();
-            _aiThink = Task.Run(() => AiBrain.Choose(now, level, rng));
+            // the doctrine's character (AiStyle): the quick battle's AI doctrine
+            AiStyle style = AiStyle.Of(_quick?.AiDoctrine?.Id);
+            _aiThink = Task.Run(() => AiBrain.Choose(now, level, rng, style: style));
             _matchNote = L.T("ai.thinking");
             return;
         }
