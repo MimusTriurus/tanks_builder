@@ -118,7 +118,7 @@ public sealed partial class Tank3DBench
             AiChoice c = think.Result;
             string said = c.Play.Say(_moat);
             Log.Print(FormattableString.Invariant(
-                $"tank3d: ai: {SideName(_mt.Turn)} {_aiLevel}, round {_mt.Round}: {said} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Ms:F0} ms"));
+                $"tank3d: ai: {SideName(_mt.Turn)} {_aiLevel}, round {_mt.Round}: {said} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Replies} replies, {c.Ms:F0} ms"));
             foreach (string one in said.Split(';', StringSplitOptions.RemoveEmptyEntries))
                 _aiQueue.Enqueue(one);
             _aiTurnNo = _mt.TurnNo;

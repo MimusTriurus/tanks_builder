@@ -1440,6 +1440,15 @@ public sealed partial class HexField : Node2D, IHexBoard
         return (Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y) + Mathf.Abs(a.X + a.Y - b.X - b.Y)) / 2;
     }
 
+    /// <summary>Two different cells lie on one of the six axes through each
+    /// other - the cheap half of <see cref="LaneTo"/>, nothing on the board asked.</summary>
+    public static bool OnAxis(Vector2I from, Vector2I to)
+    {
+        Vector2I a = OffsetToAxial(from), b = OffsetToAxial(to);
+        int dq = b.X - a.X, dr = b.Y - a.Y;
+        return (dq != 0 || dr != 0) && (dq == 0 || dr == 0 || dq + dr == 0);
+    }
+
     private static Vector2I CubeRound(float q, float r)
     {
         float s = -q - r;

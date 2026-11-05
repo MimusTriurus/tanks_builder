@@ -46,6 +46,7 @@ public static class BattleRun
         bool slopes = true;
         string? ai = null;
         int aiSeed = 1, aiTurns = 300;
+        bool probeCheck = false;
         for (int i = 0; i < args.Length; i++)
         {
             bool more = i + 1 < args.Length;
@@ -60,11 +61,12 @@ public static class BattleRun
             else if (a == "--ai" && more) ai = args[++i];
             else if (a == "--ai-seed" && more) aiSeed = int.TryParse(args[++i], out int seed) ? seed : 1;
             else if (a == "--ai-turns" && more) aiTurns = int.TryParse(args[++i], out int turns) ? turns : 300;
+            else if (a == "--probe-check") probeCheck = true;
         }
         try
         {
             if (ai is not null)
-                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes);
+                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes, probeCheck);
             return Run(mapName, scriptPath, commands, outDir, first, measure, slopes);
         }
         catch (Exception e)
@@ -143,7 +145,8 @@ public static class BattleRun
     /// <c>--ai-seed N</c>, <c>--ai-turns N</c> (300) the most turns. Exit
     /// code 2 when an order of the AI's own was refused.
     /// </summary>
-    private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes)
+    private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes,
+                             bool probeCheck = false)
     {
         if (mapName is null)
             return Refuse("--battle-run wants a map");
@@ -178,9 +181,16 @@ public static class BattleRun
         var rng = new Random(seed);
         int refused = 0, turns = 0, plays = 0;
         double ms = 0.0, worst = 0.0;
+        int probes = 0, probesWrong = 0;
         while (!s.Over && turns < maxTurns)
         {
             turns++;
+            if (probeCheck)
+            {
+                (int n, int wrong) = ProbeCheck(s);
+                probes += n;
+                probesWrong += wrong;
+            }
             Camp side = s.Turn;
             List<Order> orders;
             if (Plays(side))
@@ -190,7 +200,7 @@ public static class BattleRun
                 ms += c.Ms;
                 worst = Math.Max(worst, c.Ms);
                 string line = FormattableString.Invariant(
-                    $"battle-run: round {s.Round} {side}: {c.Play.Say(s.Shift)} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Ms:F1} ms");
+                    $"battle-run: round {s.Round} {side}: {c.Play.Say(s.Shift)} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Replies} replies, {c.Ms:F1} ms");
                 said.Add(line);
                 Log.Print(line);
                 orders = c.Play.Orders.Select(o => o.Moved(-s.Shift)).ToList();
@@ -214,7 +224,69 @@ public static class BattleRun
         File.WriteAllText(file, s.Say());
         File.WriteAllText(Path.Combine(dir, $"{map.Name}-ai.log"), string.Join("\n", said) + "\n");
         Log.Print($"battle-run: the match as it ends - {file}");
-        return refused > 0 ? 2 : 0;
+        if (probeCheck)
+            Log.Print($"battle-run: probe-check - {probes} shots probed, {probesWrong} not as fired");
+        return refused > 0 || probesWrong > 0 ? 2 : 0;
+    }
+
+    /// <summary>
+    /// <c>--probe-check</c>: every unit able to act, from where it stands
+    /// (a casemate turned to the axis), at every standing unit on an axis in
+    /// range - the probe (<see cref="Battle.Probe"/>) against the shot itself
+    /// on a copy (<see cref="Battle.Fire"/>), unit by unit: out, destroyed,
+    /// set alight. Returns how many were asked and how many differ; the first
+    /// differences go to the log.
+    /// </summary>
+    private static (int Asked, int Wrong) ProbeCheck(BattleState s)
+    {
+        int asked = 0, wrong = 0;
+        var marks = new int[s.Units.Count];
+        foreach (BattleUnit shooter in s.Units)
+        {
+            if (shooter.Fate != UnitFate.Alive)
+                continue;
+            foreach (BattleUnit target in s.Units)
+            {
+                if (ReferenceEquals(target, shooter) || !target.Standing)
+                    continue;
+                (int heading, int range) = s.Board.LaneTo(shooter.Cell, target.Cell);
+                if (heading < 0 || Gunnery.MayTarget(shooter.Class.Lobs, range, true, Gunnery.LobReachOf(shooter.Kit)) != Gunnery.Distance.Fits)
+                    continue;
+                foreach (bool full in new[] { true })
+                {
+                    Battle.Probe(s, shooter, shooter.Cell, heading, target.Cell, marks, full);
+                    BattleState t = AiMoves.Copy(s);
+                    t.Turn = shooter.Side;
+                    t.Active = shooter.Id;
+                    t.Drove = t.Fired = t.Bonus = t.Overdrive = false;
+                    t.OnWay = null;
+                    if (!t.Units[s.Units.IndexOf(shooter)].Class.Turreted)
+                        t.Units[s.Units.IndexOf(shooter)].Heading = heading;
+                    if (Battle.Fire(t, target.Cell) is { } why)
+                    {
+                        Log.Print($"battle-run: probe-check: {shooter.Say(s.Shift)} at {target.Say(s.Shift)} - the shot refused: {why}");
+                        continue;
+                    }
+                    asked++;
+                    var said = new List<string>();
+                    for (int i = 0; i < s.Units.Count; i++)
+                    {
+                        BattleUnit was = s.Units[i], now = t.Units[i];
+                        int fired = now.Fate == was.Fate ? (now.Burning && !was.Burning ? Battle.ProbeAlight : Battle.ProbeNone)
+                            : now.Fate == UnitFate.Destroyed ? Battle.ProbeGone
+                            : now.Out && !was.Out ? Battle.ProbeOut : Battle.ProbeNone;
+                        if (fired != marks[i])
+                            said.Add($"#{was.Id} probe {marks[i]} fire {fired}");
+                    }
+                    if (said.Count == 0)
+                        continue;
+                    wrong++;
+                    if (wrong <= 10)
+                        Log.Print($"battle-run: probe-check: {shooter.Say(s.Shift)} at {target.Say(s.Shift)}: {string.Join(", ", said)}");
+                }
+            }
+        }
+        return (asked, wrong);
     }
 
     private static int Refuse(string why)

@@ -1,29 +1,41 @@
 using System;
-using System.Collections.Generic;
 using Godot;
 
 namespace TankSpriteTest;
 
 /// <summary>
-/// How good a match is for one side (docs/ai-plan.md, «Оценка позиции»,
-/// И1): the material, the units on the control point, the way to the enemy -
-/// <see cref="Quick"/>, asked of every play - and, for the plays that come
-/// out on top, what the enemy's next turn can knock out of where it stands
-/// (<see cref="Full"/>): the threat map's first, standing half. Positive is
-/// good for <c>me</c>. The weights are this file's until the levels are
-/// calibrated (И5, <c>data/ai.json</c>).
+/// How good a match is for one side (docs/ai-plan.md, «Оценка позиции»):
+/// <see cref="Quick"/> - the material, the units on the control point, the
+/// way to the enemy, the stalemate's clock - asked of every play and every
+/// reply; <see cref="Full"/> - that and the threat map (<see cref="AiThreat"/>):
+/// what the enemy's next activation can take, what ours could after.
+/// Positive is good for <c>me</c>. The weights are this file's until the
+/// levels are calibrated (И5, <c>data/ai.json</c>).
 /// </summary>
 public static class AiEval
 {
     /// <summary>A side wins or loses: past anything the material can say.</summary>
     public const double Decided = 10000.0;
 
+    /// <summary>A unit alight, of its worth: the fire takes it unless its next activation puts it out.</summary>
+    public const double AlightShare = 0.55;
+    /// <summary>A unit knocked out or drowned, of its worth: it still blocks,
+    /// goes up in a chain, can be repaired.</summary>
+    public const double OutShare = 0.2;
+
     /// <summary>A draw, for the side asking: it would rather fight on.</summary>
-    private const double Drawn = -2.0;
+    private const double Drawn = -4.0;
     /// <summary>A quiet round on the stalemate's clock.</summary>
     private const double Quiet = 0.4;
     /// <summary>A step short of (or past) where a unit wants to be from the nearest enemy.</summary>
     private const double Approach = 0.2;
+    /// <summary>A quiet round's extra weight on a point of material lead.</summary>
+    private const double Lead = 0.15;
+    /// <summary>The enemy's best activation, and the rest of its units' best:
+    /// one of them acts next.</summary>
+    private const double Worst = 0.9, Others = 0.1;
+    /// <summary>Our own best activation after: the initiative, the enemy's turn between.</summary>
+    private const double Initiative = 0.25;
 
     /// <summary>What a unit is worth (ai-plan.md, вопрос 2): LT 3, MT 4,
     /// HT 6, TD 5, HM 5 by its gun, a quarter a piece of kit on top.</summary>
@@ -33,14 +45,11 @@ public static class AiEval
         return cls + 0.25 * System.Numerics.BitOperations.PopCount((uint)u.Kit);
     }
 
-    /// <summary>How much of its worth a unit still is: whole alive, half
-    /// alight (the fire takes it unless its next activation puts it out),
-    /// a fifth knocked out or drowned - it still blocks, goes up in a chain,
-    /// can be repaired - nothing destroyed.</summary>
+    /// <summary>How much of its worth a unit still is.</summary>
     public static double Share(BattleUnit u) => u.Fate switch
     {
-        UnitFate.Alive => u.Burning ? 0.55 : 1.0,
-        UnitFate.Knocked or UnitFate.Drowned => 0.2,
+        UnitFate.Alive => u.Burning ? AlightShare : 1.0,
+        UnitFate.Knocked or UnitFate.Drowned => OutShare,
         _ => 0.0,
     };
 
@@ -53,7 +62,7 @@ public static class AiEval
         return sum;
     }
 
-    /// <summary>The cheap score, asked of every play.</summary>
+    /// <summary>The cheap score, asked of every play and every reply.</summary>
     public static double Quick(BattleState s, Camp me)
     {
         if (s.Won is Camp w)
@@ -64,8 +73,9 @@ public static class AiEval
             return Drawn;
         double score = Material(s, me);
         // the stalemate's clock (match.md, «Пат — ничья»): quiet rounds weigh
-        // on the side to move, so it goes and shoots at a tank
-        score -= Quiet * s.QuietRounds;
+        // on the side asking, so it goes and shoots at a tank - the more, the
+        // further ahead it is (ai-plan.md, «Пат»: the leader has a win to lose)
+        score -= s.QuietRounds * (Quiet + Lead * Math.Max(0.0, score));
         foreach (BattleUnit u in s.Units)
         {
             if (u.Fate != UnitFate.Alive)
@@ -76,7 +86,9 @@ public static class AiEval
             if (near < int.MaxValue)
             {
                 int want = u.Class.Lobs ? 4 : u.Class.Turreted ? 2 : 3;
-                score -= sign * Approach * Math.Abs(near - want);
+                // the pull grows with the stalemate's clock: a side that sits
+                // still the whole match is drawn
+                score -= sign * Approach * (1.0 + 0.5 * s.QuietRounds) * Math.Abs(near - want);
             }
             // the control point: standing on it
             if (s.Point is { } point && Array.IndexOf(point, u.Cell) >= 0)
@@ -86,107 +98,57 @@ public static class AiEval
     }
 
     /// <summary>
-    /// The full score: <see cref="Quick"/> less what the enemy's next turn
-    /// can knock out from where its units stand (each tried on a copy - a shot
-    /// along the axis, ricochet, pass and chain as the rules have them), the
-    /// worst of it most, for one unit acts; and a little for what
-    /// <paramref name="me"/> could knock out after, the initiative. The move
-    /// before the shot is not tried yet (И2).
+    /// The full score: <see cref="Quick"/> less what the enemy's next
+    /// activation can take - its best most, for one unit acts; the fear eases
+    /// as the stalemate nears - and a little for what ours could take after.
     /// </summary>
-    public static double Full(BattleState s, Camp me)
+    public static double Full(BattleState s, Camp me, AiThreat threats)
     {
         double score = Quick(s, me);
         if (s.Over)
             return score;
-        Camp enemy = me == Camp.Green ? Camp.Brown : Camp.Green;
-        (double worst, double rest) = Threats(s, enemy);
-        // the nearer the stalemate, the less the fear of standing in a line of fire
+        (double worst, double others) = threats.Of(s, Across(me));
         double fear = Math.Max(0.3, 1.0 - 0.25 * s.QuietRounds);
-        score -= fear * (0.8 * worst + 0.15 * rest);
-        (double best, _) = Threats(s, me);
-        score += 0.3 * best;
-        return score;
+        score -= fear * (Worst * worst + Others * others);
+        return score + Initiative * threats.Of(s, me).Worst;
     }
 
-    /// <summary>What <paramref name="shooters"/>' side could take with one
-    /// shot from where each stands: the best single shot's worth, and the sum
-    /// of the others' best.</summary>
-    public static (double Worst, double Others) Threats(BattleState s, Camp shooters)
-    {
-        double worst = 0.0, sum = 0.0;
-        foreach (BattleUnit e in s.Units)
-        {
-            if (e.Side != shooters || e.Fate != UnitFate.Alive)
-                continue;
-            double best = 0.0;
-            foreach (BattleUnit t in s.Units)
-            {
-                if (t.Side == shooters || t.Fate != UnitFate.Alive)
-                    continue;
-                best = Math.Max(best, ShotWorth(s, e, t));
-            }
-            sum += best;
-            worst = Math.Max(worst, best);
-        }
-        return (worst, sum - worst);
-    }
+    /// <summary>The leaf after the enemy's reply: <see cref="Quick"/> and our
+    /// best activation, which is next.</summary>
+    public static double AfterReply(BattleState s, Camp me, AiThreat threats) =>
+        s.Over ? Quick(s, me) : Quick(s, me) + Initiative * threats.Of(s, me).Worst;
 
-    /// <summary>
-    /// What a shot from <paramref name="shooter"/>, standing where it stands,
-    /// at <paramref name="target"/> takes from the target's side - the
-    /// material the shooter's side gains by it, chains and ricochets on
-    /// either side counted. Nought when the axis, the distance or the line
-    /// of fire says no. A casemate is let turn to the axis: its move would.
-    /// </summary>
-    public static double ShotWorth(BattleState s, BattleUnit shooter, BattleUnit target)
-    {
-        (int heading, int range) = s.Board.LaneTo(shooter.Cell, target.Cell);
-        if (heading < 0)
-            return 0.0;
-        if (Gunnery.MayTarget(shooter.Class.Lobs, range, true, Gunnery.LobReachOf(shooter.Kit)) != Gunnery.Distance.Fits)
-            return 0.0;
-        BattleState t = s.Clone();
-        t.Events.Clear();
-        t.Turn = shooter.Side;
-        t.Active = shooter.Id;
-        t.Drove = t.Fired = t.Bonus = t.Overdrive = false;
-        t.OnWay = null;
-        BattleUnit sh = t.Unit(shooter.Id)!;
-        if (!sh.Class.Turreted)
-            sh.Heading = heading;
-        double before = Material(t, shooter.Side);
-        if (Battle.Fire(t, target.Cell) is not null)
-            return 0.0;
-        return Math.Max(0.0, Material(t, shooter.Side) - before);
-    }
+    public static Camp Across(Camp c) => c == Camp.Green ? Camp.Brown : Camp.Green;
 
-    /// <summary>Steps from <paramref name="u"/> to the nearest standing enemy
-    /// able to fight, or <see cref="int.MaxValue"/> for none.</summary>
-    public static int Nearest(BattleState s, BattleUnit u)
-    {
-        int best = int.MaxValue;
-        foreach (BattleUnit o in s.Units)
-            if (o.Side != u.Side && o.Fate == UnitFate.Alive)
-                best = Math.Min(best, HexField.Distance(u.Cell, o.Cell));
-        return best;
-    }
+    /// <summary>Steps from <paramref name="u"/> to the nearest enemy able to
+    /// fight - with none left, the nearest still standing, out of the fight:
+    /// the match is won only once every enemy is destroyed (match.md) - or
+    /// <see cref="int.MaxValue"/> for none.</summary>
+    public static int Nearest(BattleState s, BattleUnit u) =>
+        NearestEnemy(s, u, u.Cell) is { } e ? HexField.Distance(u.Cell, e.Cell) : int.MaxValue;
 
-    /// <summary>The nearest enemy able to fight, or null.</summary>
-    public static BattleUnit? NearestEnemy(BattleState s, BattleUnit u)
+    /// <summary>The enemy of <paramref name="u"/> nearest <paramref name="from"/>:
+    /// one able to fight, else one still standing; null for none.</summary>
+    public static BattleUnit? NearestEnemy(BattleState s, BattleUnit u, Godot.Vector2I from)
     {
-        BattleUnit? best = null;
-        int d = int.MaxValue;
+        BattleUnit? alive = null, standing = null;
+        int da = int.MaxValue, ds = int.MaxValue;
         foreach (BattleUnit o in s.Units)
         {
-            if (o.Side == u.Side || o.Fate != UnitFate.Alive)
+            if (o.Side == u.Side || !o.Standing)
                 continue;
-            int here = HexField.Distance(u.Cell, o.Cell);
-            if (here < d)
+            int d = HexField.Distance(from, o.Cell);
+            if (o.Fate == UnitFate.Alive && d < da)
             {
-                d = here;
-                best = o;
+                da = d;
+                alive = o;
+            }
+            else if (o.Fate != UnitFate.Alive && d < ds)
+            {
+                ds = d;
+                standing = o;
             }
         }
-        return best;
+        return alive ?? standing;
     }
 }

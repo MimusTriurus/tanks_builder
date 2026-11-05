@@ -222,19 +222,7 @@ public static class AiMoves
     /// nearest enemy of <paramref name="u"/>, or -1 with none.</summary>
     public static int Toward(BattleState s, BattleUnit u, Vector2I from)
     {
-        BattleUnit? best = null;
-        int d = int.MaxValue;
-        foreach (BattleUnit o in s.Units)
-        {
-            if (o.Side == u.Side || o.Fate != UnitFate.Alive)
-                continue;
-            int here = HexField.Distance(from, o.Cell);
-            if (here < d)
-            {
-                d = here;
-                best = o;
-            }
-        }
+        BattleUnit? best = AiEval.NearestEnemy(s, u, from);
         if (best is null)
             return -1;
         int side = -1, near = int.MaxValue;
