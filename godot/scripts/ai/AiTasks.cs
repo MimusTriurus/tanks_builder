@@ -54,16 +54,7 @@ public static class AiTasks
             foreach ((string name, Func<BattleState> setup, Func<BattleState, BattleState, bool> ok) in Problems())
             {
                 BattleState start = Ready(setup());
-                AiChoice c;
-                try
-                {
-                    c = AiBrain.Choose(start, level, new Random(7));
-                }
-                finally
-                {
-                    // a problem's setup may let the own glance in (AiMoves.OwnGlances)
-                    AiMoves.OwnGlances = false;
-                }
+                AiChoice c = AiBrain.Choose(start, level, new Random(7));
                 (BattleState after, string? refused) = Play(start, c.Play);
                 bool good = refused is null && ok(start, after);
                 check($"{level}: {name}", good,
@@ -180,8 +171,6 @@ public static class AiTasks
             Put(s, 2, "HMR", Camp.Brown, past.X, past.Y, 90);
             // neither may move: the glance is the only way at the mortar
             s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
-            // off in play until the bench has it (AiMoves.OwnGlances)
-            AiMoves.OwnGlances = true;
             return s;
         }, (_, a) => a.Unit(2)!.Fate != UnitFate.Alive && a.Unit(1)!.Fate == UnitFate.Alive);
 

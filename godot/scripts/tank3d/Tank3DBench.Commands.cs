@@ -179,6 +179,11 @@ public sealed partial class Tank3DBench
                 // the round is chosen as the button chooses it, and leaves with the shot
                 _fieryMode = c.Kind == CommandKind.Burn;
                 _smokeShotMode = c.Kind == CommandKind.SmokeShot;
+                // an own unit is fired on with «Атака» (Tank3DBench.Acts) - a
+                // fire command at one means it: the glance off an own hull
+                // (AiMoves.Glances); without it the round went into the ground
+                if (FriendOn(c.Cell))
+                    _attackMode = true;
                 ShotOrder(c.Cell);
                 break;
             case CommandKind.Ram:

@@ -2266,8 +2266,12 @@ public sealed partial class Tank3DBench : Node3D
         {
             if (_model.Turreted)          // a casemate aims with its hull
                 _model.Yaw += yawIn * Mathf.DegToRad(SlewDeg) * dt;
+            // past the limits only as far as a laid shot took it, shrinking
+            // back as the tube comes home (TankModel.ElevStretch)
+            if (_aim is null)
+                _model.ElevStretch = _model.PastLimits(_model.Elevation);
             _model.Elevation = Mathf.Clamp(_model.Elevation + elevIn * Mathf.DegToRad(ElevDeg) * dt,
-                                           Mathf.DegToRad(_model.ElevMin), Mathf.DegToRad(_model.ElevMax));
+                                           _model.ElevLow, _model.ElevHigh);
         }
         else
         {

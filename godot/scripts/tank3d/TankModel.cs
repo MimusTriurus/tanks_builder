@@ -96,6 +96,22 @@ public sealed partial class TankModel : Node3D
     /// </summary>
     public Vector3 RecoilBack = new(0.0f, 0.0f, -1.0f);
     public float ElevMin, ElevMax;
+    /// <summary>
+    /// How far past its own limits (<see cref="ElevMin"/>, <see cref="ElevMax"/>,
+    /// the sidecar's <c>limits_deg</c>) the tube is let go, radians. The
+    /// limits are the old 2D ladder's, ±14°; a shot the rules allow across
+    /// levels (field.md, «Перепад в уровнях не больше дальности в клетках»)
+    /// wants 25° and more on the relief, so the bench lets the tube go as far
+    /// as the laid shot wants (<c>Tank3DBench.Laying</c>, 2026-11-05).
+    /// </summary>
+    public float ElevStretch;
+    public float ElevLow => Mathf.DegToRad(ElevMin) - ElevStretch;
+    public float ElevHigh => Mathf.DegToRad(ElevMax) + ElevStretch;
+
+    /// <summary>How far <paramref name="elev"/> lies past the tube's own
+    /// limits, radians; nought within them.</summary>
+    public float PastLimits(float elev) =>
+        Mathf.Max(0.0f, Mathf.Max(Mathf.DegToRad(ElevMin) - elev, elev - Mathf.DegToRad(ElevMax)));
     public float DroopDeg, CantDeg, TipPitchDeg;
     public Quaternion Tip = Quaternion.Identity;
     public Vector3 BlastAt;
@@ -762,7 +778,7 @@ public sealed partial class TankModel : Node3D
         }
         // Elevation is from the rest pose - a mortar's rest is already raised,
         // in the geometry, not in a node's rotation.
-        float elev = Mathf.Clamp(Elevation, Mathf.DegToRad(ElevMin), Mathf.DegToRad(ElevMax));
+        float elev = Mathf.Clamp(Elevation, ElevLow, ElevHigh);
         Mantlet.Rotation = new Vector3(-elev + Droop * Mathf.DegToRad(DroopDeg), 0.0f, 0.0f);
         Barrel.Position = RecoilBack * (Recoil * Travel);
         foreach (Track t in Tracks)

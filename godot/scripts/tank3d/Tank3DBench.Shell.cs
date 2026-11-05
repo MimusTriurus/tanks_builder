@@ -121,6 +121,7 @@ public sealed partial class Tank3DBench
             ? HoledLeg(CellHere, AxisTo(CellHere, laid).Axis, hull) : null;
         // or through a wood on the way (upgrades.md, «Сквозь лес»): on at one less
         bool wood = !_profile.Lobs && !fiery && !smoke && _shadowAim is Vector2I past && WoodPass(CellHere, past);
+        Vector2I? laidOn = _shadowAim;
         _shadowAim = null;
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
@@ -130,7 +131,7 @@ public sealed partial class Tank3DBench
         if (_profile.Lobs && _chargeFor is Vector3 to && Charge(muzzle, bore, to, fall) is float v)
             speed = v;
         _chargeFor = null;
-        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, !smoke, _profile.Lobs, holes, wood, smokeOn);
+        _aimRound = Throw(muzzle, bore * speed, fall, ShellLongest, !smoke, _profile.Lobs, holes, wood, smokeOn, laidOn);
     }
 
     /// <summary>Where the bomb being fired was laid on, for its charge.</summary>
@@ -215,6 +216,26 @@ public sealed partial class Tank3DBench
         return y;
     }
 
+    /// <summary>
+    /// What stops a gun's round at <paramref name="w"/>: <see cref="ShellGround"/>,
+    /// except that an empty water hex short of the one it was laid on
+    /// (<paramref name="laidOn"/>) does not screen the line of fire (GDD
+    /// field.md, «пустой водный гекс огонь не перекрывает»; the core's
+    /// <c>Gunnery.Overtops</c> reads its bed) - the round goes on under its top,
+    /// as far as the bed. A shot down past a high pond into the low hex beyond
+    /// went into the water (docs/ai-plan.md, drill10 seed 2).
+    /// </summary>
+    private float RoundGround(Vector3 w, Vector2I? laidOn, out bool wet)
+    {
+        float y = ShellGround(w, out wet);
+        if (!wet || laidOn is not Vector2I laid || _field is null)
+            return y;
+        Vector2I cell = _field.FlatCellAt(Board(w));
+        if (cell == laid || UnitStanding(cell) is not null)
+            return y;
+        return Foot(w).Y;
+    }
+
     private bool OnBoard(Vector3 w)
     {
         if (_field is null)
@@ -238,7 +259,8 @@ public sealed partial class Tank3DBench
     /// on that hex.
     /// </summary>
     private CelShell.Round Throw(Vector3 from, Vector3 v, float fall, float longest, bool strikes, bool lob,
-                                 Leg? holes = null, bool woodPassed = false, Vector2I? smokeOn = null)
+                                 Leg? holes = null, bool woodPassed = false, Vector2I? smokeOn = null,
+                                 Vector2I? laidOn = null)
     {
         var path = new List<Vector3> { from };
         var g = new Vector3(0.0f, -fall, 0.0f);
@@ -337,11 +359,11 @@ public sealed partial class Tank3DBench
                     break;
                 }
             }
-            float ground = ShellGround(next, out bool wet);
+            float ground = RoundGround(next, laidOn, out bool wet);
             if (next.Y <= ground)
             {
                 // Where the step went under, by the share of it above.
-                float above = p.Y - ShellGround(p, out _);
+                float above = p.Y - RoundGround(p, laidOn, out _);
                 float k = above / Mathf.Max(above + (ground - next.Y), 1e-4f);
                 Vector3 at = p.Lerp(next, Mathf.Clamp(k, 0.0f, 1.0f));
                 at.Y = ShellGround(at, out wet);
@@ -870,10 +892,14 @@ public sealed partial class Tank3DBench
             : LayFor(muzzle, at, speed, fall);
         // Out of reach: as far as it throws, which is 45 degrees.
         float elev = (lay ?? Mathf.Pi * 0.25f) - pitch;
+        // A gun's tube goes past its model's limits as far as the shot wants:
+        // the rules allow a level's drop per cell (TankModel.ElevStretch).
+        if (!_profile.Lobs && lay is not null)
+            _model.ElevStretch = Mathf.Max(_model.ElevStretch, _model.PastLimits(_model.Elevation + elev) + 1e-3f);
         if (dt > 0.0f)
             elevIn = Mathf.Clamp(elev / (Mathf.DegToRad(ElevDeg) * dt), -1.0f, 1.0f);
-        bool stopped = (elev > 0.0f && _model.Elevation >= Mathf.DegToRad(_model.ElevMax) - 1e-4f)
-                    || (elev < 0.0f && _model.Elevation <= Mathf.DegToRad(_model.ElevMin) + 1e-4f);
+        bool stopped = (elev > 0.0f && _model.Elevation >= _model.ElevHigh - 1e-4f)
+                    || (elev < 0.0f && _model.Elevation <= _model.ElevLow + 1e-4f);
         _aimNote = lay is null ? L.T("shell.out_of_reach") : stopped ? L.T("shell.barrel_stop") : "";
         bool laid = Mathf.Abs(Mathf.RadToDeg(yaw)) < LaidYaw
                     && (Mathf.Abs(Mathf.RadToDeg(elev)) < LaidElev || stopped);
