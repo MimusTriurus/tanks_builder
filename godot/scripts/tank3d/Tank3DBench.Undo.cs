@@ -155,11 +155,12 @@ public sealed partial class Tank3DBench
         // the end of the turn beside it, greyed with the match over (Д6)
         // ActOn: its icon greyed with it
         if (_passButton is not null)
-            ActOn(_passButton, !MatchOver);
+            ActOn(_passButton, !MatchOver && !AiTurn);
         if (_undoButton is null)
             return;
         // no move to take back before the first turn (Tank3DBench.Deploy)
-        _undoButton.Visible = !Deploying;
+        // nor on the AI's turn: its moves are not the player's to take back (Tank3DBench.Ai)
+        _undoButton.Visible = !Deploying && !AiTurn;
         string why = UndoWhy();
         if (ReferenceEquals(why, _undoShown))
             return;

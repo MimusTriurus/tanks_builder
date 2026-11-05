@@ -74,7 +74,7 @@ lines; the user's edit is ignored) — inside Claude Code only.
 |---|---|
 | `scenes/` | 3D line scenes and tools: `Tank3D`, `Match3D`, `Tree3D`, `Relief3D`, `Editor` |
 | `scenes/legacy/` | legacy 2D sprite scenes |
-| `scripts/` | C# by subject, not by line: `core` (infrastructure, `Ui`, `UiTip`, `L`), `rules` (GDD rules, `Battle`), `board` (field, maps, relief), `stage3d`, `water`, `props`, `walls`, `tank` (shared by both lines), `sprite` (2D), `tank3d` (`Tank3DBench.*`), `cel` (3D cel effects), `effects`, `editor`, `benches`, `test` (`SelfTest`) |
+| `scripts/` | C# by subject, not by line: `core` (infrastructure, `Ui`, `UiTip`, `L`), `rules` (GDD rules, `Battle`), `ai` (the AI on the core, `AiBrain`), `board` (field, maps, relief), `stage3d`, `water`, `props`, `walls`, `tank` (shared by both lines), `sprite` (2D), `tank3d` (`Tank3DBench.*`), `cel` (3D cel effects), `effects`, `editor`, `benches`, `test` (`SelfTest`) |
 | `data/` | bench settings read from disk (`AssetRoot.Data`): `panel`, `bench`, `effects`, `events`, `terrain`, `classes`, `walls`, `editor_presets`, `match`, `lang/` |
 | `maps/`, `perf/` | maps `maps/*.json` ([docs/editor.md](docs/editor.md)) and `--perf` baselines ([docs/perf.md](docs/perf.md)) |
 | `tools/` | helper scripts outside the engine |

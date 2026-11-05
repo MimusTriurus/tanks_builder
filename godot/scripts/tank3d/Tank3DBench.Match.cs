@@ -491,6 +491,9 @@ public sealed partial class Tank3DBench
     /// pass (<c>--commands</c>) is not a hand and is not held.</summary>
     private void PassByHand()
     {
+        // the AI's turn is the AI's to hand over (Tank3DBench.Ai)
+        if (AiTurn)
+            return;
         if (!Deploying && !MatchOver && _passedByItself > 0
             && Time.GetTicksMsec() - _passedByItself < PassGrace
             && !(_side == _mt.Turn && (_mt.Drove || _mt.Fired || _mt.Bonus)))
@@ -683,6 +686,8 @@ public sealed partial class Tank3DBench
         HexEffectsTick();
         // --commands, one at a time (Tank3DBench.Commands)
         CommandsTick(busy);
+        // the AI's side: its play, chosen and given (Tank3DBench.Ai)
+        AiTick(busy, dt);
         if (_other is { Unit: true, Fate: Fate.Destroyed } && !busy)
             DropTarget();
         if (MatchOver)

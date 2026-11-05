@@ -7,6 +7,7 @@
     "OFL beside it). Latin only - so ru.json names none and keeps Godot's font."
   ],
   "_font": "BlackOpsOne-Regular.ttf",
+  "ai.thinking": "the AI is thinking…",
   "quick.south_cap": "South",
   "quick.north_cap": "North",
   "quick.point": "Point",

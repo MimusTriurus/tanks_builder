@@ -133,7 +133,8 @@ public sealed partial class Tank3DBench
             case CommandKind.Place:
                 return PlaceWhy(c.Unit, c.Cell, c.Side);
             case CommandKind.Ready:
-                return Deploying ? "" : L.T("commands.why_deploy_over");
+                // after the placement: the quick battle's «К бою» on the open squads
+                return Deploying || _qReveal is not null ? "" : L.T("commands.why_deploy_over");
             default:
                 return "";
         }
@@ -235,7 +236,14 @@ public sealed partial class Tank3DBench
                 Place(c.Unit, c.Cell, c.Side);
                 break;
             case CommandKind.Ready:
-                DeployReady();
+                if (Deploying)
+                    DeployReady();
+                else
+                {
+                    // «К бою» (Tank3DBench.Quick, QuickReveal)
+                    _qReveal?.QueueFree();
+                    _qReveal = null;
+                }
                 break;
         }
         Log.Print($"tank3d: command {c}");

@@ -660,7 +660,7 @@ public sealed partial class Tank3DBench
             && !RamRunning && _aim is null && _shotWaiting is null && _ramWaiting is null && (_shells?.Rounds.Count ?? 0) == 0)
             DropTarget();
         // none in the placement before the first turn: nothing on it may be done yet
-        bool ours = _chosen && _fate == Fate.Alive && Match && !MatchOver && !Deploying && _side == _mt.Turn;
+        bool ours = _chosen && _fate == Fate.Alive && Match && !MatchOver && !Deploying && _side == _mt.Turn && !AiTurn;
         _acts.Visible = ours;
         // the act's card under the pointer, gone with the panel (Tank3DBench.ActTips)
         ActTipTick();

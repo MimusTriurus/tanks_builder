@@ -1491,7 +1491,7 @@ public sealed partial class Tank3DBench : Node3D
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
-            if (_show.Read(args, ref i) || ReadPerfFlag(args, ref i))
+            if (_show.Read(args, ref i) || ReadPerfFlag(args, ref i) || AiArg(args[i], args, ref i))
                 continue;
             string a = args[i];
             bool more = i + 1 < args.Length;
@@ -2614,6 +2614,9 @@ public sealed partial class Tank3DBench : Node3D
         // the placement before the first turn takes the buttons (Tank3DBench.Deploy)
         if (Match && DeployInput(@event))
             return;
+        // the AI's turn: the camera is the player's, the board and the orders not (Tank3DBench.Ai)
+        if (AiTurn && @event is InputEventMouseButton { ButtonIndex: MouseButton.Left or MouseButton.Right, Pressed: true })
+            return;
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } click)
         {
             AimAt(click.Position);
@@ -2629,7 +2632,7 @@ public sealed partial class Tank3DBench : Node3D
                 OrderClick(left.Position, left.DoubleClick);
             return;
         }
-        if (_rules && @event is InputEventKey { Pressed: true, Echo: false } order)
+        if (_rules && !AiTurn && @event is InputEventKey { Pressed: true, Echo: false } order)
         {
             // in a match W/A/S/D are the camera's (PanKeys), not orders
             switch (Match && order.Keycode is Key.W or Key.A or Key.S or Key.D ? Key.None : order.Keycode)

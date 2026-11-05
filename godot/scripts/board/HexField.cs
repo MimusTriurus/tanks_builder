@@ -1432,6 +1432,14 @@ public sealed partial class HexField : Node2D, IHexBoard
     private static Vector2I OffsetToAxial(Vector2I cell) =>
         new(cell.X, cell.Y - (cell.X - (cell.X & 1)) / 2);
 
+    /// <summary>Steps between two cells on the grid, nothing in the way
+    /// counted - the hex distance.</summary>
+    public static int Distance(Vector2I from, Vector2I to)
+    {
+        Vector2I a = OffsetToAxial(from), b = OffsetToAxial(to);
+        return (Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y) + Mathf.Abs(a.X + a.Y - b.X - b.Y)) / 2;
+    }
+
     private static Vector2I CubeRound(float q, float r)
     {
         float s = -q - r;

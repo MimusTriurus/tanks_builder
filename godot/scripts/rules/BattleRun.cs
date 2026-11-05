@@ -44,6 +44,8 @@ public static class BattleRun
         Camp first = Camp.Green;
         int measure = 0;
         bool slopes = true;
+        string? ai = null;
+        int aiSeed = 1, aiTurns = 300;
         for (int i = 0; i < args.Length; i++)
         {
             bool more = i + 1 < args.Length;
@@ -55,9 +57,14 @@ public static class BattleRun
             else if (a == "--first" && more) first = args[++i] == "brown" ? Camp.Brown : Camp.Green;
             else if (a == "--measure" && more) measure = int.TryParse(args[++i], out int n) ? n : 0;
             else if (a == "--ramps") slopes = false;
+            else if (a == "--ai" && more) ai = args[++i];
+            else if (a == "--ai-seed" && more) aiSeed = int.TryParse(args[++i], out int seed) ? seed : 1;
+            else if (a == "--ai-turns" && more) aiTurns = int.TryParse(args[++i], out int turns) ? turns : 300;
         }
         try
         {
+            if (ai is not null)
+                return RunAi(mapName, ai, aiSeed, aiTurns, outDir, first, slopes);
             return Run(mapName, scriptPath, commands, outDir, first, measure, slopes);
         }
         catch (Exception e)
@@ -122,6 +129,91 @@ public static class BattleRun
 
         if (measure > 0)
             Measure(start, orders, place, measure);
+        return refused > 0 ? 2 : 0;
+    }
+
+    /// <summary>
+    /// <c>--ai SIDES[:LEVEL]</c> (docs/ai-plan.md, И1): the match played by the
+    /// AI (<see cref="AiBrain"/>) - <c>both</c>, or <c>green</c> or
+    /// <c>brown</c> against a side that only passes; LEVEL <c>recruit</c>,
+    /// <c>fighter</c> (default) or <c>veteran</c>, <c>both:a,b</c> for green's
+    /// and brown's apart. A map with zones is readied as it stands. Each turn
+    /// goes to the log with the play, its events and what choosing it cost;
+    /// the match as it ends to <c>out/battle-run/MAP-ai.txt</c>.
+    /// <c>--ai-seed N</c>, <c>--ai-turns N</c> (300) the most turns. Exit
+    /// code 2 when an order of the AI's own was refused.
+    /// </summary>
+    private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes)
+    {
+        if (mapName is null)
+            return Refuse("--battle-run wants a map");
+        if (!BoardMap.Names.Contains(mapName, StringComparer.OrdinalIgnoreCase))
+            return Refuse($"no such board {mapName} - known: {string.Join(", ", BoardMap.Names)}");
+        BoardMap map = BoardMap.ByName(mapName);
+        string[] parts = spec.Split(':');
+        string sides = parts[0].ToLowerInvariant();
+        if (sides is not ("both" or "green" or "brown"))
+            return Refuse($"--ai {spec}: both, green or brown");
+        string[] words = parts.Length > 1 ? parts[1].Split(',') : new[] { "fighter" };
+        var levels = new AiLevel[2];
+        for (int i = 0; i < 2; i++)
+        {
+            string w = words[Math.Min(i, words.Length - 1)];
+            if (AiBrain.LevelOf(w) is not AiLevel level)
+                return Refuse($"--ai {spec}: no level {w} - recruit, fighter, veteran");
+            levels[i] = level;
+        }
+        bool Plays(Camp c) => sides == "both" || (sides == "green") == (c == Camp.Green);
+
+        var place = new Placing(Played(map, slopes), first);
+        BattleState s = Start(map, first, slopes);
+        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units");
+        foreach (BattleUnit u in s.Units)
+            Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
+        var said = new List<string>();
+        // the placement as the homes stand
+        if (place.Side is not null)
+            Play(s, new List<Order> { new(OrderKind.Ready), new(OrderKind.Ready) }, place, said);
+
+        var rng = new Random(seed);
+        int refused = 0, turns = 0, plays = 0;
+        double ms = 0.0, worst = 0.0;
+        while (!s.Over && turns < maxTurns)
+        {
+            turns++;
+            Camp side = s.Turn;
+            List<Order> orders;
+            if (Plays(side))
+            {
+                AiChoice c = AiBrain.Choose(s, levels[side == Camp.Green ? 0 : 1], rng);
+                plays += c.Plays;
+                ms += c.Ms;
+                worst = Math.Max(worst, c.Ms);
+                string line = FormattableString.Invariant(
+                    $"battle-run: round {s.Round} {side}: {c.Play.Say(s.Shift)} - score {c.Play.Score:F2}, {c.Plays} plays, {c.Ms:F1} ms");
+                said.Add(line);
+                Log.Print(line);
+                orders = c.Play.Orders.Select(o => o.Moved(-s.Shift)).ToList();
+            }
+            else
+                orders = new List<Order> { new(OrderKind.Pass) };
+            int turnNo = s.TurnNo;
+            int bad = Play(s, orders, place, said);
+            refused += bad;
+            // a play refused part-way leaves the turn open: handed over
+            if (!s.Over && s.TurnNo == turnNo)
+                Play(s, new List<Order> { new(OrderKind.Pass) }, place, said);
+        }
+        string verdict = s.Drawn ? "drawn" : s.Won is Camp won ? $"{won} won" : "not over";
+        int aiTurns = Math.Max(1, sides == "both" ? turns : (turns + 1) / 2);
+        Log.Print(FormattableString.Invariant(
+            $"battle-run: ai over - {verdict}, round {s.Round}, {turns} turns, {refused} refused; a turn {ms / aiTurns:F1} ms, {plays / (double)aiTurns:F0} plays, the slowest {worst:F1} ms"));
+        string dir = outDir ?? ProjectSettings.GlobalizePath("res://out/battle-run");
+        Directory.CreateDirectory(dir);
+        string file = Path.Combine(dir, $"{map.Name}-ai.txt");
+        File.WriteAllText(file, s.Say());
+        File.WriteAllText(Path.Combine(dir, $"{map.Name}-ai.log"), string.Join("\n", said) + "\n");
+        Log.Print($"battle-run: the match as it ends - {file}");
         return refused > 0 ? 2 : 0;
     }
 

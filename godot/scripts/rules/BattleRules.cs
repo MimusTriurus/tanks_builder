@@ -541,7 +541,7 @@ public static partial class Battle
 
     /// <summary>The level a hull fires from and is shot at: its cell's, but
     /// afloat on the bank's (field.md, 2026-10-29).</summary>
-    private static int Level(BattleState s, BattleUnit u) =>
+    internal static int Level(BattleState s, BattleUnit u) =>
         s.Board.LevelAt(u.Cell) + (u.Fate == UnitFate.Alive && s.Board.IsDeep(u.Cell) && s.Board.RampHeading(u.Cell) < 0 ? 1 : 0);
 
     /// <summary>
