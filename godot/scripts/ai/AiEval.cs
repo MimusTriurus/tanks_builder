@@ -39,8 +39,12 @@ public static class AiEval
     /// <summary>A quiet round's extra weight on a point of material lead.</summary>
     private const double Lead = 0.15;
     /// <summary>The enemy's best activation, and the rest of its units' best:
-    /// one of them acts next.</summary>
-    private const double Worst = 0.9, Others = 0.1;
+    /// one of them acts next, the others after - a move that ends under the
+    /// guns of several is a bad one even when only one fires next («перебежка»
+    /// от укрытия к укрытию, docs/ai-plan.md, И4). Others was 0.1; at 0.3 the
+    /// fighter won 33:21 against it, the veteran 20:6 (2026-11-05); 0.5 was
+    /// worse than 0.3.</summary>
+    private const double Worst = 0.9, Others = 0.3;
     /// <summary>Our own best activation after: the initiative, the enemy's turn between.</summary>
     private const double Initiative = 0.25;
 
@@ -171,8 +175,9 @@ public static class AiEval
         if (s.Over)
             return score;
         (double worst, double others) = threats.Of(s, Across(me));
-        double fear = (style ?? AiStyle.Plain).Fear * Math.Max(0.3, 1.0 - 0.25 * s.HarmlessFor(me));
-        score -= fear * (Worst * worst + Others * others);
+        AiStyle st = style ?? AiStyle.Plain;
+        double fear = st.Fear * Math.Max(0.3, 1.0 - 0.25 * s.HarmlessFor(me));
+        score -= fear * (Worst * worst + st.Spread * Others * others);
         return score + Initiative * threats.Of(s, me).Worst;
     }
 

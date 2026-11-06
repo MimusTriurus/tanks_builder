@@ -22,7 +22,11 @@ namespace TankSpriteTest;
 /// within six cells: a penalty - its lines of fire and ambushes are along it.</param>
 /// <param name="Watch">Each own unit watching in ambush: a bonus.</param>
 /// <param name="Huddle">Two own hulls side by side, times the plain penalty.</param>
-public sealed record AiStyle(string Id, double Pull, int Reach, double Fear, double Front, double Watch, double Huddle)
+/// <param name="Spread">The enemy's other units' threats (all but its best
+/// activation's), times the plain weight (<c>AiEval.Others</c>, the bound
+/// from cover to cover).</param>
+public sealed record AiStyle(string Id, double Pull, int Reach, double Fear, double Front, double Watch, double Huddle,
+                             double Spread = 1.0)
 {
     public static readonly AiStyle Plain = new("plain", 1.0, 0, 1.0, 0.0, 0.0, 1.0);
 
