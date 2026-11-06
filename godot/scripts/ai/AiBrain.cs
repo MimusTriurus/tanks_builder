@@ -48,6 +48,11 @@ public static class AiBrain
     {
         var watch = Stopwatch.StartNew();
         AiStyle st = style ?? AiStyle.Plain;
+        // the veteran plays the squad's roles (AiRoles; docs/ai-plan.md, И4,
+        // «Роли по классам»: paired against the veteran without, 20:13 in
+        // pairs apart; the fighter's were 16:12 - within the noise, left out)
+        if (level == AiLevel.Veteran && st.Roles != AiRoles.All)
+            st = st with { Roles = AiRoles.All };
         // the dice drawn twice a call, whatever the plays: the hair of noise
         // that splits equal plays is a hash of the play under this salt, the
         // weaker levels' slip the one roll - so a change to the plays tried

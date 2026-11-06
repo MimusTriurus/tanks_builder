@@ -116,6 +116,8 @@ public static class AiEval
                     score -= st.Front;
                 if (st.Watch > 0.0 && u.Ambushing)
                     score += st.Watch;
+                if (st.Roles != AiRoles.None)
+                    score += Role(s, u, st.Roles);
             }
             // the formation: an own hull beside is a chain waiting for a spark
             // (states.md, «Уничтожен»), each pair once
@@ -207,6 +209,69 @@ public static class AiEval
             }
         }
         return false;
+    }
+
+    /// <summary>A cell that suits the class's role (<see cref="AiRoles"/>).</summary>
+    private const double RoleBonus = 0.3;
+
+    /// <summary>The role's bonus for own <paramref name="u"/> where it stands.</summary>
+    private static double Role(BattleState s, BattleUnit u, AiRoles roles)
+    {
+        switch (u.Class.Might)
+        {
+            case 5 when (roles & AiRoles.Mortar) != 0:
+                // behind the front: another own hull nearer the enemy than it
+                return Ahead(s, u, out bool other) && other ? -RoleBonus : 0.0;
+            case 3 when (roles & AiRoles.Anchor) != 0:
+                // the anchor: none of its own nearer the enemy
+                return Ahead(s, u, out _) ? RoleBonus : 0.0;
+            case 1 when (roles & AiRoles.Flank) != 0:
+                foreach (BattleUnit e in s.Units)
+                    if (e.Side != u.Side && e.Fate == UnitFate.Alive && AxisOf(e, u.Cell) is int h && h != e.Heading)
+                        return RoleBonus;
+                return 0.0;
+            case 4 when (roles & AiRoles.Axis) != 0:
+                foreach (BattleUnit e in s.Units)
+                    if (e.Side != u.Side && e.Fate == UnitFate.Alive && AxisOf(u, e.Cell) == u.Heading)
+                        return RoleBonus;
+                return 0.0;
+        }
+        return 0.0;
+    }
+
+    /// <summary>Whether no other own active hull is nearer its nearest enemy
+    /// than <paramref name="u"/>; <paramref name="other"/> - whether there is
+    /// another own active hull at all.</summary>
+    private static bool Ahead(BattleState s, BattleUnit u, out bool other)
+    {
+        int mine = Nearest(s, u);
+        other = false;
+        foreach (BattleUnit o in s.Units)
+        {
+            if (o == u || o.Side != u.Side || o.Fate != UnitFate.Alive)
+                continue;
+            other = true;
+            if (Nearest(s, o) < mine)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>The axis from <paramref name="from"/> that reaches
+    /// <paramref name="cell"/> within six steps, or null.</summary>
+    private static int? AxisOf(BattleUnit from, Vector2I cell)
+    {
+        foreach (int h in HexField.EdgeHeadings)
+        {
+            Vector2I at = from.Cell;
+            for (int k = 0; k < 6; k++)
+            {
+                at = HexField.Step(at, h);
+                if (at == cell)
+                    return h;
+            }
+        }
+        return null;
     }
 
     public static Camp Across(Camp c) => c == Camp.Green ? Camp.Brown : Camp.Green;

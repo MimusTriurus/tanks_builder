@@ -26,7 +26,7 @@ namespace TankSpriteTest;
 /// activation's), times the plain weight (<c>AiEval.Others</c>, the bound
 /// from cover to cover).</param>
 public sealed record AiStyle(string Id, double Pull, int Reach, double Fear, double Front, double Watch, double Huddle,
-                             double Spread = 1.0)
+                             double Spread = 1.0, AiRoles Roles = AiRoles.None)
 {
     public static readonly AiStyle Plain = new("plain", 1.0, 0, 1.0, 0.0, 0.0, 1.0);
 
@@ -46,12 +46,47 @@ public sealed record AiStyle(string Id, double Pull, int Reach, double Fear, dou
 
     public static readonly AiStyle[] All = { Plain, Armour, Recon, Artillery };
 
-    /// <summary>The style of a doctrine's id (<c>QuickSquad.Doctrine.Id</c>), plain for none.</summary>
+    /// <summary>The style of a doctrine's id (<c>QuickSquad.Doctrine.Id</c>),
+    /// plain for none; <c>id+hm+lt</c> adds roles to it (<see cref="AiRoles"/>,
+    /// <c>+roles</c> all of them) - for a paired measurement on <c>--battle-run</c>.</summary>
     public static AiStyle Of(string? id)
     {
+        string[] parts = (id ?? "").Split('+');
+        AiStyle found = Plain;
         foreach (AiStyle s in All)
-            if (string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase))
-                return s;
-        return Plain;
+            if (string.Equals(s.Id, parts[0], StringComparison.OrdinalIgnoreCase))
+                found = s;
+        AiRoles roles = found.Roles;
+        for (int i = 1; i < parts.Length; i++)
+            roles |= parts[i].ToLowerInvariant() switch
+            {
+                "hm" => AiRoles.Mortar,
+                "lt" => AiRoles.Flank,
+                "ht" => AiRoles.Anchor,
+                "td" => AiRoles.Axis,
+                "roles" => AiRoles.All,
+                _ => AiRoles.None,
+            };
+        return roles == found.Roles ? found : found with { Id = id!, Roles = roles };
     }
+}
+
+/// <summary>
+/// The squad's roles by class (docs/ai-plan.md, «Координация отряда», И4):
+/// a small bonus in <see cref="AiEval.Quick"/> for a cell that suits the
+/// class - not an order, the search's material still comes first.
+/// </summary>
+[Flags]
+public enum AiRoles
+{
+    None = 0,
+    /// <summary>HM: behind the front - another own hull nearer the enemy.</summary>
+    Mortar = 1,
+    /// <summary>LT: on an enemy's axis other than its front - at its side or rear.</summary>
+    Flank = 2,
+    /// <summary>HT: the anchor ahead - the own hull nearest the enemy.</summary>
+    Anchor = 4,
+    /// <summary>TD: an enemy on the axis its hull faces, within six cells.</summary>
+    Axis = 8,
+    All = Mortar | Flank | Anchor | Axis,
 }
