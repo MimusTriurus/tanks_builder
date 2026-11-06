@@ -100,6 +100,13 @@ public static class AiMoves
 
     /// <summary>The match copied for a play, without its log of events: the
     /// rules write it and never read it back.</summary>
+    /// <summary>The tide (trial, <see cref="BattleState.Tide"/>) rises at this
+    /// round's end unless a tank is hit first, and <paramref name="u"/>
+    /// stands on the ring it floods without the snorkel.</summary>
+    public static bool Drowns(BattleState s, BattleUnit u) =>
+        s.Tide && (u.Kit & Kit.Snorkel) == 0 && !s.Board.IsDeep(u.Cell)
+        && s.TideQuiet + 1 >= s.TideStep && s.Ring(u.Cell) == s.TideLevel + 1;
+
     public static BattleState Copy(BattleState s)
     {
         List<BattleEvent> events = s.Events;
@@ -143,6 +150,10 @@ public static class AiMoves
                         // scored above keeping it - on duel12 nearly every match
                         // lost a tank to the sea by round 3 (2026-11-06)
                         if (s1.Unit(_id)!.Fate != UnitFate.Alive)
+                            continue;
+                        // nor on to the ring the tide (a trial) floods at this
+                        // round's end: the hull gets no activation to leave
+                        if (Drowns(s1, s1.Unit(_id)!))
                             continue;
                         head.Add(new Order(OrderKind.Go, cell, face == route.End.Heading ? -1 : face));
                         After(s1, head, attacked);

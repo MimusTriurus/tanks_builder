@@ -49,6 +49,109 @@ public static class AiEval
     /// <summary>Our own best activation after: the initiative, the enemy's turn between.</summary>
     private const double Initiative = 0.25;
 
+    /// <summary>
+    /// The tide (trial, <see cref="BattleState.Tide"/>): a unit on the next
+    /// ring to flood loses its worth as the clock nears the rise - all of it
+    /// in the round the sea comes - and a little on the ring after; the
+    /// snorkel swims.
+    /// </summary>
+    private static double TideScore(BattleState s, Camp me)
+    {
+        int left = Math.Max(1, s.TideStep - s.TideQuiet);
+        double clock = 1.0 - (left - 1) / (double)s.TideStep;
+        double score = 0.0;
+        for (int side = 0; side < 2; side++)
+        {
+            // a side moves one hull a round: the urgency is the activations
+            // its hulls on the ring need to get off it - through a wood one
+            // step at a time - against the rounds left; a hull a move nearer
+            // safety eases it, so the way out scores before the last round
+            int need = 0;
+            foreach (BattleUnit u in s.Units)
+                if ((int)u.Side == side && Afoot(u) && s.Ring(u.Cell) - s.TideLevel == 1)
+                    need += Escape(s, u);
+            double urgent = Math.Min(1.0, Math.Max(clock, need / (double)left));
+            foreach (BattleUnit u in s.Units)
+            {
+                if ((int)u.Side != side)
+                    continue;
+                double sign = u.Side == me ? 1.0 : -1.0;
+                if (!Afoot(u))
+                {
+                    // drowned by the rise just come: as dear as the risk was, so
+                    // a search that sees the sea come does not find it cheaper
+                    // than the round before
+                    if (u.Fate == UnitFate.Drowned && s.TideQuiet == 0 && s.TideLevel > 0
+                        && (u.Kit & Kit.Snorkel) == 0 && s.Ring(u.Cell) == s.TideLevel)
+                        score -= sign * Value(u) * (1.0 - OutShare) * (TideFear - 1.0);
+                    continue;
+                }
+                int ring = s.Ring(u.Cell) - s.TideLevel;
+                double risk = ring == 1 ? urgent : ring == 2 ? NextRing * urgent : 0.0;
+                if (risk > 0.0)
+                    score -= sign * Value(u) * (1.0 - OutShare) * risk * TideFear;
+            }
+        }
+        return score;
+    }
+
+    /// <summary>
+    /// The activations <paramref name="u"/> needs to stand off the ring the
+    /// tide floods next - on one it will flood later, or deeper in: one when
+    /// its move reaches such a cell, two when a move after one does, else
+    /// three. The board as the match began it - smoke and hulls in the way aside; kept per match, pose and rise.
+    /// </summary>
+    private static int Escape(BattleState s, BattleUnit u)
+    {
+        s.Ring(u.Cell);
+        var key = (u.Id, u.Cell, u.Heading, s.TideLevel, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(s.TideRings));
+        if (Escapes.TryGetValue(key, out int had))
+            return had;
+        Steps.Mover mover = Battle.MoverOf(s, u);
+        Steps.Reach first = Steps.Plan(s.Board, new Steps.Pose(u.Cell, u.Heading), mover);
+        int need = 3;
+        foreach (Vector2I c in first.Cells.Keys)
+            if (Dry(s, c))
+            {
+                need = 1;
+                break;
+            }
+        if (need > 1)
+            foreach (Vector2I c in first.Cells.Keys)
+            {
+                if (c == u.Cell || first.RouteTo(c) is not { } route)
+                    continue;
+                Steps.Reach then = Steps.Plan(s.Board, route.End, mover);
+                foreach (Vector2I d in then.Cells.Keys)
+                    if (Dry(s, d))
+                    {
+                        need = 2;
+                        break;
+                    }
+                if (need == 2)
+                    break;
+            }
+        if (Escapes.Count > 20000)
+            Escapes.Clear();
+        Escapes[key] = need;
+        return need;
+    }
+
+    /// <summary>Off the next rise's flood and not under water already.</summary>
+    private static bool Dry(BattleState s, Vector2I c) =>
+        !s.Board.IsDeep(c) && s.Ring(c) - s.TideLevel >= 2;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int, Vector2I, int, int, int), int> Escapes = new();
+
+    /// <summary>A hull the tide can drown: able to fight, without the snorkel.</summary>
+    private static bool Afoot(BattleUnit u) => u.Fate == UnitFate.Alive && (u.Kit & Kit.Snorkel) == 0;
+
+    /// <summary>The ring after the one to flood next, its share of the risk.</summary>
+    private const double NextRing = 0.5;
+    /// <summary>The tide's risk against the guns': a drowning is sure, a shot
+    /// may not come. 2 left a hull on the ring twice as often as 4 (2026-11-06).</summary>
+    private const double TideFear = 4.0;
+
     /// <summary>What a unit is worth (ai-plan.md, вопрос 2): LT 3, MT 4,
     /// HT 6, TD 5, HM 5 by its gun, a quarter a piece of kit on top.</summary>
     public static double Value(BattleUnit u)
@@ -102,6 +205,10 @@ public static class AiEval
         // further ahead it is (ai-plan.md, «Пат»: the leader has a win to lose)
         int quiet = count > 0 ? 0 : s.HarmlessFor(me);
         score -= quiet * (Quiet + Lead * Math.Max(0.0, score));
+        // the tide (a trial) after the clock: no lead to lose - its weight
+        // scaled by the quiet rounds took a hull's way off the ring for a loss
+        if (s.Tide)
+            score += TideScore(s, me);
         foreach (BattleUnit u in s.Units)
         {
             if (u.Fate != UnitFate.Alive)

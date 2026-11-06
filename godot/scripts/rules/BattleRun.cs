@@ -69,7 +69,14 @@ public static class BattleRun
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
             else if (a == "--doctrine" && more) doctrine = args[++i];
-            else if (a == "--stalemate" && more) _staleByCount = args[++i] == "count";
+            else if (a == "--stalemate" && more)
+            {
+                string how = args[++i];
+                _staleByCount = how == "count";
+                _tide = how.StartsWith("tide");
+                if (_tide && how.Length > 5 && int.TryParse(how[5..], out int step) && step > 0)
+                    _tideStep = step;
+            }
             else if (a == "--budget" && more)
             {
                 // N for both sides, or GREEN,BROWN
@@ -170,6 +177,8 @@ public static class BattleRun
     /// <summary><c>--stalemate count</c>: the stalemate won on the count of
     /// units able to fight (<see cref="BattleState.StaleByCount"/>).</summary>
     private static bool _staleByCount;
+    private static bool _tide;
+    private static int _tideStep = MatchRules.QuietRoundsDraw;
 
     /// <summary>
     /// The upgrades of <c>--budget</c>: each unit a branch of its class drawn
@@ -250,9 +259,13 @@ public static class BattleRun
         s.Handicap = handicap;
         Upgrade(s, _budget, seed);
         s.StaleByCount = _staleByCount;
+        s.Tide = _tide;
+        s.TideStep = _tideStep;
+        if (s.Tide)
+            s.Ring(default);  // the rings once, shared by every clone of the match
         Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
                   + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : "")
-                  + (_staleByCount ? ", stalemate on count" : ""));
+                  + (_staleByCount ? ", stalemate on count" : "") + (_tide ? $", the tide every {_tideStep}" : ""));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();

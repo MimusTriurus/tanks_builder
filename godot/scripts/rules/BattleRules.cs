@@ -1404,6 +1404,11 @@ public static partial class Battle
     /// the last tank burnt out on the same tick is a win, not a draw.</summary>
     private static void Stalemate(BattleState s)
     {
+        if (s.Tide)
+        {
+            Tide(s);
+            return;
+        }
         if (s.Over || s.QuietRounds < MatchRules.QuietRoundsDraw)
             return;
         if (s.StaleByCount)
@@ -1426,6 +1431,173 @@ public static partial class Battle
         }
         s.Drawn = true;
         s.Events.Add(new BattleEvent(BattleEventKind.Drawn, -1, default, s.QuietRounds, "stalemate"));
+    }
+
+    /// <summary>
+    /// The tide (trial, <see cref="BattleState.Tide"/>): after
+    /// <see cref="MatchRules.QuietRoundsDraw"/> quiet rounds on its clock the
+    /// sea rises a ring. A unit able to fight on a flooded cell is drowned -
+    /// afloat with the snorkel - a knocked-out hull drowned with it. No land
+    /// left and nobody beaten is the draw.
+    /// </summary>
+    private static void Tide(BattleState s)
+    {
+        if (s.Over || s.TideQuiet < s.TideStep)
+            return;
+        s.TideLevel++;
+        s.LastTide = s.Round - 1;
+        bool land = false;
+        for (int r = 0; r < s.Board.Rows; r++)
+            for (int q = 0; q < s.Board.Columns; q++)
+            {
+                var c = new Vector2I(q, r);
+                if (!s.Board.InBounds(c) || s.Board.IsDeep(c))
+                    continue;
+                if (s.Ring(c) > s.TideLevel)
+                {
+                    land = true;
+                    continue;
+                }
+                s.Board.Flood(c, s.TideSea);
+                s.Fires.Remove(c);
+                s.Events.Add(new BattleEvent(BattleEventKind.Flooded, -1, c, s.TideLevel));
+            }
+        foreach (BattleUnit u in s.Units)
+        {
+            if (!s.Board.IsDeep(u.Cell) || s.Ring(u.Cell) != s.TideLevel)
+                continue;
+            if (u.Fate == UnitFate.Alive)
+            {
+                if (u.Burning)
+                    Douse(s, u);
+                if ((u.Kit & Kit.Snorkel) != 0)
+                {
+                    s.Events.Add(new BattleEvent(BattleEventKind.Afloat, u.Id, u.Cell, 0, "the tide"));
+                    continue;
+                }
+                u.Fate = UnitFate.Drowned;
+                s.Harmed(u);
+                s.Events.Add(new BattleEvent(BattleEventKind.Drowned, u.Id, u.Cell, 0, "the tide"));
+                Lift(s, u, "drowned");
+            }
+            else if (u.Fate == UnitFate.Knocked)
+            {
+                u.Fate = UnitFate.Drowned;
+                s.Events.Add(new BattleEvent(BattleEventKind.Drowned, u.Id, u.Cell, 0, "the tide"));
+            }
+        }
+        Over(s);
+        if (!s.Over && !land)
+        {
+            s.Drawn = true;
+            s.Events.Add(new BattleEvent(BattleEventKind.Drawn, -1, default, s.TideLevel, "the sea took the board"));
+        }
+    }
+
+    /// <summary>
+    /// Each cell's rise for the tide (<see cref="BattleState.TideRings"/>) and
+    /// the sea's level. The ring is hex steps from the sea - the deep cells on
+    /// the plot's rim; the n-th rise floods every cell n steps in or nearer
+    /// and then, the dam of the shore gone, runs as in vessels joined: from
+    /// all the sea's water - deep water it reaches too - into every cell
+    /// beside at the sea's level or under it, a ravine or a shallow,
+    /// whatever its ring.
+    /// </summary>
+    public static int[] Rings(BattleBoard b, out int sea)
+    {
+        var ring = new int[b.Columns * b.Rows];
+        Array.Fill(ring, int.MaxValue);
+        var queue = new Queue<Vector2I>();
+        sea = 0;
+        bool found = false;
+        for (int r = 0; r < b.Rows; r++)
+            for (int q = 0; q < b.Columns; q++)
+            {
+                var c = new Vector2I(q, r);
+                if (!b.InBounds(c) || !b.IsDeep(c))
+                    continue;
+                bool rim = false;
+                foreach (int h in HexField.EdgeHeadings)
+                    if (!b.InBounds(HexField.Step(c, h)))
+                        rim = true;
+                if (!rim)
+                    continue;
+                ring[r * b.Columns + q] = 0;
+                queue.Enqueue(c);
+                if (!found)
+                {
+                    sea = b.LevelAt(c);
+                    found = true;
+                }
+            }
+        while (queue.Count > 0)
+        {
+            Vector2I c = queue.Dequeue();
+            int d = ring[c.Y * b.Columns + c.X];
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I n = HexField.Step(c, h);
+                if (!b.InBounds(n) || ring[n.Y * b.Columns + n.X] <= d + 1)
+                    continue;
+                ring[n.Y * b.Columns + n.X] = d + 1;
+                queue.Enqueue(n);
+            }
+        }
+        int most = 0;
+        for (int i = 0; i < ring.Length; i++)
+            if (ring[i] != int.MaxValue)
+                most = Math.Max(most, ring[i]);
+        // the rise each cell goes under at: the ring, or sooner by the vessels
+        var rise = new int[ring.Length];
+        Array.Fill(rise, int.MaxValue);
+        var wet = new bool[ring.Length];
+        for (int i = 0; i < ring.Length; i++)
+            if (ring[i] == 0)
+            {
+                rise[i] = 0;
+                wet[i] = true;
+            }
+        for (int n = 1; n <= most; n++)
+        {
+            queue.Clear();
+            for (int i = 0; i < ring.Length; i++)
+            {
+                if (ring[i] == n && rise[i] == int.MaxValue)
+                {
+                    rise[i] = n;
+                    wet[i] = true;
+                }
+                if (wet[i])
+                    queue.Enqueue(new Vector2I(i % b.Columns, i / b.Columns));
+            }
+            while (queue.Count > 0)
+            {
+                Vector2I c = queue.Dequeue();
+                foreach (int h in HexField.EdgeHeadings)
+                {
+                    Vector2I x = HexField.Step(c, h);
+                    if (!b.InBounds(x))
+                        continue;
+                    int i = x.Y * b.Columns + x.X;
+                    if (wet[i])
+                        continue;
+                    if (b.IsDeep(x))
+                        wet[i] = true;
+                    else if (b.LevelAt(x) <= sea)
+                    {
+                        wet[i] = true;
+                        rise[i] = Math.Min(rise[i], n);
+                    }
+                    else
+                        continue;
+                    queue.Enqueue(x);
+                }
+            }
+        }
+        for (int i = 0; i < rise.Length; i++)
+            if (rise[i] == int.MaxValue)
+                rise[i] = ring[i] == int.MaxValue ? 0 : ring[i];
+        return rise;
     }
 
     /// <summary>The round's end (match.md): each burning wood a round shorter,

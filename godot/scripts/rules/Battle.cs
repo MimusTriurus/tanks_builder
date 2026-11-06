@@ -90,6 +90,9 @@ public enum BattleEventKind
     Overdrive,
     /// <summary>The shot on the move said: fired as the move comes on to Cell; Note the aim.</summary>
     OnWay,
+    /// <summary>The tide (trial, <see cref="BattleState.Tide"/>): Cell went
+    /// under the sea; Value the ring.</summary>
+    Flooded,
 }
 
 /// <summary>What happened, in the order it happened: the protocol the bench
@@ -125,6 +128,26 @@ public sealed class BattleState
     /// --stalemate count</c>, docs/ai-plan.md): the side with more units able
     /// to fight wins it, an even count is a draw. Off is the GDD's draw.</summary>
     public bool StaleByCount;
+    /// <summary>The tide under trial (<c>--battle-run … --stalemate tide</c>,
+    /// docs/ai-plan.md, «Прилив»): a stalemate is no draw, the sea rises a
+    /// ring instead - every cell of the next ring in from the sea becomes
+    /// deep water, a unit on it drowned or, with the snorkel, afloat. Off is
+    /// the GDD's draw.</summary>
+    public bool Tide;
+    /// <summary>Quiet rounds on the tide's clock to a rise (<see cref="TideQuiet"/>).</summary>
+    public int TideStep = MatchRules.QuietRoundsDraw;
+    /// <summary>Rings the sea has risen (<see cref="Tide"/>).</summary>
+    public int TideLevel;
+    /// <summary>The round the sea last rose in, nought for never.</summary>
+    public int LastTide;
+    /// <summary>Each cell's ring: hex steps from the sea, the sea nought;
+    /// worked out at the first ask, then shared by every clone.</summary>
+    public int[]? TideRings;
+    /// <summary>The sea's level, the flooded cells' (<see cref="TideRings"/>).</summary>
+    public int TideSea;
+    /// <summary>Rounds into the match before the first contact after which
+    /// the tide's clock runs anyway: no rise waits on the contact for ever.</summary>
+    public const int TideStart = 6;
     public int Round = 1;
     /// <summary>Turns played, the first nought: a fire's clock.</summary>
     public int TurnNo;
@@ -183,6 +206,20 @@ public sealed class BattleState
     /// AI's clock, not the stalemate's. Its own losses do not wind it back:
     /// a side ahead, pressed by it, would else throw a tank away to be let
     /// off (docs/ai-plan.md, И3: a heavy driven into the sea).</summary>
+    /// <summary>The tide's clock (<see cref="Tide"/>): whole rounds since the
+    /// last hit on a tank, ram, change of the point or rise - and before the
+    /// contact, since <see cref="TideStart"/>.</summary>
+    public int TideQuiet => Math.Max(0, Round - 1 - Math.Max(Math.Max(LastStrike, LastShift),
+        Math.Max(LastTide, LastStrike == 0 && LastShift == 0 ? TideStart : 0)));
+
+    /// <summary>The ring of <paramref name="cell"/> (<see cref="TideRings"/>):
+    /// the sea nought, the board's heart the most.</summary>
+    public int Ring(Vector2I cell)
+    {
+        TideRings ??= Battle.Rings(Board, out TideSea);
+        return Board.InBounds(cell) ? TideRings[cell.Y * Board.Columns + cell.X] : 0;
+    }
+
     public int HarmlessFor(Camp me) =>
         Math.Max(0, Round - 1 - Math.Max(me == Camp.Green ? LastHarmBrown : LastHarmGreen, LastShift));
 

@@ -181,7 +181,7 @@ public sealed class AiThreat
     /// state and smoke.</summary>
     private static long Stamp(BattleState s, BattleUnit e)
     {
-        long h = 17;
+        long h = 17 + s.TideLevel;
         foreach (BattleUnit u in s.Units)
             if (u.Standing && u.Id != e.Id)
                 h = h * 31 + (u.Cell.X * 1009 + u.Cell.Y);

@@ -154,6 +154,22 @@ public sealed class BattleBoard : IHexBoard
             _sides[Index(cell)] = (byte)mask;
     }
 
+    /// <summary>The tide's (trial, <see cref="BattleState.Tide"/>): the cell
+    /// under the sea - deep water at <paramref name="level"/>, its wood,
+    /// walls and mines gone with it.</summary>
+    public void Flood(Vector2I cell, int level)
+    {
+        if (!InBounds(cell))
+            return;
+        int i = Index(cell);
+        _floor[i] = Foundation.Deep;
+        _level[i] = level;
+        _ramp[i] = -1;
+        _cover[i] = Cover.None;
+        _state[i] = CoverState.Intact;
+        _sides[i] = 0;
+    }
+
     public bool Smoked(Vector2I cell) => InBounds(cell) && _smoke[Index(cell)];
 
     /// <summary>Smoke laid on the hex, or gone from it.</summary>
