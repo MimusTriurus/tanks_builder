@@ -789,9 +789,45 @@ public sealed partial class Tank3DBench
             c.DrawArc(mid, BadgeR + 3.0f, 0.0f, Mathf.Tau, 24, Ui.Move, 1.5f, true);
         Font font = ThemeDB.FallbackFont;
         const int size = 13;
-        float w = font.GetStringSize(_badgeText, HorizontalAlignment.Left, -1, size).X;
-        float ascent = font.GetAscent(size), descent = font.GetDescent(size);
-        c.DrawString(font, new Vector2(mid.X - w * 0.5f, mid.Y + (ascent - descent) * 0.5f), _badgeText,
+        // centred by the digits' own ink, not the font's ascent and advance: a
+        // digit stands lower than the ascent and off its advance's middle, so the
+        // line's box set it high and to the left (Black Ops One most)
+        Rect2 ink = InkRect(font, _badgeText, size);
+        c.DrawString(font, mid - ink.GetCenter(), _badgeText,
                      HorizontalAlignment.Left, -1, size, _badgeOff ? Ui.Spent : MarkLine);
+    }
+
+    /// <summary>The ink of <paramref name="text"/> at <paramref name="size"/>
+    /// relative to the pen on the baseline, from the glyphs' own boxes (no
+    /// kerning: a digit or two). The line's box when a glyph is not to be had.</summary>
+    private static Rect2 InkRect(Font font, string text, int size)
+    {
+        TextServer ts = TextServerManager.GetPrimaryInterface();
+        Godot.Collections.Array<Rid> rids = font.GetRids();
+        var at = new Vector2I(size, 0);
+        float pen = 0.0f;
+        Rect2? ink = null;
+        foreach (char ch in text)
+        {
+            Rid rid = default;
+            for (int i = 0; i < rids.Count; i++)
+                if (ts.FontHasChar(rids[i], ch))
+                {
+                    rid = rids[i];
+                    break;
+                }
+            if (!rid.IsValid)
+                goto line;
+            long glyph = ts.FontGetGlyphIndex(rid, size, ch, 0);
+            Vector2 off = ts.FontGetGlyphOffset(rid, at, glyph), box = ts.FontGetGlyphSize(rid, at, glyph);
+            var r = new Rect2(new Vector2(pen, 0.0f) + off, box);
+            ink = ink is { } had ? had.Merge(r) : r;
+            pen += ts.FontGetGlyphAdvance(rid, size, glyph).X;
+        }
+        if (ink is { } got && got.Size.X > 0.0f && got.Size.Y > 0.0f)
+            return got;
+    line:
+        Vector2 s = font.GetStringSize(text, HorizontalAlignment.Left, -1, size);
+        return new Rect2(0.0f, -font.GetAscent(size), s.X, s.Y);
     }
 }

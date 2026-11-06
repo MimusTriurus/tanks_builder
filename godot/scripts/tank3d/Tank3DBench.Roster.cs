@@ -293,7 +293,8 @@ public sealed partial class Tank3DBench
         _rosterTipAt = over;
         _hudTips.Hold = _rosterHeld >= 0;
         int i = over;
-        _hudTips.Show(_rosterTipKeys[i], () => RosterIconRect(i), RosterCardBody);
+        // no ring round the icon, as on the action panel (Tank3DBench.ActTips)
+        _hudTips.Show(_rosterTipKeys[i], () => RosterIconRect(i), RosterCardBody, ring: false);
     }
 
     private Rect2 RosterIconRect(int i) =>

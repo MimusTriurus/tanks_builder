@@ -116,7 +116,9 @@ public sealed partial class Tank3DBench
         if (_hudTips is null || (tip.Group is not null && _acts is { Visible: false }))
             return;
         _tipWasOff = tip.Button.Disabled;
-        _hudTips.Show(tip, tip.Button.GetGlobalRect, () => ActTipBody(tip), UiTip.Prefer.Above);
+        // no ring round the button: the beak says which it is, and a grey ring
+        // over the button's own rim read as a frame of its own (the author's note, 2026-11-06)
+        _hudTips.Show(tip, tip.Button.GetGlobalRect, () => ActTipBody(tip), UiTip.Prefer.Above, ring: false);
     }
 
     /// <summary>Every frame, from <c>ActsTick</c>: a held card up, a card gone with its
