@@ -48,6 +48,14 @@ public static class AiBrain
     {
         var watch = Stopwatch.StartNew();
         AiStyle st = style ?? AiStyle.Plain;
+        // the dice drawn twice a call, whatever the plays: the hair of noise
+        // that splits equal plays is a hash of the play under this salt, the
+        // weaker levels' slip the one roll - so a change to the plays tried
+        // does not move every later roll of the match, and two builds on one
+        // seed part only where their plays differ (paired measurements,
+        // docs/ai-plan.md, «Дым на ось к своему HM»)
+        ulong salt = (ulong)rng.NextInt64();
+        double roll = rng.NextDouble();
         Camp me = state.Turn;
         BattleState root = AiMoves.Copy(state);
         int keep = level == AiLevel.Recruit ? 5 : Shortlist;
@@ -55,17 +63,17 @@ public static class AiBrain
         int plays = AiMoves.Each(root, (play, after) =>
         {
             // a hair of noise so equal plays do not always fall the same way
-            play.Score = AiEval.Quick(after, me, st) + rng.NextDouble() * 1e-4;
+            play.Score = AiEval.Quick(after, me, st) + Hair(play, salt);
             Keep(best, keep, play, after);
         });
         if (best.Count == 0)
             return new AiChoice(new AiPlay(-1, new[] { new Order(OrderKind.Pass) }), 0, watch.Elapsed.TotalMilliseconds);
         if (level == AiLevel.Recruit)
-            return new AiChoice(Tempered(best, 5, 0.6, rng), plays, watch.Elapsed.TotalMilliseconds);
+            return new AiChoice(Tempered(best, 5, 0.6, roll), plays, watch.Elapsed.TotalMilliseconds);
 
         var threats = new AiThreat(full: level == AiLevel.Veteran);
         foreach ((AiPlay p, BattleState after) in best)
-            p.Score = AiEval.Full(after, me, threats, st) + rng.NextDouble() * 1e-4;
+            p.Score = AiEval.Full(after, me, threats, st) + Hair(p, salt);
         best.Sort((a, b) => b.Play.Score.CompareTo(a.Play.Score));
 
         int deep = Math.Min(best.Count, level == AiLevel.Veteran ? 10 : 6);
@@ -88,12 +96,12 @@ public static class AiBrain
                 }
             });
             if (lowState is not null)
-                p.Score = AiEval.AfterReply(lowState, me, threats, st) + rng.NextDouble() * 1e-4;
+                p.Score = AiEval.AfterReply(lowState, me, threats, st) + Hair(p, salt);
         }
         best.RemoveRange(deep, best.Count - deep);
         best.Sort((a, b) => b.Play.Score.CompareTo(a.Play.Score));
         if (level == AiLevel.Fighter)
-            return new AiChoice(Tempered(best, 3, 0.15, rng), plays, watch.Elapsed.TotalMilliseconds, replies, 2);
+            return new AiChoice(Tempered(best, 3, 0.15, roll), plays, watch.Elapsed.TotalMilliseconds, replies, 2);
         if (shallow)
             return new AiChoice(best[0].Play, plays, watch.Elapsed.TotalMilliseconds, replies, 2);
         (AiPlay chosen, int searched, bool whole) = Search(best, me, watch, st);
@@ -219,10 +227,34 @@ public static class AiBrain
             best.RemoveAt(best.Count - 1);
     }
 
+    /// <summary>The hair of noise on a play's score, under 1e-4: a hash of
+    /// its unit and orders salted by the call's dice (splitmix64).</summary>
+    private static double Hair(AiPlay play, ulong salt)
+    {
+        ulong h = Mix(salt ^ (ulong)play.Unit);
+        foreach (Order o in play.Orders)
+        {
+            h = Mix(h ^ (ulong)(int)o.Kind);
+            h = Mix(h ^ (uint)o.Cell.X ^ ((ulong)(uint)o.Cell.Y << 32));
+            h = Mix(h ^ (uint)o.Side ^ ((ulong)(uint)o.Unit << 32));
+            h = Mix(h ^ (uint)o.Side2 ^ ((ulong)(uint)o.Side3 << 32));
+            h = Mix(h ^ (uint)o.Aim.X ^ ((ulong)(uint)o.Aim.Y << 32));
+        }
+        return (h >> 11) * (1.0 / (1UL << 53)) * 1e-4;
+    }
+
+    private static ulong Mix(ulong z)
+    {
+        z += 0x9E3779B97F4A7C15UL;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+        return z ^ (z >> 31);
+    }
+
     /// <summary>One of the <paramref name="top"/> best, drawn by their score
     /// at <paramref name="temperature"/> (in material points): the weaker
     /// levels' slips, never a play far below the best.</summary>
-    private static AiPlay Tempered(List<(AiPlay Play, BattleState After)> sorted, int top, double temperature, Random rng)
+    private static AiPlay Tempered(List<(AiPlay Play, BattleState After)> sorted, int top, double temperature, double roll)
     {
         int n = Math.Min(top, sorted.Count);
         double head = sorted[0].Play.Score;
@@ -236,7 +268,7 @@ public static class AiBrain
             weights[i] = Math.Exp((sorted[i].Play.Score - head) / temperature);
             sum += weights[i];
         }
-        double pick = rng.NextDouble() * sum;
+        double pick = roll * sum;
         for (int i = 0; i < n; i++)
         {
             pick -= weights[i];

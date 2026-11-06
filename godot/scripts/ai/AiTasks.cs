@@ -282,10 +282,12 @@ public static class AiTasks
         // enemy medium two out of the mortar, under its reach of three, would
         // knock it out the moment it fires at the medium four out; an own
         // medium beside the lane puts the smoke grenade between them, the
-        // mortar lobs over it next turn. All but the enemy's reply are pinned:
+        // mortar lobs over it next turn - or the medium, free by then, takes
+        // the screened one in its side: either is the smoke's gain, without
+        // it the mortar is lost in the reply. All but the enemy's reply are pinned:
         // no hull drives into the lane instead of the smoke, the mortar does
         // not drive off the axis; neither green gun gets through a medium's front.
-        yield return ("MT smokes the axis to its own HM, the HM lobs over the smoke next turn", () =>
+        yield return ("MT smokes the axis to its own HM: the HM lives, an enemy falls next turn", () =>
         {
             BattleState s = Board();
             Put(s, 0, "HMR", Camp.Green, 4, 8, 90);
@@ -295,7 +297,8 @@ public static class AiTasks
             foreach (int id in new[] { 0, 1, 2, 3 })
                 s.Unit(id)!.Pinned = true;
             return s;
-        }, (_, a) => a.Unit(3)!.Fate != UnitFate.Alive && a.Unit(0)!.Fate == UnitFate.Alive);
+        }, (_, a) => a.Unit(0)!.Fate == UnitFate.Alive
+                     && (a.Unit(3)!.Fate != UnitFate.Alive || a.Unit(2)!.Fate != UnitFate.Alive));
     }
 
     private const int Columns = 9, Rows = 10;
