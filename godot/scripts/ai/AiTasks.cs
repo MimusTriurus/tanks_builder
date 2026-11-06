@@ -138,6 +138,30 @@ public static class AiTasks
             return s;
         }, (_, a) => a.Unit(1)!.Fate == UnitFate.Destroyed);
 
+        // 15, 16. finish a hull or knock a live one («подбить и добить»,
+        // docs/ai-plan.md, И4): a win wants no hull blown (GameModes.md), so
+        // a hull is worth a round only while a repair kit can raise it. The
+        // same board twice, the enemy medium beyond the lane with the kit or
+        // without: raised, the knocked heavy is worth more than the light. The
+        // light stands on the heavy's other axis; neither the light nor the
+        // medium gets through a heavy's front, so the reply knocks nothing out
+        foreach (bool kit in new[] { true, false })
+            yield return (kit
+                ? "a knocked-out HT a repairer can reach is blown up, not left to be raised"
+                : "a knocked-out HT nobody can raise is left: the round knocks out a live LT", () =>
+            {
+                BattleState s = Board();
+                Put(s, 0, "HTR", Camp.Green, 4, 8, 90);
+                Put(s, 1, "HTR", Camp.Brown, 4, 4, 270, fate: UnitFate.Knocked);
+                Put(s, 2, "LTR", Camp.Brown, 1, 6, 330);
+                Put(s, 3, "MTR", Camp.Brown, 6, 2, 270, kit ? Kit.RepairKit : Kit.None);
+                // pinned: the choice is between its two rounds, not a drive
+                s.Unit(0)!.Pinned = true;
+                return s;
+            }, kit
+                ? (_, a) => a.Unit(1)!.Fate == UnitFate.Destroyed
+                : (_, a) => a.Unit(1)!.Fate == UnitFate.Knocked && a.Unit(2)!.Fate != UnitFate.Alive);
+
         // 4. alight: put it out before anything
         yield return ("a burning MT puts its fire out", () =>
         {
