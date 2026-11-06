@@ -37,11 +37,11 @@ public sealed record AiStyle(string Id, double Pull, int Reach, double Fear, dou
     public static readonly AiStyle Armour = new("armour", 1.0, 0, 0.85, 0.0, 0.0, 0.75);
 
     /// <summary>Разведбат: keeps off the guns' front, waits in ambush, fears
-    /// a little more (paired, before the shortlist fix: 18:11 in pairs apart).</summary>
+    /// a little more (paired against plain: 19:14 in pairs apart).</summary>
     public static readonly AiStyle Recon = new("recon", 1.0, 0, 1.1, 0.15, 0.15, 1.0);
 
     /// <summary>Артдивизион: a cell further, the threat weighed heavier, the
-    /// ambush valued (paired, before the shortlist fix: 20:20).</summary>
+    /// ambush valued (paired against plain: 17:21 in pairs apart, none twins).</summary>
     public static readonly AiStyle Artillery = new("artillery", 0.9, 1, 1.15, 0.1, 0.1, 1.0);
 
     public static readonly AiStyle[] All = { Plain, Armour, Recon, Artillery };
