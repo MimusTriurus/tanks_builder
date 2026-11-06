@@ -358,6 +358,39 @@ public static class AiMoves
         return shot.Clear || shot.BlockedAt is null;
     }
 
+    /// <summary>The incendiary into a wood beside an enemy standing in a
+    /// wood (docs/ai-plan.md, И4): the round's end carries the fire on to
+    /// the enemy's hex (field.md, «огонь\пожар»), where no round of the
+    /// gun's gets - a wood or the hull's front in the way. The wood aimed at
+    /// is the lane's last cell, so it does not shut it.</summary>
+    private static void Kindling(BattleState s, BattleUnit u, List<Order> all)
+    {
+        int reach = Gunnery.LobReachOf(u.Kit);
+        foreach (BattleUnit e in s.Units)
+        {
+            if (e.Side == u.Side || e.Fate != UnitFate.Alive || !Wood(s, e.Cell))
+                continue;
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I w = HexField.Step(e.Cell, h);
+                if (w == e.Cell || !s.Board.InBounds(w) || !Wood(s, w) || s.At(w) is not null
+                    || s.Board.Walled(e.Cell, h))
+                    continue;
+                (int heading, int range) = s.Board.LaneTo(u.Cell, w);
+                if (heading < 0 || (!u.Class.Turreted && heading != u.Heading)
+                    || Gunnery.MayTarget(u.Class.Lobs, range, false, reach) != Gunnery.Distance.Fits
+                    || !LaneOpen(s, u, w))
+                    continue;
+                var burn = new Order(OrderKind.Burn, w);
+                if (!all.Contains(burn))
+                    all.Add(burn);
+            }
+        }
+    }
+
+    private static bool Wood(BattleState s, Vector2I c) =>
+        s.Board.CoverAt(c) == Cover.Forest && s.Board.CoverStateAt(c) == CoverState.Intact && !s.Fires.ContainsKey(c);
+
     /// <summary>The attacks after the move: the shots, and the ambush toward
     /// the nearest enemy - a casemate along its hull, the medium a sector of
     /// two (three with the wide sector) about that side.</summary>
@@ -365,6 +398,8 @@ public static class AiMoves
     {
         List<Order> all = Shots(s, u);
         Glances(s, u, all);
+        if ((u.Kit & Kit.Incendiary) != 0)
+            Kindling(s, u, all);
         int to = Toward(s, u, u.Cell);
         if (to < 0)
             return all;

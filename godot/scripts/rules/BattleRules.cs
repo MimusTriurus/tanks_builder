@@ -260,8 +260,9 @@ public static partial class Battle
     /// When each enemy ambush fires at the moving hull (units.md, «Режим
     /// засады», 2026-10-31): the move is walked once on a copy, the ambushes
     /// held, and at each pose an ambush sees the hull in, its round is tried on
-    /// a copy of that. It fires at the first pose where the round knocks the
-    /// hull out; where none does, at the first it sees it in - the
+    /// a copy of that. It fires at the first pose where the round knocks out
+    /// an enemy - the hull, or another its glance goes on into (2026-11-06);
+    /// where none does, at the first it sees it in - the
     /// stabilizer's second round the same among the poses after its first.
     /// Poses past where the move stops on its own (a mine, the deep) are not
     /// had: the walk on the copy stops there too. Null with no ambush to fire.
@@ -299,7 +300,7 @@ public static partial class Battle
                 Shoot(tried, tried.Unit(w.Id)!, target, axis);
                 if (!seen.TryGetValue(w.Id, out var poses))
                     seen[w.Id] = poses = new List<(int, bool, int)>();
-                poses.Add((pose, target.Fate != UnitFate.Alive, axis));
+                poses.Add((pose, KnocksAny(t, tried, w.Side), axis));
             }
             return FireOnWay(t, tu, ref onWayShot) || true;
         });
@@ -347,6 +348,17 @@ public static partial class Battle
             picks[id] = queue;
         }
         return picks;
+    }
+
+    /// <summary>Whether a round knocked out any of <paramref name="ambusher"/>'s
+    /// enemies: the hull it was fired at, or another the glance went on into
+    /// (units.md, «Режим засады», 2026-11-06).</summary>
+    private static bool KnocksAny(BattleState before, BattleState after, Camp ambusher)
+    {
+        foreach (BattleUnit u in before.Units)
+            if (u.Side != ambusher && u.Fate == UnitFate.Alive && after.Unit(u.Id)!.Fate != UnitFate.Alive)
+                return true;
+        return false;
     }
 
     /// <summary>The ambushes whose moment <paramref name="pose"/> is (<see

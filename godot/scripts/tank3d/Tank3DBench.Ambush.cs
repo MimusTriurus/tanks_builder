@@ -296,23 +296,25 @@ public sealed partial class Tank3DBench
             BattleEvent e = st.Events[i];
             if (e.Kind != BattleEventKind.AmbushFired || !e.Note.StartsWith(at))
                 continue;
-            string plate = "", outcome = L.T("ambush.miss");
+            string plate = "", outcome = L.T("ambush.miss"), glance = "";
             for (int j = i + 1; j < st.Events.Count && st.Events[j].Kind is not (BattleEventKind.AmbushFired
                      or BattleEventKind.Moved or BattleEventKind.Turned); j++)
             {
                 BattleEvent h = st.Events[j];
-                if (h.Unit != _unitId || h.Kind is not (BattleEventKind.Hit or BattleEventKind.Glanced))
+                // the glance off this hull into another of ours (units.md, 2026-11-06)
+                if (h.Kind == BattleEventKind.Knocked && h.Unit != _unitId && glance.Length == 0)
+                    glance = L.T("ambush.glance_knocks", st.Unit(h.Unit)?.Tag ?? "");
+                if (h.Unit != _unitId || h.Kind is not (BattleEventKind.Hit or BattleEventKind.Glanced) || plate.Length > 0)
                     continue;
                 plate = h.Note;
                 outcome = h.Kind == BattleEventKind.Hit ? L.T("ambush.knocks") : L.T("ambush.no_pen");
-                break;
             }
             string side = plate switch
             {
                 "Front" => L.T("ambush.plate_front"), "Side" => L.T("ambush.plate_side"), "Rear" => L.T("ambush.plate_rear"),
                 "Roof" => L.T("ambush.plate_roof"), _ => "",
             };
-            said.Append(L.T("ambush.forecast", st.Unit(e.Unit)?.Tag ?? "", MapAt(e.Cell), side, outcome));
+            said.Append(L.T("ambush.forecast", st.Unit(e.Unit)?.Tag ?? "", MapAt(e.Cell), side, outcome + glance));
         }
         _forecast = said.ToString();
         if (_forecast.Length > 0)

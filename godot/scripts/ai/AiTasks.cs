@@ -299,6 +299,23 @@ public static class AiTasks
             return s;
         }, (_, a) => a.Unit(0)!.Fate == UnitFate.Alive
                      && (a.Unit(3)!.Fate != UnitFate.Alive || a.Unit(2)!.Fate != UnitFate.Alive));
+
+        // 18. the incendiary into the wood before the enemy (docs/ai-plan.md,
+        // И4): the enemy medium in a wood behind a wood - the green medium's
+        // round is spent on the first wood and a medium's front holds it
+        // anyway; the incendiary lights the first wood, the round's end
+        // carries the fire on to the enemy's (field.md, «огонь\пожар»). Not a
+        // heavy: one ending its turn in a wood fells it (units/ht.md, rule 3).
+        // The enemy is pinned for the reply, the green medium for its first
+        // turn: no drive round to the enemy's back.
+        yield return ("MT fires the incendiary into the wood before the enemy MT: the fire reaches it", () =>
+        {
+            BattleState s = Board(woods: new[] { new Vector2I(4, 5), new Vector2I(4, 4) });
+            Put(s, 0, "MTR", Camp.Green, 4, 8, 90, Kit.Incendiary);
+            Put(s, 1, "MTR", Camp.Brown, 4, 4, 270);
+            s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Unit(1)!.Burning || a.Unit(1)!.Fate != UnitFate.Alive);
     }
 
     private const int Columns = 9, Rows = 10;

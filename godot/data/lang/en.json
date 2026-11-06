@@ -580,6 +580,7 @@
   "ambush.plate_side": " side",
   "ambush.plate_rear": " rear",
   "ambush.plate_roof": " roof",
+  "ambush.glance_knocks": ", the glance knocks out {0}",
   "ambush.forecast": " · ambush {0}: {1}{2} — {3}",
   "ambush.off": "ambush off",
   "ambush.mode_sector": "ambush: aim at an axis and click, then an adjacent one for a sector, or the same for one axis",

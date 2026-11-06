@@ -582,6 +582,7 @@
   "ambush.plate_side": " бортом",
   "ambush.plate_rear": " кормой",
   "ambush.plate_roof": " сверху",
+  "ambush.glance_knocks": ", рикошет подобьёт {0}",
   "ambush.forecast": " · засада {0}: {1}{2} — {3}",
   "ambush.off": "засада выключена",
   "ambush.mode_sector": "засада: наведи на ось и щёлкни, затем соседнюю — сектор, или ту же — одна ось",
