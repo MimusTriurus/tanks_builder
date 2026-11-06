@@ -64,6 +64,7 @@ public sealed partial class Tank3DBench
     private void TideMarkCells()
     {
         _tideNext.Clear();
+        _tideMarkStale = true;
         if (_field is null)
             return;
         for (int r = 0; r < _field.Rows; r++)
@@ -154,6 +155,8 @@ public sealed partial class Tank3DBench
         }
         _mt.TideLevel = level;
         _mt.LastTide = _mt.Round;
+        // F9's warning was of this rise
+        _tideWarnForced = false;
         ulong t0 = Time.GetTicksMsec();
         Relief? before = _relief;
         TideRelief();
@@ -400,9 +403,12 @@ public sealed partial class Tank3DBench
                      .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
     }
 
-    /// <summary>F9 in a match: the sea up a ring now, as <c>--tide-at</c>
-    /// does - the stalemate's clock not waited for; nothing while a rise
-    /// plays, a turn's work is on or the sides are placing.</summary>
+    /// <summary>F9 in a match, in two presses (the author's note, 2026-11-06):
+    /// the first puts the warning up - the next ring and the hulls on it
+    /// blinking, as the last round before a rise shows them; the second, with
+    /// the warning up (F9's or the clock's own), the sea up a ring now, as
+    /// <c>--tide-at</c> does. Nothing while a rise plays, a turn's work is on
+    /// or the sides are placing.</summary>
     private void TideForce()
     {
         if (!_tideOn)
@@ -413,6 +419,12 @@ public sealed partial class Tank3DBench
         // not over the placement either: the sides' rows stand at the sea
         if (_tideFront is not null || MatchOver || MatchBusy || Deploying)
             return;
+        if (!TideWarnShown)
+        {
+            _tideWarnForced = true;
+            Log.Print($"tank3d: match: F9 - the warning up, {_tideNext.Count} cells in ring {_mt.TideLevel + 1}; F9 again floods them");
+            return;
+        }
         Log.Print($"tank3d: match: F9 - the sea up a ring now, round {_mt.Round}");
         TideRise();
     }
@@ -507,21 +519,262 @@ public sealed partial class Tank3DBench
         return (h & 0xFFFF) / 65535.0f;
     }
 
-    /// <summary>Every frame of a match: the next ring's cells marked.</summary>
+    // --- the warning: the next ring blinking on the ground ---------------------
+
+    /// <summary>The rounds before a rise the next ring shows: this round's end
+    /// and the one before (the author's note, 2026-11-06: marked from the
+    /// match's start it was noise, and the rimmed hexes stood off the relief).</summary>
+    public const int TideWarnRounds = 2;
+
+    /// <summary>The blink's full beat, s - the round before, then the last round's.</summary>
+    private const float TideBeatFar = 1.8f, TideBeatNear = 1.2f;
+    /// <summary>The fill's alpha at the top of a beat - the round before, the
+    /// last round. Plain blue, not the sea's skin (tried 2026-11-06 and put
+    /// back on the author's note: a soft blink reads better).</summary>
+    private const float TideGlowFar = 0.32f, TideGlowNear = 0.5f;
+
+    /// <summary>The mark's mesh is of the ring and board it was built on: built
+    /// again when the next ring is worked out (after a rise, the relief new).</summary>
+    private bool _tideMarkStale = true;
+    private ShaderMaterial? _tideMarkMat;
+    private float _tideBlink;
+
+    /// <summary>The rounds to the next rise, this one counted: 1 - at this round's end.</summary>
+    private int TideRoundsLeft => Mathf.Max(1, MatchRules.QuietRoundsDraw - _mt.TideQuiet);
+
+    /// <summary>The warning put up by F9 ahead of its time (<see cref="TideForce"/>):
+    /// it stays, as the last round's, until the rise it warns of.</summary>
+    private bool _tideWarnForced;
+
+    /// <summary>The next ring is blinking now: the rounds before the rise, or F9's.</summary>
+    private bool TideWarnShown =>
+        _tideOn && !MatchOver && _tideFront is null && !Deploying && _tideNext.Count > 0
+        && (_tideWarnForced || TideRoundsLeft <= TideWarnRounds);
+
+    /// <summary>Every frame of a match: the next ring's cells, a soft blink of
+    /// the ground itself - no rim - and only <see cref="TideWarnRounds"/>
+    /// rounds before the rise; faster and brighter in the last one.</summary>
     private void TideDraw()
     {
-        if (!_tideOn || _field is null || _tile is null || _noUi)
+        if (!_tideOn || _field is null || _relief is null || _noUi)
             return;
-        _tideMark ??= CellMarker("TideNext");
-        // brighter as the rise nears
-        float near = MatchOver ? 0.0f : TideNear();
-        CellMarks(_tideMark, MatchOver ? Array.Empty<Vector2I>() : _tideNext,
-                  new Color(TideInk, 0.06f + 0.22f * near), new Color(TideInk, 0.35f + 0.6f * near));
+        int left = TideRoundsLeft;
+        bool show = TideWarnShown;
+        if (!show)
+        {
+            if (_tideMark is not null)
+                _tideMark.Visible = false;
+            _tideBlink = 0.0f;
+            _tideGlowNow = 0.0f;
+            TideGhostsHide();
+            return;
+        }
+        if (_tideMark is null)
+        {
+            _tideMarkMat = new ShaderMaterial { Shader = new Shader { Code = TideMarkShader }, RenderPriority = Stage3D.RingOrder - 1 };
+            _tideMark = new MeshInstance3D
+            {
+                Name = "TideNext",
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                MaterialOverride = _tideMarkMat,
+            };
+            AddChild(_tideMark);
+        }
+        if (_tideMarkStale)
+        {
+            _tideMarkStale = false;
+            var st = new SurfaceTool();
+            st.Begin(Mesh.PrimitiveType.Triangles);
+            Vector2[] corner = Corners();
+            foreach (Vector2I cell in _tideNext)
+                ReliefCell(st, cell, corner, TideInk);
+            _tideMark.Mesh = st.Commit();
+            _tideMarkMat!.Param("lift", Lie.Length());
+        }
+        _tideMark.Visible = true;
+        bool last = left <= 1 || _tideWarnForced;
+        // from nothing up and back to nothing: the cells come and go
+        _tideBlink += (float)GetProcessDeltaTime() / (last ? TideBeatNear : TideBeatFar);
+        _tideBlink -= Mathf.Floor(_tideBlink);
+        float glow = 0.5f - 0.5f * Mathf.Cos(Mathf.Tau * _tideBlink);
+        _tideGlowNow = glow;
+        _tideMarkMat!.Param("glow", glow * (last ? TideGlowNear : TideGlowFar));
+        _tideClockAll += (float)GetProcessDeltaTime();
+        TideGhostsTick(glow, last);
     }
 
-    /// <summary>How near the rise is: 0 a full clock away, 1 at this round's end.</summary>
-    private float TideNear() =>
-        Mathf.Clamp((_mt.TideQuiet + 1) / (float)MatchRules.QuietRoundsDraw, 0.0f, 1.0f);
+    /// <summary>The warning's own clock, s: the afloat ghosts' swell.</summary>
+    private float _tideClockAll;
+
+    /// <summary>The blink now, 0..1: the hulls' signs over the ring beat with it (Tank3DBench.Badges).</summary>
+    private float _tideGlowNow;
+
+    /// <summary>The mark's shader: the ground's own triangles under the
+    /// cells (<c>ReliefCell</c>), lifted toward the eye as the move's zone is,
+    /// in their colour at <c>glow</c>.</summary>
+    private const string TideMarkShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, blend_mix;
+
+uniform float lift = 0.0;
+uniform float glow = 0.0;
+
+void vertex() {
+    vec4 v = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
+    v.z += lift;
+    POSITION = PROJECTION_MATRIX * v;
+}
+
+void fragment() {
+    ALBEDO = COLOR.rgb;
+    ALPHA = glow;
+}
+";
+
+    // --- the warning's ghosts: the hulls the rise takes --------------------------
+
+    /// <summary>A unit's ghost for the warning: a copy of its model, kept for
+    /// the match and stood over it while it is on the next ring.</summary>
+    private sealed class TideGhost
+    {
+        public required Node3D Rig;
+        public required TankModel Model;
+        public required bool Afloat;
+        public bool Used;
+    }
+
+    private readonly Dictionary<int, TideGhost> _tideGhosts = new();
+    private ShaderMaterial? _tideSinkFill, _tideFloatFill;
+    /// <summary>How far a ghost goes down, of its hull's height: one without
+    /// the snorkel most of its deck under, one with it to its swimming line.</summary>
+    private const float TideSinkDeep = 0.75f, TideSinkFloat = 0.25f;
+
+    /// <summary>The ghosts of the units able to fight on the next ring, in
+    /// the blink's beat (<paramref name="glow"/>, 0..1): without the snorkel
+    /// going down into the ground, dimming to the water's blue - drowned at
+    /// the rise; with it down to its line and riding a swell - afloat
+    /// (GameModes.md, «Пат — прилив»). Knocked-out hulls have none.</summary>
+    private void TideGhostsTick(float glow, bool last)
+    {
+        foreach (TideGhost g in _tideGhosts.Values)
+            g.Used = false;
+        float down = Mathf.SmoothStep(0.0f, 1.0f, Mathf.Clamp((_tideBlink - 0.1f) / 0.5f, 0.0f, 1.0f));
+        if (_fate == Fate.Alive && _unitId >= 0 && TideComes(CellHere))
+            TideGhostOver(_unitId, _modelTag, _rig, _model, down);
+        if (_other is { Unit: true } o && o.Fate == Fate.Alive && TideComes(OtherCell(o)))
+            TideGhostOver(o.Id, o.Tag, o.Rig, o.Model, down);
+        for (int i = 0; i < _parked.Count; i++)
+        {
+            Parked p = _parked[i];
+            if (p.Fate == Fate.Alive && TideComes(p.Cell))
+                TideGhostOver(p.Id, p.Tag, p.Rig, p.Model, down);
+        }
+        foreach (TideGhost g in _tideGhosts.Values)
+            if (!g.Used)
+                g.Rig.Visible = false;
+        float a = glow * (last ? 1.0f : 0.75f);
+        _tideSinkFill?.Param("tint", SelectionRing.Friendly.Lerp(RamDrowned, down));
+        _tideSinkFill?.Param("alpha", TideGhostAlpha * a * (1.0f - 0.3f * down));
+        _tideFloatFill?.Param("alpha", TideGhostAlpha * a);
+    }
+
+    /// <summary>The cell is on the ring the next rise takes.</summary>
+    private bool TideComes(Vector2I cell)
+    {
+        for (int i = 0; i < _tideNext.Count; i++)
+            if (_tideNext[i] == cell)
+                return true;
+        return false;
+    }
+
+    /// <summary>The ghost of unit <paramref name="id"/> stood on its rig,
+    /// <paramref name="down"/> of the way down; built the first time.</summary>
+    private void TideGhostOver(int id, string tag, Node3D rig, TankModel real, float down)
+    {
+        bool afloat = Snorkel(id);
+        if (!_tideGhosts.TryGetValue(id, out TideGhost? g) || g.Afloat != afloat)
+        {
+            if (g is not null)
+                g.Rig.QueueFree();
+            g = TideGhostMake(tag, afloat);
+            if (g is null)
+            {
+                _tideGhosts.Remove(id);
+                return;
+            }
+            _tideGhosts[id] = g;
+        }
+        g.Used = true;
+        float tall = g.Model.Size.Y * g.Model.PixelsPerUnit / RiseFactor;
+        Transform3D t = rig.Transform;
+        if (afloat)
+        {
+            float s = Mathf.Tau * _tideClockAll / (float)GhostSwell.SwellPeriod;
+            t.Origin += Vector3.Down * (TideSinkFloat * tall * down)
+                        + Vector3.Up * (2.0f * (float)GhostSwell.SwellAmplitude * Mathf.Sin(s) / RiseFactor);
+        }
+        else
+            // a little under at the top of the beat, not on the real hull's
+            // own faces: a ghost there fights the hull for the pixels
+            t.Origin += Vector3.Down * (tall * (0.06f + TideSinkDeep * down));
+        g.Rig.Transform = t;
+        g.Model.Position = real.Position;
+        g.Model.Yaw = real.Yaw;
+        g.Model.Elevation = real.Elevation;
+        g.Model.Apply();
+        g.Rig.Visible = true;
+    }
+
+    /// <summary>A ghost's copy of <paramref name="tag"/>'s model, dressed
+    /// in the sinking or the floating fill.</summary>
+    private TideGhost? TideGhostMake(string tag, bool afloat)
+    {
+        TankModel model;
+        try
+        {
+            model = TankModel.Copy(tag, Bare) ?? TankModel.Load(tag, toon: true, bare: Bare);
+        }
+        catch (Exception e)
+        {
+            Log.Print($"tank3d: match: the tide's ghost of {tag}: {e.Message}");
+            return null;
+        }
+        ShaderMaterial fill;
+        if (afloat)
+        {
+            _tideFloatFill ??= new ShaderMaterial { Shader = TideGhostShader(), RenderPriority = Stage3D.RingOrder + 1 };
+            _tideFloatFill.Param("tint", SelectionRing.Friendly);
+            fill = _tideFloatFill;
+        }
+        else
+        {
+            _tideSinkFill ??= new ShaderMaterial { Shader = TideGhostShader(), RenderPriority = Stage3D.RingOrder + 1 };
+            fill = _tideSinkFill;
+        }
+        Node3D rig = DressGhost(model, tag, fill, afloat ? "TideGhostAfloat" : "TideGhostSink");
+        return new TideGhost { Rig = rig, Model = model, Afloat = afloat };
+    }
+
+    private void TideGhostsHide()
+    {
+        foreach (TideGhost g in _tideGhosts.Values)
+            g.Rig.Visible = false;
+    }
+
+    private static Shader? _tideGhostFill;
+
+    /// <summary>The move ghost's fill, drawn over everything: the warning's
+    /// ghost stands in its own hull and goes down into the ground, and
+    /// depth-tested the hull and the ground hid all of it. No dashed ink: with
+    /// no depth its inflated back faces hatched the whole hull.</summary>
+    private static Shader TideGhostShader() =>
+        _tideGhostFill ??= new Shader
+        {
+            Code = GhostFillShader.Code.Replace("depth_draw_always", "depth_draw_never, depth_test_disabled"),
+        };
+
+    /// <summary>The warning ghost's fill at the top of the beat.</summary>
+    private const float TideGhostAlpha = 0.5f;
 
     /// <summary>The HUD's word on the tide: the rounds to the rise.</summary>
     private string TideHud() =>

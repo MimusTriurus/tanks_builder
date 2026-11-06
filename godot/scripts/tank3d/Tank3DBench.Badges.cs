@@ -59,6 +59,16 @@ public sealed partial class Tank3DBench
         Badge badge = BadgeOf(id, fate, cell);
         // in ambush (Tank3DBench.Ambush): the sight, beside the state's sign if it has one
         bool watching = fate == Fate.Alive && _ambush.ContainsKey(id);
+        // the tide's warning (Tank3DBench.Tide): what the rise makes of it -
+        // drowned, or afloat with the snorkel - blinking with the ring, past
+        // whatever else stands over the hull
+        if (fate == Fate.Alive && _tideGlowNow > 0.01f && TideWarnShown && TideComes(cell)
+            && !BlastMarked(model) && !ShotMarked(model))
+        {
+            int beside = (badge != Badge.None ? 1 : 0) + (watching ? 1 : 0);
+            Vector2 tideAt = Over(model, rig) + new Vector2(r * 1.15f * beside, 0.0f);
+            Sign(ink, Snorkel(id) ? Badge.Afloat : Badge.Drowned, tideAt, r, 0.0f, _tideGlowNow);
+        }
         if ((badge == Badge.None && !watching) || BlastMarked(model) || ShotMarked(model))
             return;
         Vector2 at = Over(model, rig);
