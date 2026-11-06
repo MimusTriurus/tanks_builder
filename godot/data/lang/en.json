@@ -375,6 +375,7 @@
   "bench.drive_cells": "by hexes, as in 2D  (off — WASD, --free-drive)",
   "bench.fire_axis": "line of fire  (--no-fire-axis)",
   "bench.reticle": "aiming circle  (--reticle)",
+  "bench.turn_camera": "view turns to the side to move  (--turn-camera)",
   "bench.drive_note_cells": "LMB own — select, LMB — drive, double LMB a target — ram, RMB — shot\nW/S — hex forward/back, A/D — 60°, ESC — cancel, with no order — deselect",
   "bench.drive_note_free": "WASD — drive, Q/E — turret, RMB — shot",
   "bench.tank": "tank",

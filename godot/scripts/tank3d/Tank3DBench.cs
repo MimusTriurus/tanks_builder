@@ -1551,6 +1551,8 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--no-target") _targetDefault = false;
             else if (a == "--no-fire-axis") _fireAxis = false;
             else if (a == "--reticle") _reticle = true;
+            // the view round to the side to move and to its unit on a hand-over (Tank3DBench.Match)
+            else if (a == "--turn-camera") _turnCamera = true;
             else if (a == "--no-amphibious") _amphibious = false;
             else if (a == "--no-ripples") _ripples.Enabled = false;
             else if (a == "--no-tracer") _tracerOn = false;
@@ -2826,6 +2828,8 @@ public sealed partial class Tank3DBench : Node3D
         // the line of fire, beads from the muzzle to the hull (Tank3DBench.Aim)
         _panel.Toggle("tank3d.drive.axis", L.T("bench.fire_axis"), () => _fireAxis, v => _fireAxis = v);
         _panel.Toggle("tank3d.drive.reticle", L.T("bench.reticle"), () => _reticle, v => _reticle = v);
+        if (Match)
+            _panel.Toggle("tank3d.drive.turn_camera", L.T("bench.turn_camera"), () => _turnCamera, v => _turnCamera = v);
         _panel.Readout("tank3d.drive.note", () => _rules
             ? L.T("bench.drive_note_cells")
               + (_orderNote.Length > 0 ? "\n" + _orderNote : "")

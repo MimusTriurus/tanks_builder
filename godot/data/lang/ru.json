@@ -377,6 +377,7 @@
   "bench.drive_cells": "по клеткам, как в 2D  (выкл. — WASD, --free-drive)",
   "bench.fire_axis": "линия огня  (--no-fire-axis)",
   "bench.reticle": "прицельный круг  (--reticle)",
+  "bench.turn_camera": "камера к ходящей стороне  (--turn-camera)",
   "bench.drive_note_cells": "ЛКМ по своему — выбрать, ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\nW/S — клетка вперёд/назад, A/D — 60°, ESC — отмена, без приказа — снять выбор",
   "bench.drive_note_free": "WASD — езда, Q/E — башня, ПКМ — выстрел",
   "bench.tank": "танк",

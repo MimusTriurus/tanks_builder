@@ -540,6 +540,12 @@ public sealed partial class Tank3DBench
             BurnOut(ending, turn, activated, bonusSpent);
     }
 
+    /// <summary>The view on a hand-over: turned round to the side to move and
+    /// flown to its first unit. Off by default (the author's note, 2026-11-06):
+    /// the view stays where the player left it; <c>--turn-camera</c> or the
+    /// side panel's row turns it on.</summary>
+    private bool _turnCamera;
+
     /// <summary>To the other side: its first unit able to act on the rig. A
     /// side with none passes on.</summary>
     private void HandOver()
@@ -571,16 +577,18 @@ public sealed partial class Tank3DBench
                 return;
             if (FirstReady(_mt.Turn) is { } next)
             {
-                TakeOver(next);
+                TakeOver(next, glide: _turnCamera);
                 // the view round to the side to move (Tank3DBench.Deploy)
-                ViewToSide(_mt.Turn);
+                if (_turnCamera)
+                    ViewToSide(_mt.Turn);
                 Banner(L.T("match.round_banner", _mt.Round, SideName(_mt.Turn)), SideInk(_mt.Turn));
                 Log.Print($"tank3d: match: round {_mt.Round}, {SideName(_mt.Turn)} to move, {_modelTag} on {MapAt(CellHere)}");
                 return;
             }
             if (_side == _mt.Turn && _fate == Fate.Alive)
             {
-                ViewToSide(_mt.Turn);
+                if (_turnCamera)
+                    ViewToSide(_mt.Turn);
                 Banner(L.T("match.round_banner", _mt.Round, SideName(_mt.Turn)), SideInk(_mt.Turn));
                 return;
             }

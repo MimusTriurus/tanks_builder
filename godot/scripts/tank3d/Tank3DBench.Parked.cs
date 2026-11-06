@@ -190,7 +190,7 @@ public sealed partial class Tank3DBench
     /// Drive <paramref name="next"/> instead: the own tank parks where it stands
     /// and the standing one is mounted on the rig, on its cell and heading.
     /// </summary>
-    private void TakeOver(Parked next)
+    private void TakeOver(Parked next, bool glide = true)
     {
         if (_field is null || RamRunning)
             return;
@@ -268,8 +268,9 @@ public sealed partial class Tank3DBench
         using (Prof.Measure("takeover.choose"))
             Choose(true);
         // the view flies to it rather than jumping with the rig - not in
-        // placement, where it stays over the zone (Tank3DBench.Deploy)
-        if (!Deploying)
+        // placement, where it stays over the zone (Tank3DBench.Deploy), nor on
+        // a hand-over without --turn-camera (Tank3DBench.Match, HandOver)
+        if (!Deploying && glide)
             GlideTo(_rig.Position);
         // another unit taken in a turn already under way (Tank3DBench.Shadow);
         // the hand-over's own is the next turn's, read off the bench
