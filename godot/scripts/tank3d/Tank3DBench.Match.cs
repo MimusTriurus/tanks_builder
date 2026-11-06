@@ -221,6 +221,32 @@ public sealed partial class Tank3DBench
     /// neutral machine, or a match off a map's homes, which carry none.</summary>
     private int LevelOf(int id) => id >= 0 && id < _levels.Length ? _levels[id] : 0;
 
+    /// <summary>
+    /// The drill (<see cref="MatchMap"/>, the board a bare launch opens; the
+    /// author's note, 2026-11-06): every machine upgraded to the top, green
+    /// along its class's first branch and brown along its second - both trees
+    /// on the board at once to try. Only when the drill comes by default: a
+    /// <c>--map drill10</c> run (the AI's and the rules' studies) keeps the
+    /// starting kits it was measured with, and a quick battle has its squads.
+    /// </summary>
+    private void DrillKits()
+    {
+        if (_quick is not null || _mapNamed || _handed || _mapName != MatchMap)
+            return;
+        for (int i = 0; i < _lineup.Count; i++)
+        {
+            QuickSquad.Class cls = QuickSquad.ClassOf(ClassFor(_lineup[i].Model).Tag);
+            int b = SideOf(_lineup[i]) == Side.Green ? 0 : 1;
+            if (b >= cls.Branches.Length)
+                continue;
+            var slot = new QuickSquad.Slot(cls.Tag, cls.Branches[b].Id, 3);
+            _kits[i] = QuickSquad.KitOf(slot);
+            _levels[i] = 3;
+        }
+        Log.Print("tank3d: match: the drill - green on the first branches, brown on the second, all at level 3: "
+                  + string.Join(", ", _lineup.Select((u, i) => $"{u.Model}#{i} {Kits.Names(_kits[i])}")));
+    }
+
     /// <summary>How the unit on the rig moves: its class, its wading gear and
     /// what else its kit says of driving (upgrades.md, Д8: the trawl, wide
     /// tracks, the reverse gear, the double turn - <see cref="Steps.Kitted"/>).</summary>
@@ -249,6 +275,7 @@ public sealed partial class Tank3DBench
         _kits = _lineup.Select(u => _parkings[u.Slot].Kit ?? Kits.Starter(ClassFor(u.Model))).ToArray();
         // the level the squad gave it; nought off a map's own homes
         _levels = _lineup.Select(u => u.Slot < _homeLevels.Length ? _homeLevels[u.Slot] : 0).ToArray();
+        DrillKits();
         Log.Print("tank3d: match: kits "
                  + string.Join(", ", _lineup.Select((u, i) => $"{SideName(SideOf(u))} {u.Model}#{i} {Kits.Names(_kits[i])}")));
         int green = _lineup.Count(u => u.Side == Parking.Green), brown = _lineup.Count - green;
