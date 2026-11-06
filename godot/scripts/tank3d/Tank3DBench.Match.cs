@@ -114,6 +114,14 @@ public sealed partial class Tank3DBench
         /// (<see cref="BattleState.QuietRounds"/>).</summary>
         public int QuietRounds => LastStrike == 0 && LastShift == 0
             ? 0 : Mathf.Max(0, Round - 1 - Mathf.Max(LastStrike, LastShift));
+        /// <summary>Rings the sea has risen, and the round of the last rise
+        /// (Tank3DBench.Tide; <see cref="BattleState.TideLevel"/>).</summary>
+        public int TideLevel, LastTide;
+        /// <summary>The tide's clock: whole rounds since the last hit on a
+        /// tank, ram, change of the point or rise - before the contact, since
+        /// <see cref="BattleState.TideStart"/> (<see cref="BattleState.TideQuiet"/>).</summary>
+        public int TideQuiet => Mathf.Max(0, Round - 1 - Mathf.Max(Mathf.Max(LastStrike, LastShift),
+            Mathf.Max(LastTide, LastStrike == 0 && LastShift == 0 ? BattleState.TideStart : 0)));
     }
 
     private readonly MatchTurn _mt = new();
@@ -689,6 +697,8 @@ public sealed partial class Tank3DBench
         SmokeTick(dt);
         // the control point on the board (Tank3DBench.Point)
         PointDraw();
+        // the ring the tide floods next (Tank3DBench.Tide)
+        TideDraw();
         // the winch's pull (Tank3DBench.Gear)
         PullTick(dt);
         // the watchers out of the fight out of ambush (Tank3DBench.Ambush)
@@ -1154,6 +1164,8 @@ public sealed partial class Tank3DBench
         h.Add(_mt.Round);
         h.Add(_mt.LastStrike);
         h.Add(_mt.LastShift);
+        h.Add(_mt.TideLevel);
+        h.Add(_mt.LastTide);
         h.Add(_mt.Score[0]);
         h.Add(_mt.Score[1]);
         h.Add(PointHolder());
@@ -1206,7 +1218,9 @@ public sealed partial class Tank3DBench
             ? (_mt.Drawn ? L.T("match.draw") : L.T("match.victory", SideName(_mt.Won!.Value))) + L.T("match.round_tail", _mt.Round) + PointHud()
             : L.T("match.round", _mt.Round)
               // the stalemate's count, once there is one (Tank3DBench.Rules)
-              + (_mt.QuietRounds > 0 ? L.T("match.quiet", _mt.QuietRounds, MatchRules.QuietRoundsDraw) : "")
+              // the tide's, or the old draw's (Tank3DBench.Tide)
+              + (_tideOn ? TideHud()
+                 : _mt.QuietRounds > 0 ? L.T("match.quiet", _mt.QuietRounds, MatchRules.QuietRoundsDraw) : "")
               // the control point and the points (Tank3DBench.Point)
               + PointHud()
               + L.T("match.turn_state", SideName(_mt.Turn), _modelTag,

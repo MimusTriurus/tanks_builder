@@ -73,7 +73,7 @@ public static class BattleRun
             {
                 string how = args[++i];
                 _staleByCount = how == "count";
-                _tide = how.StartsWith("tide");
+                _tide = how.StartsWith("tide");  // "draw" turns it off: the old rule
                 if (_tide && how.Length > 5 && int.TryParse(how[5..], out int step) && step > 0)
                     _tideStep = step;
             }
@@ -175,9 +175,12 @@ public static class BattleRun
     private static readonly int[] _budget = { -1, -1 };
 
     /// <summary><c>--stalemate count</c>: the stalemate won on the count of
-    /// units able to fight (<see cref="BattleState.StaleByCount"/>).</summary>
+    /// units able to fight (<see cref="BattleState.StaleByCount"/>), a trial.</summary>
     private static bool _staleByCount;
-    private static bool _tide;
+    /// <summary>The tide (GameModes.md, «Пат — прилив», 2026-11-06): the AI's
+    /// matches play it unless <c>--stalemate draw</c> (the rule before) or
+    /// <c>count</c>; <c>tide:N</c> - a rise every N quiet rounds.</summary>
+    private static bool _tide = true;
     private static int _tideStep = MatchRules.QuietRoundsDraw;
 
     /// <summary>
@@ -265,7 +268,7 @@ public static class BattleRun
             s.Ring(default);  // the rings once, shared by every clone of the match
         Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
                   + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : "")
-                  + (_staleByCount ? ", stalemate on count" : "") + (_tide ? $", the tide every {_tideStep}" : ""));
+                  + (_staleByCount ? ", stalemate on count" : "") + (_tide ? $", the tide every {_tideStep}" : _staleByCount ? "" : ", stalemate drawn"));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();

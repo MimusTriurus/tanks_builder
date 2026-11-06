@@ -18,8 +18,9 @@ namespace TankSpriteTest;
 /// turn on it is ground on the board (<c>Cleared</c>), not only in the trees
 /// that fell.</item>
 /// <item><b>The stalemate</b> (П-21, Д6): rounds without a shot at a tank
-/// counted (<see cref="TankShot"/>), and the match drawn at
-/// <see cref="MatchRules.QuietRoundsDraw"/> (<see cref="StalemateTick"/>).</item>
+/// counted (<see cref="TankShot"/>); on the relief the sea rises at
+/// <see cref="MatchRules.QuietRoundsDraw"/> (Tank3DBench.Tide), without it
+/// the match is drawn (<see cref="StalemateTick"/>).</item>
 /// </list>
 /// </summary>
 public sealed partial class Tank3DBench
@@ -111,14 +112,15 @@ public sealed partial class Tank3DBench
         SmokeRound();
         // the control point held or not, the points taken (Tank3DBench.Point)
         PointTick();
-        if (_wildfire is null || !_wildfire.Ruled)
-            return;
-        foreach (Vector2I cell in _wildfire.Round())
-        {
-            Log.Print($"tank3d: match: the fire spreads to {MapAt(cell)}");
-            if (UnitOn(cell) is { Fate: Fate.Alive } u)
-                Ignite(u.Id, u.Side, u.Tag, cell);
-        }
+        if (_wildfire is not null && _wildfire.Ruled)
+            foreach (Vector2I cell in _wildfire.Round())
+            {
+                Log.Print($"tank3d: match: the fire spreads to {MapAt(cell)}");
+                if (UnitOn(cell) is { Fate: Fate.Alive } u)
+                    Ignite(u.Id, u.Side, u.Tag, cell);
+            }
+        // the stalemate's sea, last - it puts out what it floods (Tank3DBench.Tide)
+        TideTick();
     }
 
     /// <summary>П. 6 for the heavy (classes.md, «Бульдозер HT»): the wood it
@@ -151,7 +153,8 @@ public sealed partial class Tank3DBench
     /// (<c>Battle.Stalemate</c>).</summary>
     private void StalemateTick(bool busy)
     {
-        if (MatchOver || busy || _passIn is not null || _pointDue is not null || _mt.QuietRounds < MatchRules.QuietRoundsDraw)
+        // the tide plays the stalemate instead (Tank3DBench.Tide)
+        if (_tideOn || MatchOver || busy || _passIn is not null || _pointDue is not null || _mt.QuietRounds < MatchRules.QuietRoundsDraw)
             return;
         _mt.Drawn = true;
         _commands.Clear();

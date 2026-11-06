@@ -86,6 +86,9 @@ public sealed partial class Tank3DBench
             Holder = _mt.Holder is Side held ? CampOf(held) : null,
             Won = _mt.Won is Side w ? CampOf(w) : null, Drawn = _mt.Drawn,
             Active = _side == _mt.Turn && _unitId >= 0 ? _unitId : null,
+            // the tide (Tank3DBench.Tide): the rings the match began with
+            Tide = _tideOn, TideStep = MatchRules.QuietRoundsDraw, TideLevel = _mt.TideLevel,
+            LastTide = _mt.LastTide, TideRings = _tideRings, TideSea = _tideSea,
         };
         void Add(int id, string tag, MovementProfile cls, Side side, Vector2I cell, int heading, Fate fate)
         {

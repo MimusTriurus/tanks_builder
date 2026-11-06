@@ -1147,6 +1147,8 @@ public sealed partial class Tank3DBench : Node3D
         // a match: who stands where, and which of them rides the rig
         LineUpSides();
         PointSetup();
+        // the tide's rings, off the board before anything floods (Tank3DBench.Tide)
+        TideSetup(map);
 
         // What the stage aims its own camera by: it mirrors a 2D camera, and
         // this scene has none - its camera is its own (BuildCamera), current
@@ -1260,6 +1262,9 @@ public sealed partial class Tank3DBench : Node3D
                 if (map.MasonryAt(cell)?.Kind == Masonry.Sort.Capon)
                     berms.Add(cell);
         _relief = Relief.Build(_field!, rocks: rocks, berms: berms);
+        // the tide builds it again with the same (Tank3DBench.Tide)
+        _tideRocks = rocks;
+        _tideBerms = berms;
         if (_relief is null)
             return;
         foreach (RockGroup g in _relief.Rocks)
