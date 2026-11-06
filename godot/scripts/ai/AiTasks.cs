@@ -269,6 +269,42 @@ public static class AiTasks
                 s.Unit(id)!.Pinned = true;
             return s;
         }, (_, a) => a.Board.Smoked(new Vector2I(4, 3)) || a.Board.Smoked(new Vector2I(4, 4)) || a.Board.Smoked(new Vector2I(4, 5)));
+
+        // 20-22. the upgrades the --budget runs could not tell from the log
+        // (docs/ai-plan.md, «Апгрейды в прогонах ИИ»): each the one shot
+        // there is, all pinned. 20: «Сквозь лес» - the destroyer's one pass a
+        // wood, the round on at III, through the light tank's front.
+        yield return ("TD with «through the forest» fires through the wood", () =>
+        {
+            BattleState s = Board(woods: new[] { new Vector2I(4, 5) });
+            Put(s, 0, "TDR", Camp.Green, 4, 8, 90, Kit.ThroughWood);
+            Put(s, 1, "LTR", Camp.Brown, 4, 3, 270);
+            s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive);
+
+        // 21. «Тепловизор»: the medium's round through the smoke between, into
+        // the light tank's front.
+        yield return ("MT with the thermal imager fires through smoke", () =>
+        {
+            BattleState s = Board();
+            s.Board.SetSmoke(new Vector2I(4, 6), true);
+            s.Smoke[new Vector2I(4, 6)] = 2;
+            Put(s, 0, "MTR", Camp.Green, 4, 8, 90, Kit.Thermal);
+            Put(s, 1, "LTR", Camp.Brown, 4, 4, 270);
+            s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive);
+
+        // 22. «Вилка 3–6»: the mortar's bomb six out, past the plain reach of five.
+        yield return ("HM with the 3-6 bracket throws six out", () =>
+        {
+            BattleState s = Board();
+            Put(s, 0, "HMR", Camp.Green, 4, 8, 90, Kit.Bracket);
+            Put(s, 1, "MTR", Camp.Brown, 4, 2, 270);
+            s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive);
     }
 
     /// <summary>Problems a turn does not settle: green's play, the enemy's
