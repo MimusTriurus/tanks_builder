@@ -13,9 +13,8 @@ namespace TankSpriteTest;
 /// <list type="bullet">
 /// <item><b>The reach</b> - the cells tinted in two tones, bright where the tank
 /// arrives with a step to spare for a turn, faint where it arrives with none,
-/// and a contour round the whole. A red stop sign on the cells where a move
-/// ends: mud, deep water without the snorkel - not a mine, not a wood
-/// (drawn through instead, Tank3DBench.Wood).</item>
+/// and a contour round the whole. No sign on the cells where a move ends
+/// (the red stop sign went 2026-11-06): the ghost and the way's pill tell it.</item>
 /// <item><b>The way</b> - a ribbon through the cells' middles lying on the
 /// ground, chevrons along it, the steps spent by each cell in a disc (brown on
 /// sand, which costs two), a pill for what it risks
@@ -37,7 +36,6 @@ namespace TankSpriteTest;
 public sealed partial class Tank3DBench
 {
     private static readonly Color CourseInk = new(0.09f, 0.37f, 0.65f);
-    private static readonly Color StopInk = new(0.64f, 0.18f, 0.18f);
     private static readonly Color SandInk = new(0.52f, 0.31f, 0.04f);
 
     private MeshInstance3D? _course;
@@ -1211,20 +1209,11 @@ void fragment() {
         float r = Mathf.Clamp(hex * 0.16f, 8.0f, 16.0f);
         int size = Mathf.RoundToInt(r * 1.15f);
 
-        foreach (Vector2I cell in _reach.Cells.Keys)
-            // a mine is no stop sign (2026-10-29, the author's note): it is
-            // driven on to and goes off - the ghost on it shows that
-            // (Tank3DBench.Ghost, GhostMined), the mine is seen on the board;
-            // nor a wood (2026-10-31): it stands drawn through in the reach
-            // (Tank3DBench.Wood, WoodSee), and the sign lay on its crowns
-            if ((Steps.Stops(_field!, cell, _reach.Mover) || (_field!.IsDeep(cell) && !RigSnorkel))
-                && _field.CoverAt(cell) != Cover.Forest)
-            {
-                Vector2 at = Screen(cell) + new Vector2(hex * 0.42f, -hex * 0.30f);
-                ink.DrawCircle(at, r * 0.8f, StopInk);
-                ink.DrawRect(new Rect2(at - new Vector2(r * 0.5f, r * 0.14f), new Vector2(r, r * 0.28f)), Colors.White);
-            }
-
+        // No stop sign on the cells where a move ends (mud, deep water without
+        // the snorkel) since 2026-11-06, the author's note - off the water and
+        // everywhere: the ghost on the way's end shows what the cell does to
+        // the hull (Tank3DBench.Ghost: drowned, afloat, mined), and the pill
+        // on the way says it (утонет, мина, огонь).
         if (_ways.Count == 0)
             return;
         Steps.Route way = _ways[_wayIx % _ways.Count];
