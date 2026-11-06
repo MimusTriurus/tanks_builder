@@ -78,12 +78,23 @@ public static class AiBrain
 
         int deep = Math.Min(best.Count, level == AiLevel.Veteran ? 10 : 6);
         int replies = 0;
-        for (int i = 0; i < deep; i++)
+        // past the plays looked through while every one of them loses to its
+        // reply: a shortlist all lost is no reason to lose - the saving play
+        // may stand seventh by the full score (a doctrine's weights reorder
+        // it; Бронегруппа lost 1:9 so; without this the fighter lost 0:10 in
+        // paired games, docs/ai-plan.md)
+        bool allLost = true;
+        for (int i = 0; i < deep || (allLost && i < best.Count); i++)
         {
+            if (i >= deep)
+                deep = i + 1;
             (AiPlay p, BattleState after) = best[i];
             // the enemy's turn next: a match over, or one it has nobody for, has no reply
             if (after.Over || after.Turn == me)
+            {
+                allLost &= p.Score <= -AiEval.Decided / 2;
                 continue;
+            }
             double low = double.MaxValue;
             BattleState? lowState = null;
             replies += AiMoves.Each(after, (_, reply) =>
@@ -97,6 +108,7 @@ public static class AiBrain
             });
             if (lowState is not null)
                 p.Score = AiEval.AfterReply(lowState, me, threats, st) + Hair(p, salt);
+            allLost &= p.Score <= -AiEval.Decided / 2;
         }
         best.RemoveRange(deep, best.Count - deep);
         best.Sort((a, b) => b.Play.Score.CompareTo(a.Play.Score));

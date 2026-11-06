@@ -31,15 +31,17 @@ public sealed record AiStyle(string Id, double Pull, int Reach, double Fear, dou
     public static readonly AiStyle Plain = new("plain", 1.0, 0, 1.0, 0.0, 0.0, 1.0);
 
     /// <summary>Бронегруппа: trades boldly, the threat weighed lighter, the
-    /// formation tight; no pull - that lost (14:16 as it stands).</summary>
+    /// formation tight; no pull - that lost. Paired against plain
+    /// (2026-11-06): 4:3 in pairs apart, 49 of 72 twins - the fear does it,
+    /// the huddle all but never moves a play.</summary>
     public static readonly AiStyle Armour = new("armour", 1.0, 0, 0.85, 0.0, 0.0, 0.75);
 
     /// <summary>Разведбат: keeps off the guns' front, waits in ambush, fears
-    /// a little more (17:10, ambushes 116 against 66).</summary>
+    /// a little more (paired, before the shortlist fix: 18:11 in pairs apart).</summary>
     public static readonly AiStyle Recon = new("recon", 1.0, 0, 1.1, 0.15, 0.15, 1.0);
 
     /// <summary>Артдивизион: a cell further, the threat weighed heavier, the
-    /// ambush valued (12:13, ambushes 104 against 71).</summary>
+    /// ambush valued (paired, before the shortlist fix: 20:20).</summary>
     public static readonly AiStyle Artillery = new("artillery", 0.9, 1, 1.15, 0.1, 0.1, 1.0);
 
     public static readonly AiStyle[] All = { Plain, Armour, Recon, Artillery };
