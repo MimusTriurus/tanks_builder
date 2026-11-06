@@ -58,12 +58,10 @@ public sealed partial class Tank3DBench
             Name = "Course",
             Mesh = new ImmediateMesh(),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            MaterialOverride = new StandardMaterial3D
+            // the vertex colour, unshaded, both faces; the ribbon cut to a width in pixels
+            MaterialOverride = new ShaderMaterial
             {
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                VertexColorUseAsAlbedo = true,
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                Shader = new Shader { Code = CourseShader },
                 // under the marks, over the water
                 RenderPriority = Stage3D.RingOrder - 1,
             },
@@ -256,7 +254,11 @@ public sealed partial class Tank3DBench
             if (_relief is null && !attack)
                 Zone(mesh, _reach!);
             if (_ways.Count > 0)
+            {
+                if (_course.MaterialOverride is ShaderMaterial ribbon)
+                    ribbon.Param("half_px", RibbonHalfPx());
                 Ribbon(mesh, _ways[_wayIx % _ways.Count]);
+            }
             mesh.SurfaceEnd();
         }
 
@@ -364,11 +366,18 @@ public sealed partial class Tank3DBench
     {
         // three calls, not a loop over new[] { a, b, c }: a few hundred
         // triangles a frame, 10 KB of arrays (BOT-3)
+        // UV2 nought: not the ribbon, drawn as its colour says (CourseShader)
         mesh.SurfaceSetColor(ink);
+        mesh.SurfaceSetUV(Vector2.Zero);
+        mesh.SurfaceSetUV2(Vector2.Zero);
         mesh.SurfaceAddVertex(OnTop(cell, a));
         mesh.SurfaceSetColor(ink);
+        mesh.SurfaceSetUV(Vector2.Zero);
+        mesh.SurfaceSetUV2(Vector2.Zero);
         mesh.SurfaceAddVertex(OnTop(cell, b));
         mesh.SurfaceSetColor(ink);
+        mesh.SurfaceSetUV(Vector2.Zero);
+        mesh.SurfaceSetUV2(Vector2.Zero);
         mesh.SurfaceAddVertex(OnTop(cell, c));
     }
 
@@ -757,7 +766,7 @@ public sealed partial class Tank3DBench
         // the water's own, and on a tie the pond, drawn after, covered the
         // zone and the ribbon laid on its surface. The marks share the rung
         // above, and draw nothing since HUD stage 4.
-        if (_course?.MaterialOverride is BaseMaterial3D course)
+        if (_course?.MaterialOverride is Material course)
             course.RenderPriority = Stage3D.RingOrder;
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
@@ -1157,27 +1166,113 @@ void fragment() {
         return new Vector3(flat.X, top / RiseFactor, flat.Y / Squash) + Lie;
     }
 
-    /// <summary>The ribbon: a strip through the middles of the cells the way
-    /// drives, cut into short pieces so each lies on the cell under it.</summary>
+    /// <summary>
+    /// The ribbon: a strip through the middles of the cells the way drives, cut
+    /// into short pieces so each lies on the cell under it, and a disc at each
+    /// bend. <b>As wide on the screen whichever way it runs</b> (2026-11-06, the
+    /// author's note: a leg across the screen was thinner than one up it - the
+    /// camera's tilt squeezes the ground's depth, and the strip was as wide on
+    /// the ground). The mesh is laid <see cref="RibbonSpare"/> times too wide;
+    /// each vertex carries its offset from the way's line on the plan (UV), and
+    /// <see cref="CourseShader"/> keeps the fragments nearer the line than
+    /// <c>half_px</c> pixels, by how fast that offset changes on the screen - as
+    /// the relief's zone draws its rim. Held so from any view: nothing is baked
+    /// for the camera's angle, the pixels are counted each fragment.
+    /// </summary>
     private void Ribbon(ImmediateMesh mesh, Steps.Route way)
     {
         var ink = new Color(CourseInk, 0.9f);
-        float half = HexWidth * 0.055f;
+        float half = HexWidth * 0.055f * RibbonSpare;
         Vector2I at = way.Legs[0].At.Cell;
+        bool first = true;
         foreach (Vector2I next in way.Cells())
         {
             Vector2 a = CellFlat(at), b = CellFlat(next);
-            Vector2 across = (b - a).Normalized().Orthogonal() * half;
+            Vector2 side = (b - a).Normalized().Orthogonal();
+            Vector2 across = side * half;
             const int pieces = 8;
             for (int k = 0; k < pieces; k++)
             {
                 Vector2 p = a.Lerp(b, (float)k / pieces), q = a.Lerp(b, (float)(k + 1) / pieces);
                 Vector2I under = _field!.FlatCellAt((p + q) * 0.5f);
-                Quad(mesh, ink, under, p + across, q + across, q - across, p - across);
+                RibbonTri(mesh, ink, under, p + across, q + across, q - across, half, half, -half);
+                RibbonTri(mesh, ink, under, p + across, q - across, p - across, half, -half, -half);
             }
+            // a disc on the bend, so the outer corner is round, not notched
+            if (!first)
+                RibbonCap(mesh, ink, at, a, half);
+            first = false;
             at = next;
         }
     }
+
+    /// <summary>How much wider than drawn the ribbon's mesh is laid: room for the
+    /// strip at its width in pixels however much the view squeezes it.</summary>
+    private const float RibbonSpare = 3.0f;
+
+    /// <summary>The ribbon's width in pixels each side of its line: the old strip's
+    /// on a leg square to the eye, where the ground is not squeezed.</summary>
+    private float RibbonHalfPx()
+    {
+        if (_reach is null)
+            return 4.0f;
+        Vector3 p = OnTop(_reach.Start.Cell, CellFlat(_reach.Start.Cell));
+        float perUnit = (_camera.UnprojectPosition(p + _camera.GlobalBasis.X) - _camera.UnprojectPosition(p)).Length();
+        return HexWidth * 0.055f * perUnit;
+    }
+
+    /// <summary>A ribbon triangle: UV.x the signed offset from the line, UV2 marks it.</summary>
+    private void RibbonTri(ImmediateMesh mesh, Color ink, Vector2I cell, Vector2 a, Vector2 b, Vector2 c,
+                           float ua, float ub, float uc)
+    {
+        RibbonVertex(mesh, ink, cell, a, new Vector2(ua, 0.0f));
+        RibbonVertex(mesh, ink, cell, b, new Vector2(ub, 0.0f));
+        RibbonVertex(mesh, ink, cell, c, new Vector2(uc, 0.0f));
+    }
+
+    private void RibbonVertex(ImmediateMesh mesh, Color ink, Vector2I cell, Vector2 at, Vector2 offset)
+    {
+        mesh.SurfaceSetColor(ink);
+        mesh.SurfaceSetUV(offset);
+        mesh.SurfaceSetUV2(Vector2.Right);
+        mesh.SurfaceAddVertex(OnTop(cell, at));
+    }
+
+    /// <summary>The bend's disc: a square round the cell's middle, its UV the offset
+    /// from it, so the shader keeps a disc as wide as the strip.</summary>
+    private void RibbonCap(ImmediateMesh mesh, Color ink, Vector2I cell, Vector2 mid, float half)
+    {
+        var x = new Vector2(half, 0.0f);
+        var y = new Vector2(0.0f, half);
+        RibbonVertex(mesh, ink, cell, mid - x - y, -x - y);
+        RibbonVertex(mesh, ink, cell, mid + x - y, x - y);
+        RibbonVertex(mesh, ink, cell, mid + x + y, x + y);
+        RibbonVertex(mesh, ink, cell, mid - x - y, -x - y);
+        RibbonVertex(mesh, ink, cell, mid + x + y, x + y);
+        RibbonVertex(mesh, ink, cell, mid - x + y, -x + y);
+    }
+
+    /// <summary>The course's material: the vertex colour, unshaded, both faces; on the
+    /// ribbon (UV2.x 1) only what lies within <c>half_px</c> pixels of its line, the
+    /// distance in pixels the offset over its rate on the screen, the edge a pixel soft.</summary>
+    private const string CourseShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, blend_mix;
+
+uniform float half_px = 4.0;
+
+void fragment() {
+	ALBEDO = COLOR.rgb;
+	float a = COLOR.a;
+	if (UV2.x > 0.5) {
+		float d = length(UV);
+		float rate = length(vec2(dFdx(d), dFdy(d)));
+		float px = d / max(rate, 1e-6);
+		a *= clamp(half_px - px + 0.5, 0.0, 1.0);
+	}
+	ALPHA = a;
+}
+";
 
     // --- the screen -------------------------------------------------------
 
