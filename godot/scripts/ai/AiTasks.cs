@@ -277,6 +277,25 @@ public static class AiTasks
             s.Unit(2)!.Pinned = true;
             return s;
         }, (_, a) => a.Unit(2)!.Fate != UnitFate.Alive);
+
+        // 17. smoke on the axis to an own mortar (docs/ai-plan.md, И4): the
+        // enemy medium two out of the mortar, under its reach of three, would
+        // knock it out the moment it fires at the medium four out; an own
+        // medium beside the lane puts the smoke grenade between them, the
+        // mortar lobs over it next turn. All but the enemy's reply are pinned:
+        // no hull drives into the lane instead of the smoke, the mortar does
+        // not drive off the axis; neither green gun gets through a medium's front.
+        yield return ("MT smokes the axis to its own HM, the HM lobs over the smoke next turn", () =>
+        {
+            BattleState s = Board();
+            Put(s, 0, "HMR", Camp.Green, 4, 8, 90);
+            Put(s, 1, "MTR", Camp.Green, 5, 7, 90, Kit.Smoke);
+            Put(s, 2, "MTR", Camp.Brown, 4, 6, 270);
+            Put(s, 3, "MTR", Camp.Brown, 4, 4, 270);
+            foreach (int id in new[] { 0, 1, 2, 3 })
+                s.Unit(id)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Unit(3)!.Fate != UnitFate.Alive && a.Unit(0)!.Fate == UnitFate.Alive);
     }
 
     private const int Columns = 9, Rows = 10;

@@ -47,7 +47,7 @@ public sealed class AiPlay
 /// ambush toward the nearest enemy; the bonus act - putting a fire out,
 /// ramming an enemy beside, the repair kit on an own unit out of the fight.
 /// LT may shoot first and move after. Doing nothing is always a play.
-/// Not yet: the risk-wise way of equal cost, the smoke, mines, the winch,
+/// Not yet: the risk-wise way of equal cost, mines, the winch,
 /// the double turn, the forced engine, the shot on the move, the wall's ram.
 /// </summary>
 public static class AiMoves
@@ -457,10 +457,31 @@ public static class AiMoves
         return false;
     }
 
+    /// <summary>Whether <paramref name="c"/> lies on an enemy gun's axis
+    /// strictly between it and an active unit of <paramref name="side"/>.</summary>
+    private static bool Screens(BattleState s, Camp side, Vector2I c)
+    {
+        foreach (BattleUnit e in s.Units)
+        {
+            if (e.Side == side || e.Fate != UnitFate.Alive || e.Class.Lobs)
+                continue;
+            (int toC, int atC) = s.Board.LaneTo(e.Cell, c);
+            if (toC < 0)
+                continue;
+            foreach (BattleUnit o in s.Units)
+                if (o.Side == side && o.Fate == UnitFate.Alive
+                    && s.Board.LaneTo(e.Cell, o.Cell) is var (toO, atO) && toO == toC && atO > atC)
+                    return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// The bonus acts worth trying: the fire put out; a ram at each enemy
     /// beside; the repair kit at each own unit beside out of the fight; the
-    /// smoke grenade and the mine layer on the hex toward the nearest enemy;
+    /// smoke grenade and the mine layer on the hex toward the nearest enemy,
+    /// the grenade also on each hex beside that screens an own unit from an
+    /// enemy gun (<see cref="Screens"/>);
     /// the winch at each hull two out; the double turn either way; the ram of
     /// the wall ahead.
     /// </summary>
@@ -478,6 +499,16 @@ public static class AiMoves
             if ((u.Kit & Kit.MineLayer) != 0)
                 acts.Add(new Order(OrderKind.Mine, near));
         }
+        // the screen: smoke on a hex beside that cuts an enemy gun's axis to
+        // an own unit (docs/ai-plan.md, И4, «дым на ось к своему HM»)
+        if ((u.Kit & Kit.Smoke) != 0)
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I c = HexField.Step(u.Cell, h);
+                // the hex toward the enemy is tried above already
+                if (c != u.Cell && !(to >= 0 && c == HexField.Step(u.Cell, to)) && Screens(s, u.Side, c))
+                    acts.Add(new Order(OrderKind.Smoke, c));
+            }
         if ((u.Kit & Kit.Winch) != 0)
             foreach (int h in HexField.EdgeHeadings)
             {
