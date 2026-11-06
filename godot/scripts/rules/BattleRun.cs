@@ -69,7 +69,13 @@ public static class BattleRun
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
             else if (a == "--doctrine" && more) doctrine = args[++i];
-            else if (a == "--budget" && more) _budget = int.TryParse(args[++i], out int b) ? b : -1;
+            else if (a == "--budget" && more)
+            {
+                // N for both sides, or GREEN,BROWN
+                string[] w = args[++i].Split(',');
+                for (int k = 0; k < 2; k++)
+                    _budget[k] = int.TryParse(w[Math.Min(k, w.Length - 1)], out int b) ? b : -1;
+            }
             else if (a == "--deploy-lead" && more) AiDeploy.Lead = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
             else if (a == "--handicap" && more && Enum.TryParse(args[++i], true, out Handicap h)) handicap = h;
         }
@@ -155,9 +161,10 @@ public static class BattleRun
     /// <c>--ai-seed N</c>, <c>--ai-turns N</c> (300) the most turns. Exit
     /// code 2 when an order of the AI's own was refused.
     /// </summary>
-    /// <summary><c>--budget N</c>: each side's units upgraded on N points as
-    /// the quick battle's squad (<see cref="QuickSquad"/>); -1 - the map's kits.</summary>
-    private static int _budget = -1;
+    /// <summary><c>--budget N</c> or <c>--budget GREEN,BROWN</c>: each side's
+    /// units upgraded on its points as the quick battle's squad
+    /// (<see cref="QuickSquad"/>), 0 - none at all; -1 - the map's kits.</summary>
+    private static readonly int[] _budget = { -1, -1 };
 
     /// <summary>
     /// The upgrades of <c>--budget</c>: each unit a branch of its class drawn
@@ -166,10 +173,13 @@ public static class BattleRun
     /// of the levels it has (<see cref="QuickSquad.KitOf"/>), the starter's
     /// gone. A die of its own off the seed: the AI's draws are not moved.
     /// </summary>
-    private static void Upgrade(BattleState s, int budget, int seed)
+    private static void Upgrade(BattleState s, int[] budgets, int seed)
     {
         for (int side = 0; side < 2; side++)
         {
+            int budget = budgets[side];
+            if (budget < 0)
+                continue;
             var rng = new Random(seed * 7919 + side * 104729 + 1);
             var units = new List<BattleUnit>();
             foreach (BattleUnit u in s.Units)
@@ -233,10 +243,9 @@ public static class BattleRun
         var place = new Placing(Played(map, slopes), first);
         BattleState s = Start(map, first, slopes);
         s.Handicap = handicap;
-        if (_budget >= 0)
-            Upgrade(s, _budget, seed);
+        Upgrade(s, _budget, seed);
         Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
-                  + (_budget >= 0 ? $", budget {_budget}" : ""));
+                  + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : ""));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();
