@@ -48,6 +48,8 @@ public sealed partial class Tank3DBench
     private MovementProfile _peekProfile = MovementProfile.Light;
     private string _peekTag = "";
     private Side _peekSide;
+    /// <summary>The upgrades the unit shown carries, as icons in its card.</summary>
+    private Kit _peekKit;
     /// <summary>The tag the name below was looked up for.</summary>
     private string _peekNamed = "", _peekTitle = "", _peekName = "";
     private float _peekUp;
@@ -60,7 +62,7 @@ public sealed partial class Tank3DBench
         if (_noUi)
             return;
         // the whole screen: the leader runs from the hull to the card
-        _peek = new Control { Name = "UnitPeek", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _peek = new Control { Name = "UnitPeek", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false, TextureFilter = QIconFilter };
         _peek.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         _peek.Draw += DrawPeek;
         layer.AddChild(_peek);
@@ -85,12 +87,12 @@ public sealed partial class Tank3DBench
                 _peekClassOf = p.Tag;
                 _peekClass = ClassFor(p.Tag);
             }
-            PeekAt(p.Model, p.Rig, _peekClass, p.Tag, p.Side);
+            PeekAt(p.Model, p.Rig, _peekClass, p.Tag, p.Side, KitOf(p.Id));
         }
         else if (_overTarget && _other is { } o && o.Fate != Fate.Destroyed)
-            PeekAt(o.Model, o.Rig, o.Profile, o.Tag, o.Side);
+            PeekAt(o.Model, o.Rig, o.Profile, o.Tag, o.Side, o.Unit ? KitOf(o.Id) : Kit.None);
         else if (_overOwn && !_chosen && _fate != Fate.Destroyed)
-            PeekAt(_model, _rig, _profile, _modelTag, _side);
+            PeekAt(_model, _rig, _profile, _modelTag, _side, KitOf(_unitId));
 
         if (_peekModel is null || !IsInstanceValid(_peekModel) || _peekRig is null)
         {
@@ -118,13 +120,14 @@ public sealed partial class Tank3DBench
         _peek.QueueRedraw();
     }
 
-    private void PeekAt(TankModel model, Node3D rig, MovementProfile profile, string tag, Side side)
+    private void PeekAt(TankModel model, Node3D rig, MovementProfile profile, string tag, Side side, Kit kit)
     {
         _peekModel = model;
         _peekRig = rig;
         _peekProfile = profile;
         _peekTag = tag;
         _peekSide = side;
+        _peekKit = kit;
     }
 
     private void DrawPeek()
@@ -149,6 +152,7 @@ public sealed partial class Tank3DBench
             sx0 = foot.X >= end.X ? 1.0f : -1.0f;
             sy0 = foot.Y >= end.Y ? 1.0f : -1.0f;
         }
+        float peekH = PeekHeight(_peekProfile, _peekKit);
         Rect2 box = default;
         Vector2 knee = default;
         float sx = sx0;
@@ -157,7 +161,7 @@ public sealed partial class Tank3DBench
         {
             float tx = (i & 1) == 0 ? sx0 : -sx0, ty = (i & 2) == 0 ? sy0 : -sy0;
             Vector2 k = foot + new Vector2(tx * PeekLeg, ty * PeekLeg);
-            Rect2 b = PeekPlace(k, tx, ty, screen, out int pushed);
+            Rect2 b = PeekPlace(k, tx, ty, screen, peekH, out int pushed);
             int covers = pushed + (clear ? PeekCovers(b.Grow(10.0f), own, end, foot) : 0);
             if (covers < best)
             {
@@ -180,21 +184,21 @@ public sealed partial class Tank3DBench
             _peekNamed = _peekTag;
             (_peekTitle, _peekName) = PanelNames(_peekProfile, _peekTag);
         }
-        UnitPanel(c, font, box, _peekProfile, _peekTitle, _peekName, _peekSide, Badge.None, turn: false);
+        UnitPanel(c, font, box, _peekProfile, _peekTitle, _peekName, _peekSide, Badge.None, turn: false, kit: _peekKit);
     }
 
     /// <summary>The card off the knee on the side <paramref name="sx"/>,
     /// <paramref name="sy"/>: the leader comes in near the title going down,
     /// near the foot going up. Held on the screen; <paramref name="pushed"/>
     /// counts against it when the hold moved it far, as it then covers the hull.</summary>
-    private static Rect2 PeekPlace(Vector2 knee, float sx, float sy, Vector2 screen, out int pushed)
+    private static Rect2 PeekPlace(Vector2 knee, float sx, float sy, Vector2 screen, float h, out int pushed)
     {
         float left = sx > 0.0f ? knee.X + PeekReach : knee.X - PeekReach - PeekW;
-        float top = sy > 0.0f ? knee.Y - 26.0f : knee.Y - PeekH + 26.0f;
+        float top = sy > 0.0f ? knee.Y - 26.0f : knee.Y - h + 26.0f;
         float l = Mathf.Clamp(left, 8.0f, Mathf.Max(8.0f, screen.X - PeekW - 8.0f));
-        float t = Mathf.Clamp(top, 8.0f, Mathf.Max(8.0f, screen.Y - PeekH - 8.0f));
-        pushed = (Mathf.Abs(l - left) > PeekReach ? 50 : 0) + (Mathf.Abs(t - top) > PeekH * 0.5f ? 50 : 0);
-        return new Rect2(l, t, PeekW, PeekH);
+        float t = Mathf.Clamp(top, 8.0f, Mathf.Max(8.0f, screen.Y - h - 8.0f));
+        pushed = (Mathf.Abs(l - left) > PeekReach ? 50 : 0) + (Mathf.Abs(t - top) > h * 0.5f ? 50 : 0);
+        return new Rect2(l, t, PeekW, h);
     }
 
     /// <summary>How much of our unit's picture <paramref name="box"/> covers,
@@ -230,13 +234,15 @@ public sealed partial class Tank3DBench
         return true;
     }
 
-    /// <summary>The class's short name and the model's, off the lineup -
-    /// which allocates, so a caller keeps them until the tag changes.</summary>
+    /// <summary>The class's full name, the tree's (<c>QuickSquad.Class.Name</c>: «Истребитель
+    /// танков», not TD - the author's note, 2026-11-06), and no model's name beside it - which
+    /// looks up, so a caller keeps them until the tag changes.</summary>
     private static (string Title, string Name) PanelNames(MovementProfile profile, string tag)
     {
-        int cls = Array.IndexOf(MovementProfile.All, profile);
-        int pair = Lineup.PairAt(tag);
-        return (cls >= 0 ? ClassShort[cls] : profile.Tag, pair >= 0 ? Lineup.Pairs[pair].Name : tag);
+        foreach (QuickSquad.Class cls in QuickSquad.Classes)
+            if (ReferenceEquals(cls.Profile, profile))
+                return (cls.Name, "");
+        return (profile.Tag, "");
     }
 
     /// <summary>
@@ -247,7 +253,8 @@ public sealed partial class Tank3DBench
     /// sign stands in the title row.
     /// </summary>
     private void UnitPanel(Control c, Font font, Rect2 box, MovementProfile profile, string title, string name,
-                           Side side, Badge badge, bool turn, PanelSurface surface = PanelSurface.Tip)
+                           Side side, Badge badge, bool turn, PanelSurface surface = PanelSurface.Tip, Kit kit = Kit.None,
+                           bool kitHits = false)
     {
         float left = box.Position.X, top = box.Position.Y;
         // the tip's surface (Ui.DrawTip) for a card that tells of a unit, the panel's for the
@@ -261,23 +268,191 @@ public sealed partial class Tank3DBench
         if (Match)
             c.DrawRect(new Rect2(left + 1.0f, top + 8.0f, 3.0f, box.Size.Y - 16.0f), SideInk(side));
 
-        // the class a heading, the model's name a body's size beside it
+        // the class's full name a heading, a size down at a time while it is wider than
+        // the card leaves it (the sign's corner kept); the model's name, if any, beside it
         var at = new Vector2(left + PeekPad, top + PeekPad + font.GetAscent(Ui.Heading));
-        c.DrawString(font, at, title, HorizontalAlignment.Left, -1, Ui.Heading, Ui.Ink);
-        float tw = font.GetStringSize(title, HorizontalAlignment.Left, -1, Ui.Heading).X;
-        c.DrawString(font, at + new Vector2(tw + 8.0f, 0.0f), name, HorizontalAlignment.Left, -1, Ui.Body, Ui.Muted);
+        float room = box.Size.X - 2.0f * PeekPad - (badge != Badge.None ? 26.0f : 0.0f);
+        int size = Ui.Heading;
+        float tw = font.GetStringSize(title, HorizontalAlignment.Left, -1, size).X;
+        while (tw > room && size > Ui.Caption)
+            tw = font.GetStringSize(title, HorizontalAlignment.Left, -1, --size).X;
+        c.DrawString(font, at, title, HorizontalAlignment.Left, -1, size, Ui.Ink);
+        if (name.Length > 0)
+            c.DrawString(font, at + new Vector2(tw + 8.0f, 0.0f), name, HorizontalAlignment.Left, -1, Ui.Body, Ui.Muted);
         if (badge != Badge.None)
             Sign(c, badge, new Vector2(left + box.Size.X - 22.0f, at.Y - Ui.Heading * 0.35f), 10.0f);
         float rule = top + PeekPad + font.GetHeight(Ui.Heading) + 6.0f;
         c.DrawRect(new Rect2(left + 12.0f, rule, box.Size.X - 24.0f, Ui.RimLayout(c, 1)), Ui.Line);
 
-        UnitRows(c, font, left, rule + 22.0f, profile, turn);
+        // each section's bottom: the rear plate's squares, then the trait's text
+        float y = UnitRows(c, font, left, rule + 22.0f, profile, turn) + PeekSectionEnd;
+        y = PanelTrait(c, font, left, y, profile);
+        if (kit != Kit.None)
+            PanelKit(c, font, left, y + PeekSectionHead, kit, kitHits);
     }
+
+    /// <summary>The card's height for a unit of <paramref name="profile"/> carrying
+    /// <paramref name="kit"/>: the figures' own, the trait's heading and lines, and the
+    /// upgrades' heading and rows of icons under them.</summary>
+    private static float PeekHeight(MovementProfile profile, Kit kit)
+    {
+        float h = PeekH + PeekTraitHead + TraitOf(profile).Height;
+        int n = KitCount(kit);
+        if (n == 0)
+            return h;
+        int rows = (n + PeekKitPerRow - 1) / PeekKitPerRow;
+        return h + PeekKitHead + rows * (PeekKitIcon + PeekKitGap);
+    }
+
+    /// <summary>A section's bottom under the rear plate's middle; a section's heading's
+    /// middle under the one before's bottom; the trait's text top under its heading's
+    /// middle, and what its heading adds to the card, px.</summary>
+    private const float PeekSectionEnd = 5.0f, PeekSectionHead = 25.0f, PeekTraitDrop = 12.0f;
+    private const float PeekTraitHead = PeekSectionHead + PeekTraitDrop;
+
+    /// <summary>
+    /// The class's trait (units/*.md, the tree's words: <c>QuickSquad.Class.Trait</c>)
+    /// under its heading below the plates, wrapped to the card (the author's note,
+    /// 2026-11-06). Returns the text's bottom.
+    /// </summary>
+    private static float PanelTrait(Control c, Font font, float left, float y, MovementProfile profile)
+    {
+        (string text, float height) = TraitOf(profile);
+        float x = left + PeekPad;
+        y += PeekSectionHead;
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), L.T("peek.trait"), HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
+        float top = y + PeekTraitDrop;
+        c.DrawMultilineString(font, new Vector2(x, top + font.GetAscent(Ui.Caption)), text, HorizontalAlignment.Left,
+                              PeekTraitWide, Ui.Caption, -1, Ui.Ink);
+        return top + height;
+    }
+
+    /// <summary>The trait's lines' width: the card's, inside its padding.</summary>
+    private const float PeekTraitWide = PeekW - 2.0f * PeekPad;
+
+    /// <summary>A class's trait and its wrapped height, measured once a class.</summary>
+    private static (string Text, float Height) TraitOf(MovementProfile profile)
+    {
+        int i = Array.IndexOf(MovementProfile.All, profile);
+        if (i < 0)
+            return ("", 0.0f);
+        if (Traits[i].Text is null)
+        {
+            string text = "";
+            foreach (QuickSquad.Class cls in QuickSquad.Classes)
+                if (ReferenceEquals(cls.Profile, profile))
+                    text = cls.Trait;
+            Font font = ThemeDB.FallbackFont;
+            float h = text.Length == 0 ? 0.0f
+                : font.GetMultilineStringSize(text, HorizontalAlignment.Left, PeekTraitWide, Ui.Caption).Y;
+            Traits[i] = (text, h);
+        }
+        return (Traits[i].Text!, Traits[i].Height);
+    }
+
+    private static readonly (string? Text, float Height)[] Traits = new (string?, float)[MovementProfile.All.Length];
+
+    /// <summary>What the upgrades' heading and its gaps add to the card,
+    /// an icon's side and the gap between them, px; a row holds five, the card's width.</summary>
+    private const float PeekKitHead = 38.0f, PeekKitIcon = 32.0f, PeekKitGap = 6.0f;
+    private const int PeekKitPerRow = 5;
+
+    private static int KitCount(Kit kit)
+    {
+        int n = 0;
+        for (int v = (int)kit; v != 0; v &= v - 1)
+            n++;
+        return n;
+    }
+
+    /// <summary>
+    /// The upgrades the unit carries, as their icons only (the tree's, <c>Icons/</c>,
+    /// docs/upgrade-icons-plan.md), under their heading where the plates end - in
+    /// upgrades.md's order, five to a row. The name is the icon's tip, in the
+    /// roster's card only: the board's goes as the pointer leaves the hull (2026-11-06).
+    /// </summary>
+    private void PanelKit(Control c, Font font, float left, float y, Kit kit, bool hits)
+    {
+        float x = left + PeekPad;
+        c.DrawString(font, new Vector2(x, y + PeekLabelDrop), L.T("peek.kit"), HorizontalAlignment.Left, -1, Ui.Caption, Ui.Muted);
+        float top = y + 12.0f;
+        int at = 0;
+        if (hits)
+            _kitHits = 0;
+        for (int i = 0; i < Kits.All.Length; i++)
+        {
+            if ((kit & Kits.All[i].Kit) == 0)
+                continue;
+            int col = at % PeekKitPerRow, row = at / PeekKitPerRow;
+            at++;
+            var r = new Rect2(x + col * (PeekKitIcon + PeekKitGap), top + row * (PeekKitIcon + PeekKitGap),
+                              PeekKitIcon, PeekKitIcon);
+            if (KitIcon(i) is { } tex)
+                c.DrawTextureRect(tex, r, false);
+            else
+                Ui.DrawRim(c, r, Ui.Muted, 1);
+            if (hits)
+            {
+                // where each icon stands on the screen, for its name's tip (Tank3DBench.Roster)
+                _kitHit[_kitHits] = new Rect2(c.GetGlobalRect().Position + r.Position, r.Size);
+                _kitHitAt[_kitHits++] = i;
+            }
+        }
+    }
+
+    /// <summary>The icons of the card that tells their names, on the screen, and their
+    /// places in <see cref="Kits.All"/>: the roster's, the one the pointer can reach.</summary>
+    private readonly Rect2[] _kitHit = new Rect2[Kits.All.Length];
+    private readonly int[] _kitHitAt = new int[Kits.All.Length];
+    private int _kitHits;
+
+    /// <summary>Each upgrade's icon by its place in <see cref="Kits.All"/>, read once.</summary>
+    private static Texture2D? KitIcon(int i)
+    {
+        if (!KitIconsLooked[i])
+        {
+            KitIconsLooked[i] = true;
+            KitIcons[i] = QIcon(KitIconName(Kits.All[i].Kit), (int)PeekKitIcon);
+        }
+        return KitIcons[i];
+    }
+
+    private static readonly Texture2D?[] KitIcons = new Texture2D?[Kits.All.Length];
+    private static readonly bool[] KitIconsLooked = new bool[Kits.All.Length];
+
+    /// <summary>The picture of an upgrade in <c>Icons/</c>: the tree's
+    /// (<c>QuickSquad.Upgrade.Icon</c>), whose names are not the kit's ids.</summary>
+    private static string KitIconName(Kit k) => k switch
+    {
+        Kit.MineGuard => "trawl",
+        Kit.Snorkel => "snorkel",
+        Kit.Smoke => "smoke",
+        Kit.Incendiary => "incendiary",
+        Kit.SmokeShell => "smoke_shell",
+        Kit.WideTracks => "wide_tracks",
+        Kit.Reverse => "reverse",
+        Kit.SpallLiner => "spall_liner",
+        Kit.Extinguisher => "extinguisher",
+        Kit.Thermal => "thermal",
+        Kit.Winch => "winch",
+        Kit.MineLayer => "mine",
+        Kit.RepairKit => "repair",
+        Kit.DoubleTurn => "double_turn",
+        Kit.AmbushStabilizer => "ambush_stabilizer",
+        Kit.Bracket => "fork_36",
+        Kit.ThroughWood => "through_wood",
+        Kit.RamBlade => "dozer_blade",
+        Kit.Overdrive => "overdrive",
+        Kit.FireOnMove => "fire_on_move",
+        Kit.WideSector => "wide_sector",
+        Kit.PushTwo => "push_two",
+        _ => "",
+    };
 
     /// <summary>The panel's figures from <paramref name="left"/>, the first row's middle at
     /// <paramref name="y"/>: a label, then the slots, the labels' column as wide as the
     /// longest. The hangar lays its own out of the same rows (<c>QuickHangarFigures</c>).</summary>
-    private void UnitRows(Control c, Font font, float left, float y, MovementProfile profile, bool turn)
+    private float UnitRows(Control c, Font font, float left, float y, MovementProfile profile, bool turn)
     {
         float x = left + PeekPad, slots = left + PeekSlotsAt(font);
         PeekRow(c, font, x, slots, y, L.T("peek.fire"), profile.Might, PeekMight, PeekMark.Dot, Ui.Attack);
@@ -297,6 +472,7 @@ public sealed partial class Tank3DBench
         PeekPlate(c, font, profile, x + PeekIndent, slots, y, L.T("peek.side"), Gunnery.Plate.Side);
         y += PeekPlateStep;
         PeekPlate(c, font, profile, x + PeekIndent, slots, y, L.T("peek.rear"), Gunnery.Plate.Rear);
+        return y;
     }
 
     private enum PanelSurface { Tip, Panel, None }

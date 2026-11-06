@@ -451,6 +451,8 @@
   "peek.front": "front",
   "peek.side": "side",
   "peek.rear": "rear",
+  "peek.trait": "trait",
+  "peek.kit": "upgrades",
   "glance.off_edge": "goes off the edge",
   "glance.into_wall": "into the wall {0}",
   "glance.into_smoke": "into smoke {0}",

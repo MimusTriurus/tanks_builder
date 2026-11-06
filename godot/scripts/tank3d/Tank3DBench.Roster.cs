@@ -113,11 +113,26 @@ public sealed partial class Tank3DBench
             if (local.Y - i * (RosterIcon + RosterGap) <= RosterIcon && i < _rosterCount)
                 over = i;
         }
+        // the card stays while the pointer goes over to it from its icon, to read its
+        // upgrades' names (the author's note, 2026-11-06); off the board meanwhile
+        Vector2 mouse = GetViewport().GetMousePosition();
+        bool onCard = false;
+        if (over < 0 && _rosterOver >= 0 && RosterCardUp && _hudTips!.Body is { } body)
+        {
+            Rect2 card = body.GetGlobalRect().Grow(11.0f).Merge(RosterIconRect(_rosterOver));
+            if (card.HasPoint(mouse))
+            {
+                over = _rosterOver;
+                onCard = true;
+                _rosterUnder = true;
+            }
+        }
         if (over != _rosterOver)
         {
             _rosterOver = over;
             RosterTip(over);
         }
+        KitTipTick(onCard ? mouse : new Vector2(-1.0f, -1.0f));
         // the card says the turn as it goes: redrawn while up
         if (_hudTips is { Showing: true } tips && Array.IndexOf(_rosterTipKeys, tips.For) >= 0)
             tips.Body?.QueueRedraw();
@@ -210,11 +225,12 @@ public sealed partial class Tank3DBench
             // class on every screen (step 4); the drawn silhouette with no icon on disk
             if (RosterIconOf(ci) is { } art)
             {
-                // the octagon fills the space over the label: the icon's own margins
-                // (its shield is 0.654 by 0.623 of it, QhTabPad) run past that space
-                var mid = new Vector2(box.Position.X + RosterIcon * 0.5f, box.Position.Y + 6.0f + (RosterIcon - 32.0f) * 0.5f);
+                // the octagon fills the tile - no label under it since 2026-11-06, the
+                // author's note: its shield (0.654 by 0.623 of the icon, QhTabPad) is
+                // RosterShield of the tile's side
+                Vector2 mid = box.GetCenter();
                 Vector2 size = art.GetSize();
-                Vector2 drawn = size * (RosterIconPx * 1.25f / Mathf.Max(size.X, size.Y));
+                Vector2 drawn = size * (RosterIcon * RosterShield / 0.654f / Mathf.Max(size.X, size.Y));
                 c.DrawTextureRect(art, new Rect2(mid - drawn * 0.5f, drawn), false,
                                   gone ? new Color(0.35f, 0.35f, 0.35f, 1.0f) : new Color(1.0f, 1.0f, 1.0f, a));
             }
@@ -234,8 +250,8 @@ public sealed partial class Tank3DBench
                 c.DrawString(font, at + new Vector2(-r, Ui.Caption * 0.36f), RosterKeys[i],
                              HorizontalAlignment.Center, 2.0f * r, Ui.Caption, new Color(key, a));
             }
-            c.DrawString(font, box.Position + new Vector2(0.0f, RosterIcon - 8.0f), ci >= 0 ? ClassShort[ci] : cls.Tag,
-                         HorizontalAlignment.Center, RosterIcon, Ui.Caption, new Color(gone ? Ui.Spent : Ui.Ink, a));
+            // no class's letters under it: the octagon says the class, the card its name
+            // (the author's note, 2026-11-06)
             if (gone)
             {
                 var m = box.Grow(-12.0f);
@@ -252,11 +268,18 @@ public sealed partial class Tank3DBench
 
     /// <summary>A chevron's width on the roster's tile, px; the stack's height and step
     /// as the hangar's <see cref="QuickRank"/> (0.34 and 0.44 of the width).</summary>
-    private const float RosterRankWide = 13.0f;
+    private const float RosterRankWide = 15.0f;
+
+    /// <summary>The class's shield across the tile, of its side.</summary>
+    private const float RosterShield = 0.74f;
+
+    /// <summary>The chevrons' plate, px: astride the tile's right edge, low.</summary>
+    private const float RosterRankPlateW = 25.0f, RosterRankPlateH = 30.0f;
 
     /// <summary>
-    /// The unit's level in its branch as rank chevrons, bottom right on its tile
-    /// (the author's note, 2026-11-06): the hangar's (<see cref="QuickRank"/>) -
+    /// The unit's level in its branch as rank chevrons on a small dark plate astride
+    /// the tile's right edge, low - out of the octagon's way, as the key's disc sits
+    /// on the top left corner (the author's notes, 2026-11-06): the hangar's (<see cref="QuickRank"/>) -
     /// three stacked, the lowest the first level, the levels it has lit in olive
     /// on a dark rim, the rest faint. None for a neutral machine, as the hangar
     /// shows none. Drawn as lines, not a polyline: a frame's draw makes no array.
@@ -267,8 +290,11 @@ public sealed partial class Tank3DBench
             return;
         const int of = 3;
         float wide = RosterRankWide, h = wide * 0.34f, step = wide * 0.44f, w = 2.5f;
-        float left = box.End.X - wide - 5.0f;
-        float foot = box.End.Y - 6.0f;
+        var plate = new Rect2(box.End.X - RosterRankPlateW * 0.5f, box.End.Y - RosterRankPlateH - 6.0f,
+                              RosterRankPlateW, RosterRankPlateH);
+        Ui.DrawBox(c, plate, new Color(Ui.Bg, a), new Color(Ui.Line, a), 1.0f);
+        float left = plate.GetCenter().X - wide * 0.5f;
+        float foot = plate.End.Y - 6.0f;
         for (int i = 0; i < of; i++)
         {
             float top = foot - h - i * step;
@@ -340,6 +366,59 @@ public sealed partial class Tank3DBench
         _hudTips.Show(_rosterTipKeys[i], () => RosterIconRect(i), RosterCardBody, ring: false);
     }
 
+    /// <summary>The roster's card is up (not only waiting).</summary>
+    private bool RosterCardUp => _hudTips is { Showing: true } t && Array.IndexOf(_rosterTipKeys, t.For) >= 0;
+
+    private UiTip? _kitTip;
+    /// <summary>The kit tip's keys, one an upgrade (<see cref="Kits.All"/>'s order).</summary>
+    private static readonly object[] KitTipKeys = KitKeys();
+    /// <summary>The upgrade whose name the tip holds, by its place in the card; -1 none.</summary>
+    private int _kitOver = -1;
+
+    private static object[] KitKeys()
+    {
+        var keys = new object[Kits.All.Length];
+        for (int i = 0; i < keys.Length; i++)
+            keys[i] = new object();
+        return keys;
+    }
+
+    /// <summary>The name, kind and rule of the upgrade whose icon in the roster's card is
+    /// under <paramref name="mouse"/> - the tree's words (<see cref="QuickSquad.UpgradeOf"/>),
+    /// above the icon. Called each frame; a tip is asked for as the icon changes.</summary>
+    private void KitTipTick(Vector2 mouse)
+    {
+        if (_kitTip is null)
+            return;
+        int hit = -1;
+        if (RosterCardUp)
+            for (int i = 0; i < _kitHits; i++)
+                if (_kitHit[i].HasPoint(mouse))
+                {
+                    hit = i;
+                    break;
+                }
+        if (hit == _kitOver)
+            return;
+        _kitOver = hit;
+        if (hit < 0)
+        {
+            _kitTip.Hide(null);
+            return;
+        }
+        Rect2 at = _kitHit[hit];
+        (Kit flag, string _, string name) = Kits.All[_kitHitAt[hit]];
+        _kitTip.Show(KitTipKeys[_kitHitAt[hit]], () => at, () =>
+            QuickSquad.UpgradeOf(flag) is { } u ? UiTip.Box(u.Kind, u.Name, u.Text) : UiTip.Box("", name, ""),
+            UiTip.Prefer.Above, ring: false);
+    }
+
+    /// <summary>The upgrades of the unit on a roster tile, the riding one's by the rig.</summary>
+    private Kit RosterKit(RosterSlot u) => KitOf(u.Riding ? _unitId : u.Id);
+
+    /// <summary>The class of the unit on a roster tile, the riding one's by the rig.</summary>
+    private MovementProfile RosterProfile(RosterSlot u) => u.Riding ? _profile : RosterClass(u);
+
     private Rect2 RosterIconRect(int i) =>
         new(_roster!.GetGlobalRect().Position + new Vector2(0.0f, i * (RosterIcon + RosterGap)), RosterIcon, RosterIcon);
 
@@ -348,7 +427,12 @@ public sealed partial class Tank3DBench
     private Control RosterCardBody()
     {
         // the tip's margins (Ui.TipStyle, 11) round it: the card as large as the hull's
-        var c = new Control { CustomMinimumSize = new Vector2(PeekW - 22.0f, PeekH - 22.0f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        float h = _rosterTipAt >= 0 && _rosterTipAt < _rosterCount ? PeekHeight(RosterProfile(_rosterSlots[_rosterTipAt]), RosterKit(_rosterSlots[_rosterTipAt])) : PeekH;
+        var c = new Control
+        {
+            CustomMinimumSize = new Vector2(PeekW - 22.0f, h - 22.0f), MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = QIconFilter,
+        };
         c.Draw += () => RosterCardDraw(c);
         return c;
     }
@@ -360,7 +444,9 @@ public sealed partial class Tank3DBench
             return;
         RosterSlot u = _rosterSlots[shown];
         // drawn over the tip's margins, laid out as the hull's card is
-        var card = new Rect2(-11.0f, -11.0f, PeekW, PeekH);
+        Kit kit = RosterKit(u);
+        _kitHits = 0;
+        var card = new Rect2(-11.0f, -11.0f, PeekW, PeekHeight(RosterProfile(u), kit));
         Font font = ThemeDB.FallbackFont;
         MovementProfile ucls = RosterClass(u);
         if (u.Riding)
@@ -371,12 +457,12 @@ public sealed partial class Tank3DBench
                 (_cardTitle, _cardName) = PanelNames(_profile, _modelTag);
             }
             UnitPanel(c, font, card, _profile, _cardTitle, _cardName, _side,
-                      BadgeOf(_unitId, _fate, CellHere), turn: true, PanelSurface.None);
+                      BadgeOf(_unitId, _fate, CellHere), turn: true, PanelSurface.None, kit, kitHits: true);
         }
         else
         {
             var (title, name) = RosterNames(ucls, u.Tag);
-            UnitPanel(c, font, card, ucls, title, name, _mt.Turn, BadgeOf(u.Id, u.Fate, u.Cell), turn: false, PanelSurface.None);
+            UnitPanel(c, font, card, ucls, title, name, _mt.Turn, BadgeOf(u.Id, u.Fate, u.Cell), turn: false, PanelSurface.None, kit, kitHits: true);
         }
     }
 

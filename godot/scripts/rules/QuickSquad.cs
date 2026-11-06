@@ -159,6 +159,18 @@ public static class QuickSquad
             L.T("squad.doctrine.artillery.play")),
     };
 
+    /// <summary>The tree's upgrade that sets <paramref name="flag"/> - its name, kind and
+    /// rule for a card's icon in battle; null where no tree has it.</summary>
+    public static Upgrade? UpgradeOf(Kit flag)
+    {
+        foreach (Class c in Classes)
+            foreach (Branch b in c.Branches)
+                foreach (Upgrade u in b.Levels)
+                    if (u.Flag == flag)
+                        return u;
+        return null;
+    }
+
     public static Class ClassOf(string tag) =>
         Classes.FirstOrDefault(c => string.Equals(c.Tag, tag, StringComparison.OrdinalIgnoreCase)) ?? Classes[1];
 

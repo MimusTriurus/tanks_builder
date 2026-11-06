@@ -60,7 +60,11 @@ public sealed partial class Tank3DBench
         bool shown = !Match && _chosen && _field is not null && _tile is not null && _fate != Fate.Destroyed;
         _card.Visible = shown;
         if (shown)
+        {
+            // as tall as the class's trait makes it
+            _card.OffsetTop = -12.0f - PeekHeight(_profile, Kit.None);
             _card.QueueRedraw();
+        }
     }
 
     private void DrawCard()

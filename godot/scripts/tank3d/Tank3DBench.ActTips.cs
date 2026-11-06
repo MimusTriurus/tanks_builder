@@ -97,6 +97,9 @@ public sealed partial class Tank3DBench
     {
         _hudTips = new UiTip();
         layer.AddChild(_hudTips);
+        // over it, an upgrade's name on its icon in the roster's card (Tank3DBench.Roster)
+        _kitTip = new UiTip();
+        layer.AddChild(_kitTip);
     }
 
     /// <summary>A button's card, and the pointer's enter and exit told to it.</summary>

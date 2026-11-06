@@ -2646,6 +2646,9 @@ public sealed partial class Tank3DBench : Node3D
         // the AI's turn: the camera is the player's, the board and the orders not (Tank3DBench.Ai)
         if (AiTurn && @event is InputEventMouseButton { ButtonIndex: MouseButton.Left or MouseButton.Right, Pressed: true })
             return;
+        // the roster's card held under the pointer is not the board (Tank3DBench.Roster)
+        if (_rosterUnder && @event is InputEventMouseButton { ButtonIndex: MouseButton.Left or MouseButton.Right, Pressed: true })
+            return;
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } click)
         {
             AimAt(click.Position);
