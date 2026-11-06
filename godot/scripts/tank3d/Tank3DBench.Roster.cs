@@ -246,6 +246,49 @@ public sealed partial class Tank3DBench
             Badge badge = s.Riding ? BadgeOf(_unitId, _fate, CellHere) : BadgeOf(s.Id, s.Fate, s.Cell);
             if (badge != Badge.None)
                 Sign(c, badge, box.Position + new Vector2(RosterIcon - 12.0f, 12.0f), 8.0f, a: a);
+            RosterRank(c, box, LevelOf(s.Id), a);
+        }
+    }
+
+    /// <summary>A chevron's width on the roster's tile, px; the stack's height and step
+    /// as the hangar's <see cref="QuickRank"/> (0.34 and 0.44 of the width).</summary>
+    private const float RosterRankWide = 13.0f;
+
+    /// <summary>
+    /// The unit's level in its branch as rank chevrons, bottom right on its tile
+    /// (the author's note, 2026-11-06): the hangar's (<see cref="QuickRank"/>) -
+    /// three stacked, the lowest the first level, the levels it has lit in olive
+    /// on a dark rim, the rest faint. None for a neutral machine, as the hangar
+    /// shows none. Drawn as lines, not a polyline: a frame's draw makes no array.
+    /// </summary>
+    private static void RosterRank(Control c, Rect2 box, int level, float a)
+    {
+        if (level <= 0)
+            return;
+        const int of = 3;
+        float wide = RosterRankWide, h = wide * 0.34f, step = wide * 0.44f, w = 2.5f;
+        float left = box.End.X - wide - 5.0f;
+        float foot = box.End.Y - 6.0f;
+        for (int i = 0; i < of; i++)
+        {
+            float top = foot - h - i * step;
+            var l = new Vector2(left, top + h);
+            var m = new Vector2(left + wide * 0.5f, top);
+            var r = new Vector2(left + wide, top + h);
+            if (i < level)
+            {
+                Color rim = new(0.06f, 0.06f, 0.05f, a);
+                c.DrawLine(l, m, rim, w + 2.0f, true);
+                c.DrawLine(m, r, rim, w + 2.0f, true);
+                c.DrawLine(l, m, new Color(Ui.Accent, a), w, true);
+                c.DrawLine(m, r, new Color(Ui.Accent, a), w, true);
+            }
+            else
+            {
+                Color dim = new(Ui.Muted, 0.6f * a);
+                c.DrawLine(l, m, dim, w, true);
+                c.DrawLine(m, r, dim, w, true);
+            }
         }
     }
 

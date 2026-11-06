@@ -1687,6 +1687,7 @@ public sealed partial class Tank3DBench
             return;
         string[] sides = Parking.SidesOf(_parkings);
         var homes = new List<Parking>();
+        var levels = new List<int>();
         foreach (Side side in new[] { Side.Green, Side.Brown })
         {
             string name = side == Side.Green ? Parking.Green : Parking.Brown;
@@ -1699,9 +1700,14 @@ public sealed partial class Tank3DBench
                 if (cells.All(c => c.Cell != cell))
                     cells.Add((cell, null));
             for (int i = 0; i < squad.Length && i < cells.Count; i++)
+            {
                 homes.Add(new Parking(cells[i].Cell, squad[i].Class, name, cells[i].Facing, QuickSquad.KitOf(squad[i])));
+                // the machine's level in its branch, for the roster's chevrons
+                levels.Add(squad[i].Empty ? 0 : squad[i].Level);
+            }
         }
         _parkings = homes;
+        _homeLevels = levels.ToArray();
     }
 
     // --- back to the build, and the reveal -------------------------------------------

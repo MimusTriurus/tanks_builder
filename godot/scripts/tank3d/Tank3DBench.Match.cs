@@ -213,6 +213,14 @@ public sealed partial class Tank3DBench
     /// trawl and the smoke grenade are read off it).</summary>
     private Kit KitOf(int id) => Match && id >= 0 && id < _kits.Length ? _kits[id] : Kit.None;
 
+    /// <summary>Each home's machine level in its branch, 0..3, by the parking's
+    /// index (<c>QuickHomes</c>); then each unit's, by its id.</summary>
+    private int[] _homeLevels = Array.Empty<int>(), _levels = Array.Empty<int>();
+
+    /// <summary>The unit's level in its branch (QuickSquad.Slot.Level): 0 - a
+    /// neutral machine, or a match off a map's homes, which carry none.</summary>
+    private int LevelOf(int id) => id >= 0 && id < _levels.Length ? _levels[id] : 0;
+
     /// <summary>How the unit on the rig moves: its class, its wading gear and
     /// what else its kit says of driving (upgrades.md, Д8: the trawl, wide
     /// tracks, the reverse gear, the double turn - <see cref="Steps.Kitted"/>).</summary>
@@ -230,6 +238,8 @@ public sealed partial class Tank3DBench
         _lineup = new List<Lineup.Unit>();
         _rigUnit = _unitId = -1;
         _kits = Array.Empty<Kit>();
+        _homeLevels = Array.Empty<int>();
+        _levels = Array.Empty<int>();
         if (!Match)
             return;
         // a quick battle: the two squads on the homes, each machine its kit (Tank3DBench.Quick)
@@ -237,6 +247,8 @@ public sealed partial class Tank3DBench
         _lineup = Lineup.Of(_parkings);
         // the home's kit, else the starting squad's stub by the class (Р-4, Д8)
         _kits = _lineup.Select(u => _parkings[u.Slot].Kit ?? Kits.Starter(ClassFor(u.Model))).ToArray();
+        // the level the squad gave it; nought off a map's own homes
+        _levels = _lineup.Select(u => u.Slot < _homeLevels.Length ? _homeLevels[u.Slot] : 0).ToArray();
         Log.Print("tank3d: match: kits "
                  + string.Join(", ", _lineup.Select((u, i) => $"{SideName(SideOf(u))} {u.Model}#{i} {Kits.Names(_kits[i])}")));
         int green = _lineup.Count(u => u.Side == Parking.Green), brown = _lineup.Count - green;
