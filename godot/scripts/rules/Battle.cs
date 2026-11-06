@@ -121,6 +121,10 @@ public sealed class BattleState
     public Camp First = Camp.Green;
     /// <summary>Player 2's head start under trial; <see cref="Handicap.None"/> is the GDD.</summary>
     public Handicap Handicap;
+    /// <summary>The stalemate on count under trial (<c>--battle-run …
+    /// --stalemate count</c>, docs/ai-plan.md): the side with more units able
+    /// to fight wins it, an even count is a draw. Off is the GDD's draw.</summary>
+    public bool StaleByCount;
     public int Round = 1;
     /// <summary>Turns played, the first nought: a fire's clock.</summary>
     public int TurnNo;

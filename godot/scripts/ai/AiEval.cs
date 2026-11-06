@@ -88,11 +88,18 @@ public static class AiEval
         if (s.Drawn)
             return s.HarmlessFor(me) >= Stale ? Material(s, me) : Drawn;
         double score = Material(s, me);
+        // the stalemate on count (BattleState.StaleByCount, a trial): the
+        // side with more units able to fight wins it, so the clock is its
+        // friend - no push on it, the win nearer by each quiet round; the
+        // side behind has the push and the loss coming
+        int count = s.StaleByCount ? CountLead(s, me) : 0;
+        if (count != 0)
+            score += Math.Sign(count) * StaleWin * Math.Min(1.0, s.QuietRounds / (double)MatchRules.QuietRoundsDraw);
         // the stalemate's clock, read as rounds with nobody harmed - a round
         // that glances off a tank does not wind it back: quiet rounds weigh on
         // the side asking, so it goes and takes something - the more, the
         // further ahead it is (ai-plan.md, «Пат»: the leader has a win to lose)
-        int quiet = s.HarmlessFor(me);
+        int quiet = count > 0 ? 0 : s.HarmlessFor(me);
         score -= quiet * (Quiet + Lead * Math.Max(0.0, score));
         foreach (BattleUnit u in s.Units)
         {
@@ -178,7 +185,9 @@ public static class AiEval
             return score;
         (double worst, double others) = threats.Of(s, Across(me));
         AiStyle st = style ?? AiStyle.Plain;
-        double fear = st.Fear * Math.Max(0.3, 1.0 - 0.25 * s.HarmlessFor(me));
+        // the fear eases as the draw nears - not for a side the stalemate on count would crown
+        int harmless = s.StaleByCount && CountLead(s, me) > 0 ? 0 : s.HarmlessFor(me);
+        double fear = st.Fear * Math.Max(0.3, 1.0 - 0.25 * harmless);
         score -= fear * (Worst * worst + st.Spread * Others * others);
         return score + Initiative * threats.Of(s, me).Worst;
     }
@@ -272,6 +281,20 @@ public static class AiEval
             }
         }
         return null;
+    }
+
+    /// <summary>The stalemate on count's worth at the stalemate's line, scaled
+    /// by how near the clock is to it.</summary>
+    private const double StaleWin = 3.0;
+
+    /// <summary><paramref name="me"/>'s units able to fight less the enemy's.</summary>
+    private static int CountLead(BattleState s, Camp me)
+    {
+        int lead = 0;
+        foreach (BattleUnit u in s.Units)
+            if (u.Fate == UnitFate.Alive)
+                lead += u.Side == me ? 1 : -1;
+        return lead;
     }
 
     public static Camp Across(Camp c) => c == Camp.Green ? Camp.Brown : Camp.Green;

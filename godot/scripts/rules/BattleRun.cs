@@ -69,6 +69,7 @@ public static class BattleRun
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
             else if (a == "--doctrine" && more) doctrine = args[++i];
+            else if (a == "--stalemate" && more) _staleByCount = args[++i] == "count";
             else if (a == "--budget" && more)
             {
                 // N for both sides, or GREEN,BROWN
@@ -166,6 +167,10 @@ public static class BattleRun
     /// (<see cref="QuickSquad"/>), 0 - none at all; -1 - the map's kits.</summary>
     private static readonly int[] _budget = { -1, -1 };
 
+    /// <summary><c>--stalemate count</c>: the stalemate won on the count of
+    /// units able to fight (<see cref="BattleState.StaleByCount"/>).</summary>
+    private static bool _staleByCount;
+
     /// <summary>
     /// The upgrades of <c>--budget</c>: each unit a branch of its class drawn
     /// at random, the points dealt a level at a time round the side, up to
@@ -244,8 +249,10 @@ public static class BattleRun
         BattleState s = Start(map, first, slopes);
         s.Handicap = handicap;
         Upgrade(s, _budget, seed);
+        s.StaleByCount = _staleByCount;
         Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
-                  + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : ""));
+                  + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : "")
+                  + (_staleByCount ? ", stalemate on count" : ""));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();

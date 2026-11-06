@@ -1406,6 +1406,24 @@ public static partial class Battle
     {
         if (s.Over || s.QuietRounds < MatchRules.QuietRoundsDraw)
             return;
+        if (s.StaleByCount)
+        {
+            int green = 0, brown = 0;
+            foreach (BattleUnit u in s.Units)
+                if (u.Fate == UnitFate.Alive)
+                {
+                    if (u.Side == Camp.Green)
+                        green++;
+                    else
+                        brown++;
+                }
+            if (green != brown)
+            {
+                s.Won = green > brown ? Camp.Green : Camp.Brown;
+                s.Events.Add(new BattleEvent(BattleEventKind.Won, -1, default, (int)s.Won.Value, "stalemate on count"));
+                return;
+            }
+        }
         s.Drawn = true;
         s.Events.Add(new BattleEvent(BattleEventKind.Drawn, -1, default, s.QuietRounds, "stalemate"));
     }
