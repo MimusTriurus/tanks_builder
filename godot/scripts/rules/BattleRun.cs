@@ -69,6 +69,7 @@ public static class BattleRun
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
             else if (a == "--doctrine" && more) doctrine = args[++i];
+            else if (a == "--budget" && more) _budget = int.TryParse(args[++i], out int b) ? b : -1;
             else if (a == "--deploy-lead" && more) AiDeploy.Lead = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
             else if (a == "--handicap" && more && Enum.TryParse(args[++i], true, out Handicap h)) handicap = h;
         }
@@ -154,6 +155,47 @@ public static class BattleRun
     /// <c>--ai-seed N</c>, <c>--ai-turns N</c> (300) the most turns. Exit
     /// code 2 when an order of the AI's own was refused.
     /// </summary>
+    /// <summary><c>--budget N</c>: each side's units upgraded on N points as
+    /// the quick battle's squad (<see cref="QuickSquad"/>); -1 - the map's kits.</summary>
+    private static int _budget = -1;
+
+    /// <summary>
+    /// The upgrades of <c>--budget</c>: each unit a branch of its class drawn
+    /// at random, the points dealt a level at a time round the side, up to
+    /// level 3 each (<see cref="QuickSquad.ForAi"/>); its kit then the flags
+    /// of the levels it has (<see cref="QuickSquad.KitOf"/>), the starter's
+    /// gone. A die of its own off the seed: the AI's draws are not moved.
+    /// </summary>
+    private static void Upgrade(BattleState s, int budget, int seed)
+    {
+        for (int side = 0; side < 2; side++)
+        {
+            var rng = new Random(seed * 7919 + side * 104729 + 1);
+            var units = new List<BattleUnit>();
+            foreach (BattleUnit u in s.Units)
+                if ((int)u.Side == side)
+                    units.Add(u);
+            var slots = new QuickSquad.Slot[units.Count];
+            for (int i = 0; i < units.Count; i++)
+            {
+                QuickSquad.Class cls = QuickSquad.Classes[Math.Clamp(units[i].Class.Might, 1, 5) - 1];
+                slots[i] = new QuickSquad.Slot(cls.Tag, cls.Branches[rng.Next(cls.Branches.Length)].Id, 0);
+            }
+            int left = budget;
+            for (int k = 0; left > 0 && k < 3 * units.Count; k++)
+            {
+                ref QuickSquad.Slot slot = ref slots[k % units.Count];
+                if (slot.Level < 3)
+                {
+                    slot.Level++;
+                    left--;
+                }
+            }
+            for (int i = 0; i < units.Count; i++)
+                units[i].Kit = QuickSquad.KitOf(slots[i]);
+        }
+    }
+
     private static int RunAi(string? mapName, string spec, int seed, int maxTurns, string? outDir, Camp first, bool slopes,
                              bool probeCheck = false, Handicap handicap = Handicap.None,
                              bool swap = false, bool rotCheck = false, string? deploy = null,
@@ -191,7 +233,10 @@ public static class BattleRun
         var place = new Placing(Played(map, slopes), first);
         BattleState s = Start(map, first, slopes);
         s.Handicap = handicap;
-        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}");
+        if (_budget >= 0)
+            Upgrade(s, _budget, seed);
+        Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
+                  + (_budget >= 0 ? $", budget {_budget}" : ""));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();

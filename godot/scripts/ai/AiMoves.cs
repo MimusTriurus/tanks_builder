@@ -400,11 +400,29 @@ public static class AiMoves
         Glances(s, u, all);
         if ((u.Kit & Kit.Incendiary) != 0)
             Kindling(s, u, all);
+        // the mortar's smoke bomb (upgrades.md, «Дымовой снаряд»): over
+        // everything on to any empty open hex of its band along the hull -
+        // 3 to 5, 3 to 6 with the bracket. It went the gun's way below (one to
+        // three out, stopped by the first tank) and never found a hex: 0 rounds
+        // in 36 matches with the upgrade (2026-11-06, --budget 15)
+        if ((u.Kit & Kit.SmokeShell) != 0 && u.Class.Lobs)
+        {
+            int reach = Gunnery.LobReachOf(u.Kit);
+            Vector2I c = u.Cell;
+            for (int k = 1; k <= reach; k++)
+            {
+                c = HexField.Step(c, u.Heading);
+                if (!s.Board.InBounds(c))
+                    break;
+                if (k >= Gunnery.LobShortest && s.At(c) is null && s.Board.CoverAt(c) == Cover.None && !s.Board.Smoked(c))
+                    all.Add(new Order(OrderKind.SmokeShot, c));
+            }
+        }
         int to = Toward(s, u, u.Cell);
         if (to < 0)
             return all;
         // the smoke round on the first empty hex toward the enemy (upgrades.md, «Дымовой снаряд»)
-        if ((u.Kit & Kit.SmokeShell) != 0 && (u.Class.Turreted || to == u.Heading))
+        if ((u.Kit & Kit.SmokeShell) != 0 && !u.Class.Lobs && (u.Class.Turreted || to == u.Heading))
         {
             Vector2I c = u.Cell;
             for (int k = 1; k <= 3; k++)

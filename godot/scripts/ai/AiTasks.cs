@@ -251,6 +251,24 @@ public static class AiTasks
             s.Unit(0)!.Pinned = true;
             return s;
         }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive);
+
+        // 19. the mortar's smoke bomb (upgrades.md, «Дымовой снаряд»): the
+        // enemy destroyer six out down the column, its round through the
+        // green medium and on into the mortar behind it (its one pass). The
+        // destroyer is past the mortar's reach of five, the medium's round
+        // does not get through its front, all are pinned: the one answer is
+        // smoke on the column 3 to 5 out, over the medium. The generator
+        // looked one to three out and stopped at the medium (2026-11-06).
+        yield return ("HM lays a smoke bomb over its MT on the TD's axis", () =>
+        {
+            BattleState s = Board();
+            Put(s, 0, "HMR", Camp.Green, 4, 8, 90, Kit.SmokeShell);
+            Put(s, 1, "MTR", Camp.Green, 4, 7, 90);
+            Put(s, 2, "TDR", Camp.Brown, 4, 1, 270);
+            foreach (int id in new[] { 0, 1, 2 })
+                s.Unit(id)!.Pinned = true;
+            return s;
+        }, (_, a) => a.Board.Smoked(new Vector2I(4, 3)) || a.Board.Smoked(new Vector2I(4, 4)) || a.Board.Smoked(new Vector2I(4, 5)));
     }
 
     /// <summary>Problems a turn does not settle: green's play, the enemy's
