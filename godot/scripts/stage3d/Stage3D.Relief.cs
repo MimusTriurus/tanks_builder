@@ -346,8 +346,24 @@ public sealed partial class Stage3D
 
     private void BuildRelief(Relief f, Texture2D? art)
     {
+        _tops.Mesh = ReliefMesh(f, null);
+        _sides.Mesh = null;
+        _edges.Mesh = null;
+        BakeRelief(f);
+        _tops.MaterialOverride = ReliefTurf(f, art);
+        _glaze.MaterialOverride = null;
+        BuildFrame(f);
+        Roads(f);
+        Reeds(f);
+    }
+
+    /// <summary>The relief's mesh off <paramref name="f"/>; with
+    /// <paramref name="next"/> (the tide's rise, <see cref="TideBegin"/>) it
+    /// carries that board's height and normal in CUSTOM1 and its paint in
+    /// CUSTOM2, for the vertex shader to sink each point into.</summary>
+    private ArrayMesh ReliefMesh(Relief f, Relief? next)
+    {
         int nx = f.Nx, ny = f.Ny, n = nx * ny;
-        float rise = RiseFactor;
         var at = new Vector3[n];
         var normal = new Vector3[n];
         var paint = new Color[n];
@@ -360,34 +376,8 @@ public sealed partial class Stage3D
         // the soil's looks (Relief.Look, format 3): bare earth, stones, dunes,
         // swamp - CUSTOM0, read by SoilPaint
         var look = new float[n * 4];
+        ReliefPoints(f, at, normal, paint, levels, rock, look);
         var index = new int[(nx - 1) * (ny - 1) * 6];
-        float[] sand = f.Share[(int)Relief.Kind.Sand],
-                forest = f.Share[(int)Relief.Kind.Forest];
-        for (int j = 0; j < ny; j++)
-            for (int i = 0; i < nx; i++)
-            {
-                int p = j * nx + i;
-                float x = f.X0 + i * f.Cell + Origin.X, z = f.Z0 + j * f.Cell + Origin.Y / Squash;
-                at[p] = new Vector3(x, f.Height[p] / rise, z);
-                // on a rock, over two points either side: a wall is one or
-                // two points across, and the next point's height alone
-                // turned each facet of it its own way to the sun
-                int reach = f.Cliff[p] > 0.05f ? 2 : 1;
-                int i0 = Mathf.Max(i - reach, 0), i1 = Mathf.Min(i + reach, nx - 1);
-                int j0 = Mathf.Max(j - reach, 0), j1 = Mathf.Min(j + reach, ny - 1);
-                float hx = (f.Height[j * nx + i1] - f.Height[j * nx + i0]) / (2.0f * reach * f.Cell * rise);
-                float hz = (f.Height[j1 * nx + i] - f.Height[j0 * nx + i]) / (2.0f * reach * f.Cell * rise);
-                normal[p] = new Vector3(-hx, 1.0f, -hz).Normalized();
-                // what the ground is, for the shader: sand, rock, wood, and how
-                // far under the water it lies (the bed darker than the bank)
-                float under = Mathf.Clamp(-f.Shore[p] / (f.Cell * 4.0f), 0.0f, 1.0f);
-                paint[p] = new Color(sand[p], f.Cliff[p], forest[p], under);
-                // and how deep in a hollow it lies, for its shade (Relief.Hollow)
-                levels[p] = new Vector2(f.Levels[p] & 0xFFFFFF, f.Hollow[p]);
-                rock[p] = new Vector2(f.Rock[p], f.RockAux[p]);
-                for (int k = 0; k < 4; k++)
-                    look[p * 4 + k] = f.Look[k][p];
-            }
         int t = 0;
         for (int j = 0; j + 1 < ny; j++)
             for (int i = 0; i + 1 < nx; i++)
@@ -416,19 +406,68 @@ public sealed partial class Stage3D
         arrays[(int)Mesh.ArrayType.TexUV] = rock;
         arrays[(int)Mesh.ArrayType.Custom0] = look;
         arrays[(int)Mesh.ArrayType.Index] = index;
+        long format = (long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom0Shift;
+        if (next is not null)
+        {
+            var at2 = new Vector3[n];
+            var normal2 = new Vector3[n];
+            var paint2 = new Color[n];
+            ReliefPoints(next, at2, normal2, paint2, new Vector2[n], new Vector2[n], new float[n * 4]);
+            var sunk = new float[n * 4];
+            var inked = new float[n * 4];
+            for (int p = 0; p < n; p++)
+            {
+                sunk[p * 4] = at2[p].Y;
+                sunk[p * 4 + 1] = normal2[p].X;
+                sunk[p * 4 + 2] = normal2[p].Z;
+                inked[p * 4] = paint2[p].R;
+                inked[p * 4 + 1] = paint2[p].G;
+                inked[p * 4 + 2] = paint2[p].B;
+                inked[p * 4 + 3] = paint2[p].A;
+            }
+            arrays[(int)Mesh.ArrayType.Custom1] = sunk;
+            arrays[(int)Mesh.ArrayType.Custom2] = inked;
+            format |= (long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom1Shift;
+            format |= (long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom2Shift;
+        }
         var mesh = new ArrayMesh();
-        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
-            (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat
-                               << (int)Mesh.ArrayFormat.FormatCustom0Shift));
-        _tops.Mesh = mesh;
-        _sides.Mesh = null;
-        _edges.Mesh = null;
-        BakeRelief(f);
-        _tops.MaterialOverride = ReliefTurf(f, art);
-        _glaze.MaterialOverride = null;
-        BuildFrame(f);
-        Roads(f);
-        Reeds(f);
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, (Mesh.ArrayFormat)format);
+        return mesh;
+    }
+
+    /// <summary>Each raster point's place, normal and paint for the mesh.</summary>
+    private void ReliefPoints(Relief f, Vector3[] at, Vector3[] normal, Color[] paint,
+                              Vector2[] levels, Vector2[] rock, float[] look)
+    {
+        int nx = f.Nx, ny = f.Ny;
+        float rise = RiseFactor;
+        float[] sand = f.Share[(int)Relief.Kind.Sand],
+                forest = f.Share[(int)Relief.Kind.Forest];
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++)
+            {
+                int p = j * nx + i;
+                float x = f.X0 + i * f.Cell + Origin.X, z = f.Z0 + j * f.Cell + Origin.Y / Squash;
+                at[p] = new Vector3(x, f.Height[p] / rise, z);
+                // on a rock, over two points either side: a wall is one or
+                // two points across, and the next point's height alone
+                // turned each facet of it its own way to the sun
+                int reach = f.Cliff[p] > 0.05f ? 2 : 1;
+                int i0 = Mathf.Max(i - reach, 0), i1 = Mathf.Min(i + reach, nx - 1);
+                int j0 = Mathf.Max(j - reach, 0), j1 = Mathf.Min(j + reach, ny - 1);
+                float hx = (f.Height[j * nx + i1] - f.Height[j * nx + i0]) / (2.0f * reach * f.Cell * rise);
+                float hz = (f.Height[j1 * nx + i] - f.Height[j0 * nx + i]) / (2.0f * reach * f.Cell * rise);
+                normal[p] = new Vector3(-hx, 1.0f, -hz).Normalized();
+                // what the ground is, for the shader: sand, rock, wood, and how
+                // far under the water it lies (the bed darker than the bank)
+                float under = Mathf.Clamp(-f.Shore[p] / (f.Cell * 4.0f), 0.0f, 1.0f);
+                paint[p] = new Color(sand[p], f.Cliff[p], forest[p], under);
+                // and how deep in a hollow it lies, for its shade (Relief.Hollow)
+                levels[p] = new Vector2(f.Levels[p] & 0xFFFFFF, f.Hollow[p]);
+                rock[p] = new Vector2(f.Rock[p], f.RockAux[p]);
+                for (int k = 0; k < 4; k++)
+                    look[p * 4 + k] = f.Look[k][p];
+            }
     }
 
     /// <summary>The board's frame (<see cref="Relief.Frame"/>); null until
@@ -1038,7 +1077,8 @@ void fragment() {
         Code = SoilShader
             .Replace("varying vec3 ground;", ReliefHead)
             .Replace("    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;",
-                     "    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;\n"
+                     TideSink
+                     + "    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;\n"
                      + "    ground_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
                      + "    ground_levels = int(UV2.x + 0.5);\n"
                      + "    ground_hollow = UV2.y;\n"
@@ -1046,11 +1086,47 @@ void fragment() {
                      + "    rock_aux = UV.y;\n"
                      + "    soil_look = CUSTOM0;")
             .Replace("    vec4 paint = texture(art, UV) * COLOR;", ReliefPaint)
-            .Replace("    ALBEDO = lit;", ReliefGrid),
+            .Replace("    ALBEDO = lit;", TideWet + ReliefGrid),
     };
+
+    /// <summary>The tide's rise in the ground's vertex (<see cref="TideBegin"/>):
+    /// each point from its old height, normal and paint to the new board's
+    /// (CUSTOM1, CUSTOM2) as the water reaches it - the arrival a texel a
+    /// point, read exact.</summary>
+    private const string TideSink = @"    if (tide_on > 0.5) {
+        vec2 tuv = ((MODEL_MATRIX * vec4(VERTEX, 1.0)).xz - tide_map.xy) * tide_map.zw;
+        ivec2 tsz = textureSize(tide_arrive, 0);
+        float ta = texelFetch(tide_arrive, clamp(ivec2(floor(tuv * vec2(tsz))), ivec2(0), tsz - 1), 0).r;
+        float ts = smoothstep(ta, ta + tide_fall, tide_t);
+        VERTEX.y = mix(VERTEX.y, CUSTOM1.x, ts);
+        vec3 tn = vec3(CUSTOM1.y, sqrt(max(0.0, 1.0 - CUSTOM1.y * CUSTOM1.y - CUSTOM1.z * CUSTOM1.z)), CUSTOM1.z);
+        NORMAL = normalize(mix(NORMAL, tn, ts));
+        COLOR = mix(COLOR, CUSTOM2, ts);
+    }
+";
+
+    /// <summary>The ground the water is about to take, darkened ahead of it:
+    /// soaked, <c>tide_lead</c> s before it goes under.</summary>
+    private const string TideWet = @"    if (tide_on > 0.5) {
+        vec2 tuv = (ground.xz - tide_map.xy) * tide_map.zw;
+        float ta = texture(tide_arrive, tuv).r;
+        lit *= mix(1.0, tide_dark, smoothstep(ta - tide_lead, ta, tide_t) * step(ta, 9000.0));
+    }
+";
 
     private const string ReliefHead = @"varying vec3 ground;
 varying vec3 ground_n;
+// The tide's rise (Stage3D.TideBegin): on while the sinking mesh is up; the
+// arrival per raster point (s, TideFront.Never where it stays), its corner
+// and one over its extent in world XZ, the clock, how long a point takes to
+// go under, how long ahead the ground darkens and how dark.
+uniform float tide_on = 0.0;
+uniform sampler2D tide_arrive : filter_nearest, repeat_disable;
+uniform vec4 tide_map = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float tide_t = 0.0;
+uniform float tide_fall = 0.7;
+uniform float tide_lead = 0.5;
+uniform float tide_dark = 0.6;
 varying flat int ground_levels;
 // How deep in a hollow (Relief.Hollow), and how much of the light that takes.
 varying float ground_hollow;

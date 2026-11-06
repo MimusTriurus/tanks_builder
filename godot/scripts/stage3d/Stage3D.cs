@@ -4910,6 +4910,19 @@ uniform float sparkle = 0.55;
 uniform float glint = 0.85;
 uniform float shore = 5.0;
 uniform float foam = 0.0;
+// The tide's front (Stage3D.TideBegin), on while the rise plays: the arrival
+// per raster point and its map (the ground's own), the clock, a point's fall,
+// how long the crest trails it, how far the crumple tears it (s) and when the
+// last point went under.
+uniform float tide_on = 0.0;
+uniform sampler2D tide_arrive : filter_nearest, repeat_disable;
+uniform vec4 tide_map = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float tide_t = 0.0;
+uniform float tide_fall = 0.7;
+uniform float tide_band = 0.4;
+uniform float tide_peak = 0.75;
+uniform float tide_tear = 0.15;
+uniform float tide_end = 100.0;
 uniform float foam_cut = {1};
 uniform float foam_rung = {3};
 uniform float foam_reach = 1.0;
@@ -5428,7 +5441,19 @@ void fragment() {{
     // every crest is the scratches this shader already refused once - what is over
     // the cut is the water a hull is standing in front of itself.
     float crest = smoothstep(wash_crest, wash_crest + wash_band, wsh);
-    float lane = max(max(trail, prow), crest) * mix(broken, 1.0, 0.55);
+    // And the tide's front (Stage3D.TideBegin): the water that reached this
+    // point a moment ago, a band of churned foam riding in over the ground as
+    // it goes under - in the lane for the lane's reason, and torn along the
+    // crumple so the front is tongues, not a contour.
+    float tide_crest = 0.0;
+    if (tide_on > 0.5) {{
+        float ta = texture(tide_arrive, (world.xz - tide_map.xy) * tide_map.zw).r;
+        float td = tide_t - ta + crumple(world.xz * edge_crumple.x, time) * tide_tear;
+        tide_crest = tide_peak * smoothstep(-0.04, 0.05, td)
+                   * (1.0 - smoothstep(tide_band * 0.3, tide_band, td))
+                   * (1.0 - smoothstep(0.0, 0.35, tide_t - tide_end));
+    }}
+    float lane = max(max(max(trail, prow), crest), tide_crest) * mix(broken, 1.0, 0.55);
     // Under cel the edges are not cut by the shred, only thinned by it: the
     // shred breaks the foam into patches, which faded in reads as foam on
     // moving water and stepped hard reads as a line with holes in it - the
@@ -5463,7 +5488,10 @@ void fragment() {{
         float hs = hex_side(world.xz);
         float lw = max(hex_w, length(fwidth(world.xz)));
         float line = 1.0 - smoothstep(lw, lw + max(fwidth(hs), 1e-4), hs);
-        col = mix(col, hex_color, line * hex_opacity);
+        // not over the tide's crest: dark ink on its white read as grey
+        // rails laid along the front
+        col = mix(col, hex_color, line * hex_opacity
+                                  * (1.0 - smoothstep(0.0, 0.3, tide_crest)));
     }}
 
     ALBEDO = col;

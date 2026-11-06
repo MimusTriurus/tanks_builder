@@ -337,7 +337,9 @@ public sealed partial class Tank3DBench
         // an ambush round waiting for its hull (Tank3DBench.Ambush)
         || _ambushDue.Count > 0
         // the rest of a move stopped for its shot (Tank3DBench.OnWay)
-        || _onWayRest is not null;
+        || _onWayRest is not null
+        // the tide's water coming in (Tank3DBench.Tide)
+        || _tideFront is not null;
 
     private bool MatchOver => _mt.Won is not null || _mt.Drawn;
 
@@ -699,6 +701,7 @@ public sealed partial class Tank3DBench
         PointDraw();
         // the ring the tide floods next (Tank3DBench.Tide)
         TideDraw();
+        TideAnim(dt);
         // the winch's pull (Tank3DBench.Gear)
         PullTick(dt);
         // the watchers out of the fight out of ambush (Tank3DBench.Ambush)

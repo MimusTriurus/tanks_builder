@@ -1611,6 +1611,18 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--no-ui") _noUi = true;
             else if (a == "--capture-at" && more) _captureAt = (int)F(args[++i], _captureAt);
             else if (a == "--edit-at" && more) _editAt = (int)F(args[++i], _editAt);
+            // --tide-at FRAME [EVERY]: the sea up a ring at that frame of the
+            // battle, and again every EVERY frames (Tank3DBench.Tide) - to look
+            // at a rise without playing ten quiet rounds to it
+            else if (a == "--tide-at" && more)
+            {
+                _tideAt = (int)F(args[++i], -1);
+                if (i + 1 < args.Length && int.TryParse(args[i + 1], out int every))
+                {
+                    _tideEvery = every;
+                    i++;
+                }
+            }
             else if (a == "--parked") _parkedWanted = true;
             // --sequence DIR FROM TO [STEP]: every STEP-th frame in between, for
             // looking at motion rather than at one moment of it.
