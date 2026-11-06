@@ -137,6 +137,13 @@ public static class AiMoves
                         BattleState s1 = Copy(s);
                         if (Battle.Move(s1, route.Cells(), face, route.Back) is not null)
                             continue;
+                        // no drive that takes its own hull out - into deep water,
+                        // on to a mine: the threat map counts a hull under several
+                        // guns once per gun, so drowning the most exposed one
+                        // scored above keeping it - on duel12 nearly every match
+                        // lost a tank to the sea by round 3 (2026-11-06)
+                        if (s1.Unit(_id)!.Fate != UnitFate.Alive)
+                            continue;
                         head.Add(new Order(OrderKind.Go, cell, face == route.End.Heading ? -1 : face));
                         After(s1, head, attacked);
                         head.RemoveAt(head.Count - 1);
