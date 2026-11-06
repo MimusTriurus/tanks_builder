@@ -2757,7 +2757,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (key.Keycode == Key.J)
                 Execute(new Command(CommandKind.Douse));
             // 1 to 9, the bench's hits, press the action panel's buttons and F1 to F8 take the roster's units
-            // (Tank3DBench.Acts); the hints, the overlay and Edit move to F9-F11
+            // (Tank3DBench.Acts); the forced tide, the overlay and Edit are F9-F11
             else
                 ActKey(key.Keycode);
             return;
@@ -2782,7 +2782,9 @@ public sealed partial class Tank3DBench : Node3D
             // the status and controls text on and off (HudText; in a match
             // with both sides' line, Tank3DBench.Match)
             case Key.F1: _hints = !_hints; break;
-            case Key.F9 when Match: _hints = !_hints; break;
+            // the sea up a ring now, no stalemate waited for (Tank3DBench.Tide);
+            // the hints took F9 before and have no key in a match since
+            case Key.F9 when Match: TideForce(); break;
             case Key.F10 when Match: TogglePerf(); break;
             case Key.F11 when Match: Edit(); break;
             // the relief's hex grid on and off (Stage3D.Relief); no free single key left

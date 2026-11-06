@@ -400,6 +400,23 @@ public sealed partial class Tank3DBench
                      .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
     }
 
+    /// <summary>F9 in a match: the sea up a ring now, as <c>--tide-at</c>
+    /// does - the stalemate's clock not waited for; nothing while a rise
+    /// plays, a turn's work is on or the sides are placing.</summary>
+    private void TideForce()
+    {
+        if (!_tideOn)
+        {
+            Log.Print("tank3d: match: F9 - no tide on this board (no sea round it, or --ramps)");
+            return;
+        }
+        // not over the placement either: the sides' rows stand at the sea
+        if (_tideFront is not null || MatchOver || MatchBusy || Deploying)
+            return;
+        Log.Print($"tank3d: match: F9 - the sea up a ring now, round {_mt.Round}");
+        TideRise();
+    }
+
     /// <summary>A frame of a match: the rise's clock, what is due, the spray;
     /// at the end the board's own mesh and ground back.</summary>
     private void TideAnim(float dt)
