@@ -647,6 +647,14 @@ public static partial class Battle
     private static void Strike(BattleState s, BattleUnit hit, int heading, int might, int fromLevel,
                                bool glance, bool through, bool fiery = false)
     {
+        // a drowned hull is under the water: the round goes into it, no hit on
+        // a tank - nothing to blow up, the stalemate's clock not put back
+        // (states.md, «Утоплен», 2026-11-06)
+        if (hit.Fate == UnitFate.Drowned)
+        {
+            s.Events.Add(new BattleEvent(BattleEventKind.Spent, -1, hit.Cell, heading, "water"));
+            return;
+        }
         s.LastStrike = s.Round;
         if (hit.Out)
         {
@@ -690,7 +698,8 @@ public static partial class Battle
     /// hull it knocks out as any bomb, there is nothing it does not pierce.</summary>
     private static void Lob(BattleState s, Vector2I aim, bool fiery = false)
     {
-        if (s.At(aim) is { } hit)
+        // a drowned hull is no target (states.md, «Утоплен»): the bomb is the water's
+        if (s.At(aim) is { } hit && hit.Fate != UnitFate.Drowned)
         {
             s.LastStrike = s.Round;
             s.Events.Add(new BattleEvent(BattleEventKind.Hit, hit.Id, aim, 5, "Roof"));
@@ -1712,7 +1721,9 @@ public static partial class Battle
     /// </summary>
     private static void Explode(BattleState s, BattleUnit u)
     {
-        if (u.Fate == UnitFate.Destroyed)
+        // a drowned hull does not go up: not to a round, not in a chain
+        // (states.md, «Утоплен», 2026-11-06)
+        if (u.Fate is UnitFate.Destroyed or UnitFate.Drowned)
             return;
         u.Fate = UnitFate.Destroyed;
         s.Harmed(u);

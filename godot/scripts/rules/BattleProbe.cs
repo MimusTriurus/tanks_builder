@@ -167,6 +167,9 @@ public static partial class Battle
 
         private void Strike(BattleUnit hit, int i, int heading, int might, int fromLevel, bool glance)
         {
+            // a drowned hull: the round goes into the water (Battle.Strike)
+            if (hit.Fate == UnitFate.Drowned)
+                return;
             if (Out(hit, i))
             {
                 Explode(hit, i);
@@ -186,7 +189,7 @@ public static partial class Battle
 
         private void Explode(BattleUnit u, int i)
         {
-            if (_marks[i] == ProbeGone)
+            if (_marks[i] == ProbeGone || u.Fate == UnitFate.Drowned)
                 return;
             _marks[i] = ProbeGone;
             if (!_full)
@@ -219,7 +222,7 @@ public static partial class Battle
 
         public void Lob(Vector2I aim)
         {
-            if (At(aim, out int i) is not { } hit)
+            if (At(aim, out int i) is not { } hit || hit.Fate == UnitFate.Drowned)
                 return;
             if (Out(hit, i))
                 Explode(hit, i);
