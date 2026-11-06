@@ -21,6 +21,8 @@ public sealed class AiThreat
     private int[] _marks = new int[32];
     private readonly Dictionary<(int Id, Vector2I Cell, int Heading, long Board), Steps.Reach> _reach = new();
     private readonly List<Vector2I> _poses = new();
+    private double[] _onTarget = new double[32], _pair = new double[256];
+    private bool[] _usedBy = new bool[32], _usedOn = new bool[32];
     private static readonly Func<BattleUnit, double> Value = AiEval.Value;
 
     /// <summary>Plans asked of the cache, and how many it had.</summary>
@@ -31,27 +33,69 @@ public sealed class AiThreat
     public AiThreat(bool full) => _full = full;
 
     /// <summary>The best single activation of <paramref name="side"/>'s
-    /// units: its worth, and the sum of the other units' best.</summary>
+    /// units: its worth, and what the others take besides. A target is
+    /// knocked out once, so the others are dealt greedily - the best pair of
+    /// unit and target first, each unit and each target used once; before,
+    /// three guns on one hull counted it three times.</summary>
     public (double Worst, double Others) Of(BattleState s, Camp side)
     {
-        double worst = 0.0, sum = 0.0;
-        foreach (BattleUnit e in s.Units)
+        int n = s.Units.Count;
+        if (_pair.Length < n * n)
+            _pair = new double[n * n * 2];
+        if (_usedBy.Length < n)
         {
-            if (e.Side != side || e.Fate != UnitFate.Alive)
-                continue;
-            double g = Gain(s, e);
-            sum += g;
-            worst = Math.Max(worst, g);
+            _usedBy = new bool[n * 2];
+            _usedOn = new bool[n * 2];
         }
-        return (worst, sum - worst);
+        for (int i = 0; i < n; i++)
+        {
+            _usedBy[i] = _usedOn[i] = false;
+            BattleUnit e = s.Units[i];
+            if (e.Side != side || e.Fate != UnitFate.Alive)
+            {
+                _usedBy[i] = true;
+                continue;
+            }
+            Gain(s, e);
+            for (int j = 0; j < n; j++)
+                _pair[i * n + j] = _onTarget[j];
+        }
+        double worst = 0.0, others = 0.0;
+        for (bool first = true; ; first = false)
+        {
+            int bi = -1, bj = -1;
+            double best = 0.0;
+            for (int i = 0; i < n; i++)
+            {
+                if (_usedBy[i])
+                    continue;
+                for (int j = 0; j < n; j++)
+                    if (!_usedOn[j] && _pair[i * n + j] > best)
+                    {
+                        best = _pair[i * n + j];
+                        bi = i;
+                        bj = j;
+                    }
+            }
+            if (bi < 0)
+                break;
+            _usedBy[bi] = _usedOn[bj] = true;
+            if (first)
+                worst = best;
+            else
+                others += best;
+        }
+        return (worst, others);
     }
 
     /// <summary>What <paramref name="e"/>'s side gains by its best shot or
-    /// ram in one activation.</summary>
+    /// ram in one activation; per target in <see cref="_onTarget"/>.</summary>
     public double Gain(BattleState s, BattleUnit e)
     {
         if (_marks.Length < s.Units.Count)
             _marks = new int[s.Units.Count * 2];
+        if (_onTarget.Length < s.Units.Count)
+            _onTarget = new double[s.Units.Count * 2];
         _poses.Clear();
         _poses.Add(e.Cell);
         if (!e.Pinned)
@@ -60,10 +104,13 @@ public sealed class AiThreat
         int lobReach = Gunnery.LobReachOf(e.Kit);
         bool two = (e.Kit & Kit.PushTwo) != 0;
         double best = 0.0;
-        foreach (BattleUnit t in s.Units)
+        for (int j = 0; j < s.Units.Count; j++)
         {
+            BattleUnit t = s.Units[j];
+            _onTarget[j] = 0.0;
             if (t.Side == e.Side || !t.Standing)
                 continue;
+            double on = 0.0;
             foreach (Vector2I c in _poses)
             {
                 if (!HexField.OnAxis(c, t.Cell))
@@ -72,10 +119,12 @@ public sealed class AiThreat
                 if (heading < 0 || Gunnery.MayTarget(e.Class.Lobs, range, true, lobReach) != Gunnery.Distance.Fits)
                     continue;
                 Battle.Probe(s, e, c, heading, t.Cell, _marks, _full);
-                best = Math.Max(best, Battle.ProbeGain(s, _marks, e.Side, Value, AiEval.AlightShare, AiEval.OutShare));
+                on = Math.Max(on, Battle.ProbeGain(s, _marks, e.Side, Value, AiEval.AlightShare, AiEval.OutShare));
             }
             if (t.Fate == UnitFate.Alive)
-                best = Math.Max(best, RamGain(s, e, t, two));
+                on = Math.Max(on, RamGain(s, e, t, two));
+            _onTarget[j] = on;
+            best = Math.Max(best, on);
         }
         return best;
     }

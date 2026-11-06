@@ -43,7 +43,8 @@ public static class AiEval
     /// guns of several is a bad one even when only one fires next («перебежка»
     /// от укрытия к укрытию, docs/ai-plan.md, И4). Others was 0.1; at 0.3 the
     /// fighter won 33:21 against it, the veteran 20:6 (2026-11-05); 0.5 was
-    /// worse than 0.3.</summary>
+    /// worse than 0.3. Others counts each target once since 2026-11-06; 0.45
+    /// and 0.6 then measured within noise of 0.3.</summary>
     private const double Worst = 0.9, Others = 0.3;
     /// <summary>Our own best activation after: the initiative, the enemy's turn between.</summary>
     private const double Initiative = 0.25;
