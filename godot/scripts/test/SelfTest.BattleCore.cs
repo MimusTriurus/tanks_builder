@@ -707,6 +707,64 @@ public static partial class SelfTest
                   $"plain: {Said(plain)}; forced: {Said(forced)}; stopped: {Said(stopped)}; after the move: {late}");
         }
 
+        // match.md «Структура хода», п. 2 (2026-11-07): the dash. Said before
+        // the move, it gives up the attack for speed × 1.5 up - LT 8, MT and
+        // TD 6, HT and HM 5. A green medium at (4,9) dashes six hexes up the
+        // column to (4,3) and rams the brown light at (4,2): no shot, no
+        // ambush after it, the turn kept for the move; not without the rule,
+        // not after the move, not after the shot; with the forced engine yes,
+        // with the shot on the move no.
+        {
+            static BattleState Dashing(string tag, Kit kit = Kit.None, bool on = true)
+            {
+                BattleState t = Probe(9, 10);
+                t.DashOn = on;
+                Put(t, 0, tag, Camp.Green, 4, 9, 90, kit: kit);
+                Put(t, 1, "LTR", Camp.Brown, 4, 2, 270);
+                Battle.Take(t, 0);
+                return t;
+            }
+            static int Budget(BattleState t) => Battle.MoverOf(t, t.Unit(0)!).Speed;
+            var budgets = new List<string>();
+            bool speeds = true;
+            foreach ((string tag, int plain, int dash) in new[] { ("LTR", 5, 8), ("MTR", 4, 6), ("TDR", 4, 6), ("HTR", 3, 5), ("HMR", 3, 5) })
+            {
+                BattleState t = Dashing(tag);
+                int before = Budget(t);
+                string? said = Battle.Dash(t);
+                int after = Budget(t);
+                budgets.Add($"{tag} {before}->{after}{(said is null ? "" : $" ({said})")}");
+                speeds &= said is null && before == plain && after == dash;
+            }
+            BattleState m = Dashing("MTR");
+            string? dashed = Battle.Dash(m);
+            bool kept = !Battle.TurnDone(m);
+            string? shot = Battle.Fire(m, new Vector2I(4, 2));
+            string? ambush = Battle.Ambush(m, 90);
+            var up = new List<Vector2I>();
+            for (int r = 8; r >= 3; r--)
+                up.Add(new Vector2I(4, r));
+            string? went = Battle.Move(m, up, -1);
+            Vector2I reached = m.Unit(0)!.Cell;
+            string? rammed = Battle.Ram(m, new Vector2I(4, 2));
+            BattleState off = Dashing("MTR", on: false), moved = Dashing("MTR"), lt = Dashing("LTR"),
+                        forced = Dashing("MTR", Kit.Overdrive), onWay = Dashing("LTR", Kit.FireOnMove);
+            string? noRule = Battle.Dash(off);
+            Battle.Move(moved, new[] { new Vector2I(4, 8) }, -1);
+            string? late = Battle.Dash(moved);
+            lt.Fired = true;  // LT's free order: its shot already had before the move
+            string? afterShot = Battle.Dash(lt);
+            string? both = Battle.Overdrive(forced) ?? Battle.Dash(forced);
+            string? noOnWay = Battle.Dash(onWay) is { } d ? $"dash: {d}" : Battle.OnTheWay(onWay, new Vector2I(4, 6), new Vector2I(4, 2));
+            check("the dash: speed × 1.5 up, said before the move; no shot or ambush after it, the ram yes; not without the rule, after the move or the shot; with the forced engine, not with the shot on the move",
+                  speeds && dashed is null && kept && shot is not null && ambush is not null && went is null && reached == new Vector2I(4, 3)
+                  && rammed is null && m.Unit(0)!.Cell == new Vector2I(4, 2) && m.Unit(1)!.Cell == new Vector2I(4, 1)
+                  && noRule is not null && late is not null && afterShot is not null
+                  && both is null && Budget(forced) == 6 && noOnWay is not null && !noOnWay.StartsWith("dash:"),
+                  $"budgets {string.Join(", ", budgets)}; dash {dashed}, kept {kept}, shot {shot}, ambush {ambush}, move {went}, ram {rammed} ({Said(m)}); "
+                  + $"no rule {noRule}; after the move {late}; LT after its shot {afterShot}; with the forced engine {both}; the shot on the move {noOnWay}");
+        }
+
         // upgrades.md «Выстрел на ходу» (2026-11-02): a green light drives up
         // the column from (4,8) to (4,4) and fires at a brown medium three hexes
         // off (4,6) on its 30 axis - on no axis from the start or the end. The

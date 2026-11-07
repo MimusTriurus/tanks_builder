@@ -46,9 +46,11 @@ public sealed class AiPlay
 /// attack - a shot or an incendiary at each enemy on an axis in range, or an
 /// ambush toward the nearest enemy; the bonus act - putting a fire out,
 /// ramming an enemy beside, the repair kit on an own unit out of the fight.
-/// LT may shoot first and move after. Doing nothing is always a play.
+/// LT may shoot first and move after. The dash (match.md, п. 2), where the
+/// rules have it, only to the cells the plain move does not reach: there the
+/// same move with its attack given up is never better. Doing nothing is always a play.
 /// Not yet: the risk-wise way of equal cost, mines, the winch,
-/// the double turn, the forced engine, the shot on the move, the wall's ram.
+/// the double turn, the wall's ram.
 /// </summary>
 public static class AiMoves
 {
@@ -92,6 +94,20 @@ public static class AiMoves
                     head.RemoveAt(head.Count - 1);
                 }
             }
+            // the dash, said before the move: only beyond the plain reach
+            if (root.DashOn)
+            {
+                BattleState sd = Copy(s0);
+                if (Battle.Dash(sd) is null)
+                {
+                    BattleUnit su = s0.Unit(u.Id)!;
+                    var near = new HashSet<Vector2I>(Steps.Plan(s0.Board, new Steps.Pose(su.Cell, su.Heading),
+                                                                Battle.MoverOf(s0, su)).Cells.Keys);
+                    head.Add(new Order(OrderKind.Dash));
+                    gen.Moves(sd, head, attacked: true, beyond: near);
+                    head.RemoveAt(head.Count - 1);
+                }
+            }
             gen.Moves(s0, head, attacked: false);
             n += gen.Count;
         }
@@ -128,8 +144,10 @@ public static class AiMoves
             _visit = visit;
         }
 
-        /// <summary>Every move from <paramref name="s"/> (owned: used up), then what follows it.</summary>
-        public void Moves(BattleState s, List<Order> head, bool attacked)
+        /// <summary>Every move from <paramref name="s"/> (owned: used up), then
+        /// what follows it; with <paramref name="beyond"/> (the dash) only the
+        /// moves to cells outside it - no turn on the spot, no standing still.</summary>
+        public void Moves(BattleState s, List<Order> head, bool attacked, HashSet<Vector2I>? beyond = null)
         {
             BattleUnit u = s.Unit(_id)!;
             if (!s.Drove && !u.Pinned && u.Fate == UnitFate.Alive && !s.Over)
@@ -137,6 +155,8 @@ public static class AiMoves
                 Steps.Reach reach = Steps.Plan(s.Board, new Steps.Pose(u.Cell, u.Heading), Battle.MoverOf(s, u));
                 foreach (Vector2I cell in reach.Cells.Keys)
                 {
+                    if (beyond is not null && beyond.Contains(cell))
+                        continue;
                     if (reach.RouteTo(cell) is not { } route)
                         continue;
                     foreach (int face in Faces(s, u, route, reach))
@@ -165,6 +185,8 @@ public static class AiMoves
                 // a turn on the spot: a casemate to any side, a turret to the enemy
                 foreach (int face in HexField.EdgeHeadings)
                 {
+                    if (beyond is not null)
+                        break;
                     if (face == u.Heading || (u.Class.Turreted && face != Toward(s, u, u.Cell)))
                         continue;
                     BattleState s1 = Copy(s);
@@ -175,7 +197,8 @@ public static class AiMoves
                     head.RemoveAt(head.Count - 1);
                 }
             }
-            After(s, head, attacked);
+            if (beyond is null)
+                After(s, head, attacked);
         }
 
         /// <summary>

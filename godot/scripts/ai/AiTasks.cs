@@ -305,6 +305,96 @@ public static class AiTasks
             s.Unit(0)!.Pinned = s.Unit(1)!.Pinned = true;
             return s;
         }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive);
+
+        // 23. the dash off the tide's ring (match.md, п. 2): the sea down the
+        // left column, a tongue of deep water beside it, the heavy on the ring
+        // the sea floods at this round's end - in the first pose whose plain
+        // three steps reach no dry hex and the dash's five do (the rings run
+        // as the tide does, through the deep water joined to the sea, so the
+        // pose is searched, not drawn by hand)
+        yield return ("HT dashes off the ring the tide floods", () =>
+        {
+            var deep = new List<Vector2I>();
+            for (int r = 0; r < Rows; r++)
+                deep.Add(new Vector2I(0, r));
+            for (int r = 4; r < Rows; r++)
+                deep.Add(new Vector2I(2, r));
+            // the land a level over the sea: a flat board at the sea's level
+            // goes under whole at the first rise, as in vessels joined
+            var levels = new int[Columns * Rows];
+            Array.Fill(levels, 1);
+            foreach (Vector2I d in deep)
+                levels[d.Y * Columns + d.X] = 0;
+            // the enemy in the far corner behind woods: no round to fire instead
+            Vector2I corner = new(Columns - 1, Rows - 1);
+            var woods = new List<Vector2I>();
+            foreach (int h in HexField.EdgeHeadings)
+                if (HexField.Step(corner, h) is var w && w.X >= 0 && w.X < Columns && w.Y >= 0 && w.Y < Rows)
+                    woods.Add(w);
+            BattleState s = Board(woods: woods.ToArray(), deep: deep.ToArray(), levels: levels);
+            s.DashOn = true;
+            s.Tide = true;
+            s.TideStep = 1;
+            Put(s, 1, "LTR", Camp.Brown, corner.X, corner.Y, 270);
+            s.Unit(1)!.Pinned = true;
+            Put(s, 0, "HTR", Camp.Green, 1, 1, 90);
+            BattleUnit hull = s.Unit(0)!;
+            bool DryIn(bool dash)
+            {
+                s.Active = 0;
+                s.Dash = dash;
+                Steps.Reach reach = Steps.Plan(s.Board, new Steps.Pose(hull.Cell, hull.Heading), Battle.MoverOf(s, hull));
+                s.Active = null;
+                s.Dash = false;
+                foreach (Vector2I c in reach.Cells.Keys)
+                    if (!s.Board.IsDeep(c) && s.Ring(c) - s.TideLevel >= 2)
+                        return true;
+                return false;
+            }
+            for (int r = 0; r < Rows; r++)
+                for (int q = 1; q < Columns; q++)
+                {
+                    var c = new Vector2I(q, r);
+                    if (s.Board.IsDeep(c) || s.Ring(c) != 1 || s.At(c) is not null)
+                        continue;
+                    hull.Cell = c;
+                    foreach (int h in HexField.EdgeHeadings)
+                    {
+                        hull.Heading = h;
+                        if (!DryIn(false) && DryIn(true))
+                            return s;
+                    }
+                }
+            var map = new System.Text.StringBuilder();
+            for (int r = 0; r < Rows; r++)
+            {
+                for (int q = 0; q < Columns; q++)
+                    map.Append(s.Board.IsDeep(new Vector2I(q, r)) ? " D" : $" {s.Ring(new Vector2I(q, r))}");
+                map.Append(" |");
+            }
+            throw new InvalidOperationException($"no pose on the ring that only the dash leaves:{map}");
+        }, (_, a) => a.Unit(0)!.Fate == UnitFate.Alive && !a.Board.IsDeep(a.Unit(0)!.Cell) && a.Ring(a.Unit(0)!.Cell) >= 2
+                     && a.Events.Exists(e => e.Kind == BattleEventKind.Dash));
+
+        // 24. the dash and the ram (match.md, п. 2): the light tank in a
+        // corridor of woods, a mine behind it, smoke on the hex before it -
+        // no round reaches it; the medium's plain four steps stop a hex
+        // short, the dash's six bring it on to ram
+        yield return ("MT dashes in and rams the enemy LT back on to a mine", () =>
+        {
+            Vector2I at = new(4, 3);
+            var woods = new List<Vector2I>();
+            foreach (int h in new[] { 30, 150, 210, 330 })
+                woods.Add(HexField.Step(at, h));
+            BattleState s = Board(woods: woods.ToArray(), mines: new[] { HexField.Step(at, 90) });
+            Vector2I front = HexField.Step(at, 270);
+            s.Board.SetSmoke(front, true);
+            s.Smoke[front] = 2;
+            s.DashOn = true;
+            Put(s, 0, "MTR", Camp.Green, 4, 9, 90);
+            Put(s, 1, "LTR", Camp.Brown, at.X, at.Y, 270);
+            return s;
+        }, (_, a) => a.Unit(1)!.Fate != UnitFate.Alive && a.Events.Exists(e => e.Kind == BattleEventKind.Dash));
     }
 
     /// <summary>Problems a turn does not settle: green's play, the enemy's
