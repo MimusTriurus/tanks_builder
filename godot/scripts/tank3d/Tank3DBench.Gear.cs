@@ -480,6 +480,55 @@ public sealed partial class Tank3DBench
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} says the forced engine - ambushes fire only where it stops");
     }
 
+    /// <summary>Why the dash may not be said now, or empty: the turn's gates,
+    /// then the core's own (<see cref="Battle.Dash"/>).</summary>
+    private string DashWhy()
+    {
+        if (_field is null || _lineup.Count == 0)
+            return L.T("gear.why_no_match");
+        if (_fate != Fate.Alive)
+            return L.T("gear.why_out", _modelTag);
+        if (_side != _mt.Turn)
+            return L.T("gear.why_turn", SideName(_mt.Turn));
+        if (!_dashOn)
+            return L.T("dash.why_off");
+        if (_mt.Dash)
+            return L.T("dash.why_said");
+        if (_mt.Drove)
+            return L.T("dash.why_moved");
+        if (MatchShotSpent || _onWayMode)
+            return L.T("dash.why_shot");
+        if (MatchBusy)
+            return L.T("blast.busy");
+        return Battle.Dash(ShadowOfBench()) switch
+        {
+            null => "",
+            "pinned by a ram blade" => L.T("match.pinned_no_move", _modelTag),
+            "only LT moves after acting" => L.T("match.no_move_after_act"),
+            { } no => no,
+        };
+    }
+
+    /// <summary>The dash said (the command's executor): the attack spent, the
+    /// move still to make with the longer budget - the zone grows at once
+    /// (<see cref="RigMover"/>), the click the move's.</summary>
+    private void DashGo()
+    {
+        if (DashWhy() is { Length: > 0 } no)
+        {
+            _orderNote = no;
+            return;
+        }
+        ShadowAct("dash", s => Battle.Dash(s));
+        _mt.Fired = true;
+        _mt.Dash = true;
+        _fieryMode = _smokeShotMode = false;
+        MoveOn();
+        int steps = RigMover().Speed;
+        _orderNote = L.T("dash.on", steps);
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag}#{_unitId} dashes - no attack this turn, {steps} steps");
+    }
+
     /// <summary>Why the double turn to <paramref name="side"/> may not be had
     /// now, or empty: the gates of a kit act, then the core's own.</summary>
     private string PivotWhy(int side) =>

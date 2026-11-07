@@ -109,6 +109,8 @@ public sealed partial class Tank3DBench
     /// <see cref="_reachVersion"/> counts the searches, for the keys that
     /// build on it (<c>Post</c>, <c>RamPlan</c>).</summary>
     private Vector2I _reachHere = new(int.MinValue, int.MinValue);
+    /// <summary>The reach was planned with the dash's budget (<see cref="RigMover"/>).</summary>
+    private bool _reachDash;
     private int _reachSide = int.MinValue;
     private HashSet<Vector2I> _reachBarred = new();
     private readonly HashSet<Vector2I> _barredNow = new();
@@ -185,11 +187,13 @@ public sealed partial class Tank3DBench
         Vector2I here = CellHere;
         int side = HullSide();
         FillBarred(_barredNow);
-        bool fresh = here != _reachHere || side != _reachSide || !_barredNow.SetEquals(_reachBarred);
+        bool dash = Match && _mt.Dash;
+        bool fresh = here != _reachHere || side != _reachSide || dash != _reachDash || !_barredNow.SetEquals(_reachBarred);
         if (fresh)
         {
             _reachHere = here;
             _reachSide = side;
+            _reachDash = dash;
             // a set of its own: the search keeps it
             _reachBarred = new HashSet<Vector2I>(_barredNow);
             _reachVersion++;

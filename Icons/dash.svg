@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>dash_3_chevrons</title>
+  <g id="shadow" transform="translate(2.5 2.5)" fill="none" stroke="#16130f" stroke-width="11.8" stroke-linecap="round" stroke-linejoin="round">
+    <path id="c1_shadow" d="M 9 18 L 22 32 L 9 46"/>
+    <path id="c2_shadow" d="M 24 18 L 37 32 L 24 46"/>
+    <path id="c3_shadow" d="M 39 18 L 52 32 L 39 46"/>
+  </g>
+  <g id="ink" fill="none" stroke="#16130f" stroke-width="11.8" stroke-linecap="round" stroke-linejoin="round">
+    <path id="c1_ink" d="M 9 18 L 22 32 L 9 46"/>
+    <path id="c2_ink" d="M 24 18 L 37 32 L 24 46"/>
+    <path id="c3_ink" d="M 39 18 L 52 32 L 39 46"/>
+  </g>
+  <g id="fill" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path id="c1" d="M 9 18 L 22 32 L 9 46" stroke="#2d6aa8"/>
+    <path id="c2" d="M 24 18 L 37 32 L 24 46" stroke="#3d7dc2"/>
+    <path id="c3" d="M 39 18 L 52 32 L 39 46" stroke="#4f8fd8"/>
+  </g>
+  <path id="c3_lit" d="M 40.5 20.5 L 49 29.5" fill="none" stroke="#cfe6ff" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

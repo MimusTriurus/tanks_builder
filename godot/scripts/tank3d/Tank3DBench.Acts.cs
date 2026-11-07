@@ -49,7 +49,7 @@ public sealed partial class Tank3DBench
 {
     private HBoxContainer? _acts;
     private PanelContainer? _groupMove, _groupAttack, _groupBonus;
-    private Button? _actMove, _actAttack, _actRam, _actDouse, _actOverdrive;
+    private Button? _actMove, _actAttack, _actRam, _actDouse, _actOverdrive, _actDash;
     /// <summary>«Атака» on: the left button on a tank fires, and ours may be fired on.</summary>
     private bool _attackMode;
     /// <summary>The bonus group's buttons in their order, and what each does
@@ -123,6 +123,8 @@ public sealed partial class Tank3DBench
         _actSmokeShot = ActButton(attack, "smoke_shell", L.T("acts.smoke_shell"), "", toggle: true, SmokeShotToggle);
         // the shot on the move (upgrades.md, Tank3DBench.OnWay): said before the move, no key
         _actOnWay = ActButton(attack, "fire_on_move", L.T("acts.fire_on_move"), "", toggle: true, OnWayToggle);
+        // the dash (match.md, p. 2): the attack given up for the longer move, said at once, no key
+        _actDash = ActButton(attack, "dash", L.T("acts.dash"), "", toggle: false, () => Execute(new Command(CommandKind.Dash)));
         HBoxContainer bonus;
         (_groupBonus, bonus) = Group(GroupShape.Triangle, Ui.Extra);
         // a tank or the wall ahead (Д5): a mode, the click says which
@@ -686,6 +688,7 @@ public sealed partial class Tank3DBench
         ActOn(_actFiery!, attack);
         ActOn(_actSmokeShot!, attack);
         ActOn(_actOnWay!, attack && !_mt.Drove);
+        ActOn(_actDash!, attack && move && !_onWayMode);
         for (int i = 0; i < _bonusActs.Count; i++)
             ActOn(_bonusActs[i].Button, bonus && !(_mt.Drove && _bonusActs[i].Button == _actOverdrive));
         _actAttack!.SetPressedNoSignal(attack && _attackMode);
@@ -696,6 +699,7 @@ public sealed partial class Tank3DBench
         _actSmokeShot.SetPressedNoSignal(attack && _smokeShotMode);
         _actOnWay!.Visible = RigFiresOnMove;
         _actOnWay.SetPressedNoSignal(attack && _onWayMode);
+        _actDash!.Visible = _dashOn;
         _actRam!.SetPressedNoSignal(bonus && _ramMode);
         _actSmoke!.Visible = RigSmokes;
         _actSmoke.SetPressedNoSignal(bonus && _smokeMode);

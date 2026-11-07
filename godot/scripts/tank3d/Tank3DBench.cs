@@ -1611,6 +1611,8 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--heading" && more) _heading = F(args[++i], _heading);
             else if (a == "--capture" && more) _capturePath = args[++i];
             else if (a == "--no-ui") _noUi = true;
+            // the dash in the match's rules (match.md, p. 2; a trial, docs/ai-plan.md)
+            else if (a == "--dash") _dashOn = true;
             else if (a == "--capture-at" && more) _captureAt = (int)F(args[++i], _captureAt);
             else if (a == "--edit-at" && more) _editAt = (int)F(args[++i], _editAt);
             // --tide-at FRAME [EVERY]: the sea up a ring at that frame of the

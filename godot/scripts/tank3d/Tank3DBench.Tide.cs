@@ -31,6 +31,9 @@ public sealed partial class Tank3DBench
 {
     /// <summary>The tide plays: a match on the relief, the sea round it.</summary>
     private bool _tideOn;
+    /// <summary>The dash is in the match's rules (<c>--dash</c>, <see cref="BattleState.DashOn"/>):
+    /// a trial, beside the tide it answers.</summary>
+    private bool _dashOn;
     /// <summary>The moated map whose arrays the field holds - flooded in place.</summary>
     private BoardMap? _tideMap;
     /// <summary>Each cell's rise (<see cref="Battle.Rings"/>), the sea's level.</summary>

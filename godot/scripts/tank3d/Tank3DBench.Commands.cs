@@ -34,7 +34,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot, OnWay }
+    private enum CommandKind { Take, Go, Turn, Fire, Burn, Ram, RamWall, Ambush, Smoke, Mine, Repair, Winch, Douse, Pass, Undo, Place, Ready, Pivot, Overdrive, SmokeShot, OnWay, Dash }
 
     /// <summary>A command: what, and its hex (bench cells), side (a world
     /// heading of <see cref="HexField.EdgeHeadings"/>, -1 for none) or unit;
@@ -117,6 +117,8 @@ public sealed partial class Tank3DBench
                 return _fate != Fate.Alive ? L.T("commands.why_out", _modelTag) : PivotWhy(c.Side);
             case CommandKind.Overdrive:
                 return OverdriveWhy();
+            case CommandKind.Dash:
+                return DashWhy();
             case CommandKind.OnWay:
                 if (_fate != Fate.Alive)
                     return L.T("commands.why_out", _modelTag);
@@ -218,6 +220,9 @@ public sealed partial class Tank3DBench
                 break;
             case CommandKind.Overdrive:
                 OverdriveGo();
+                break;
+            case CommandKind.Dash:
+                DashGo();
                 break;
             case CommandKind.OnWay:
                 // the clicks' picks, made at once: the next go is the move (OnWayClick)
@@ -369,6 +374,7 @@ public sealed partial class Tank3DBench
                 "douse" => new Command(CommandKind.Douse),
                 "pivot" => new Command(CommandKind.Pivot, Side: int.Parse(parts[1])),
                 "overdrive" => new Command(CommandKind.Overdrive),
+                "dash" => new Command(CommandKind.Dash),
                 "onway" => new Command(CommandKind.OnWay, Cell(parts[1]), Aim: Cell(parts[2])),
                 "pass" => new Command(CommandKind.Pass),
                 "undo" => new Command(CommandKind.Undo),

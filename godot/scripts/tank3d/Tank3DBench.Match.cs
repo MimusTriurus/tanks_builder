@@ -96,6 +96,9 @@ public sealed partial class Tank3DBench
         public bool Drove, Fired, Bonus;
         /// <summary>The forced engine said this turn (<see cref="BattleState.Overdrive"/>).</summary>
         public bool Overdrive;
+        /// <summary>The dash said this turn (<see cref="BattleState.Dash"/>):
+        /// the attack given up, the move the longer one.</summary>
+        public bool Dash;
         /// <summary>The round of the last shot at a tank, nought for none -
         /// the stalemate's clock (Tank3DBench.Rules, Д6).</summary>
         public int LastStrike;
@@ -250,8 +253,14 @@ public sealed partial class Tank3DBench
     /// <summary>How the unit on the rig moves: its class, its wading gear and
     /// what else its kit says of driving (upgrades.md, Д8: the trawl, wide
     /// tracks, the reverse gear, the double turn - <see cref="Steps.Kitted"/>).</summary>
-    private Steps.Mover RigMover(IReadOnlySet<Vector2I>? barred = null) =>
-        Steps.Kitted(Steps.Mover.Of(_profile, RigSnorkel, barred), KitOf(_unitId));
+    private Steps.Mover RigMover(IReadOnlySet<Vector2I>? barred = null)
+    {
+        Steps.Mover mover = Steps.Kitted(Steps.Mover.Of(_profile, RigSnorkel, barred), KitOf(_unitId));
+        // the dash said (Battle.MoverOf): speed x 1.5 up
+        if (Match && _mt.Dash)
+            mover.Speed = Battle.DashSpeed(mover.Speed);
+        return mover;
+    }
 
     private static Side SideOf(Lineup.Unit u) => u.Side == Parking.Brown ? Side.Brown : Side.Green;
 
@@ -399,8 +408,8 @@ public sealed partial class Tank3DBench
             return L.T("match.already_moved", _modelTag);
         if (RigPinned)
             return L.T("match.pinned_no_move", _modelTag);
-        // the forced engine is said before the move (Battle.Overdrive)
-        if ((_mt.Fired || (_mt.Bonus && !_mt.Overdrive)) && !_profile.FreeOrder)
+        // the forced engine and the dash are said before the move (Battle.ActedBeforeMove)
+        if (((_mt.Fired && !_mt.Dash) || (_mt.Bonus && !_mt.Overdrive)) && !_profile.FreeOrder)
             return L.T("match.no_move_after_act");
         return "";
     }
@@ -601,7 +610,7 @@ public sealed partial class Tank3DBench
         _matchNote = "";
         CancelOrder();
         DropTarget();
-        _mt.Drove = _mt.Fired = _mt.Bonus = _mt.Overdrive = false;
+        _mt.Drove = _mt.Fired = _mt.Bonus = _mt.Overdrive = _mt.Dash = false;
         _moveSnap = null;
         for (int tries = 0; tries < 2; tries++)
         {
@@ -768,7 +777,9 @@ public sealed partial class Tank3DBench
         // the turn goes by itself once there is nothing left in it: the shot
         // fired, the move done (or barred), and no bonus act to be had - one
         // still open waits for it or for the end of the turn (U-22)
-        if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || RigPinned || !_profile.FreeOrder) && !BonusLeft())
+        if (_passIn is null && !busy && _side == _mt.Turn && _mt.Fired && (_mt.Drove || RigPinned || !_profile.FreeOrder) && !BonusLeft()
+            // the dash spends the attack before the move it is for
+            && !(_mt.Dash && !_mt.Drove && !RigPinned))
         {
             _passIn = PassDelay;
             _matchNote = L.T("match.turn_done");
