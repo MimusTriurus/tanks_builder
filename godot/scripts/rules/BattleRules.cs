@@ -84,8 +84,9 @@ public static partial class Battle
             return "already moved";
         if (u.Pinned)
             return "pinned by a ram blade";
-        // the forced engine is a bonus act said before the move, not after it
-        if ((s.Fired || (s.Bonus && !s.Overdrive)) && !u.Class.FreeOrder)
+        // the forced engine is a bonus act said before the move, not after it;
+        // the dash an attack said before it
+        if (ActedBeforeMove(s) && !u.Class.FreeOrder)
             return "only LT moves after acting";
         if (s.OnWay is { } way && OnWayWhy(s, u, path, face, back, way) is { } no)
             return no;
@@ -422,8 +423,20 @@ public static partial class Battle
                 barred.Add(o.Cell);
         Steps.Mover mover = Steps.Mover.Of(u.Class, (u.Kit & Kit.Snorkel) != 0, barred);
         Steps.Kitted(mover, u.Kit);
+        if (s.Dash && s.Active == u.Id)
+            mover.Speed = DashSpeed(mover.Speed);
         return mover;
     }
+
+    /// <summary>The dash's budget (match.md, «Структура хода», п. 2): speed
+    /// × 1.5 rounded up - LT 8, MT and TD 6, HT and HM 5.</summary>
+    public static int DashSpeed(int speed) => (speed * 3 + 1) / 2;
+
+    /// <summary>An act this turn that ends the move's chance for all but LT:
+    /// the attack, or a bonus act - not the two said before the move, the
+    /// forced engine and the dash.</summary>
+    public static bool ActedBeforeMove(BattleState s) =>
+        (s.Fired && !s.Dash) || (s.Bonus && !s.Overdrive);
 
     /// <summary>What a cell does to a hull that comes on to it, driven or pushed
     /// (field.md, «мины», «вода», «огонь\пожар»; states.md, «Горит»). True
@@ -892,6 +905,35 @@ public static partial class Battle
         s.Bonus = s.Overdrive = true;
         Lift(s, u, "overdrive");
         s.Events.Add(new BattleEvent(BattleEventKind.Overdrive, u.Id, u.Cell));
+        return null;
+    }
+
+    /// <summary>
+    /// The dash (match.md, «Структура хода», п. 2): said before the move, it
+    /// spends the turn's attack - no shot, no ambush, no shot on the move -
+    /// for a move of <see cref="DashSpeed"/> steps (<see cref="MoverOf"/>).
+    /// The bonus act stays: a ram at the end of it is the point. LT's free
+    /// order keeps its bonus act before the move too; a burning hull may dash.
+    /// </summary>
+    public static string? Dash(BattleState s)
+    {
+        if (Acting(s, out string? why) is not { } u)
+            return why;
+        if (!s.DashOn)
+            return "no dash in these rules";
+        if (s.Dash)
+            return "already dashing";
+        if (s.Drove)
+            return "said before the move";
+        if (s.Fired || s.OnWay is not null)
+            return "the attack is spent";
+        if (s.Bonus && !s.Overdrive && !u.Class.FreeOrder)
+            return "only LT moves after acting";
+        if (u.Pinned)
+            return "pinned by a ram blade";
+        s.Fired = s.Dash = true;
+        Lift(s, u, "dash");
+        s.Events.Add(new BattleEvent(BattleEventKind.Dash, u.Id, u.Cell));
         return null;
     }
 
@@ -1367,7 +1409,7 @@ public static partial class Battle
         s.TurnNo++;
         s.Turn = ending == Camp.Green ? Camp.Brown : Camp.Green;
         s.Active = null;
-        s.Drove = s.Fired = s.Bonus = s.Overdrive = false;
+        s.Drove = s.Fired = s.Bonus = s.Overdrive = s.Dash = false;
         s.OnWay = null;
         // the round over once the side after its lead has moved (match.md,
         // «Ход и раунд»), and the next round's lead to move

@@ -66,6 +66,7 @@ public static class BattleRun
             else if (a == "--ai-turns" && more) aiTurns = int.TryParse(args[++i], out int turns) ? turns : 300;
             else if (a == "--probe-check") probeCheck = true;
             else if (a == "--swap-sides") swap = true;
+            else if (a == "--dash") _dash = true;
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
             else if (a == "--doctrine" && more) doctrine = args[++i];
@@ -135,8 +136,9 @@ public static class BattleRun
 
         var place = new Placing(Played(map, slopes), first);
         BattleState start = Start(map, first, slopes);
+        start.DashOn = _dash;
         Log.Print($"battle-run: board {map.Name} {map.Columns}x{map.Rows} {(slopes ? "on the relief" : "with ramps and walls")}, {start.Units.Count} units, player 1 {first}, "
-                  + $"{orders.Count} orders{(place.Side is Camp p ? $", {p} place first" : "")}");
+                  + $"{orders.Count} orders{(_dash ? ", the dash" : "")}{(place.Side is Camp p ? $", {p} place first" : "")}");
         foreach (BattleUnit u in start.Units)
             Log.Print($"battle-run: {u.Say(start.Shift)} kit {Kits.Names(u.Kit)}");
 
@@ -182,6 +184,9 @@ public static class BattleRun
     /// <c>count</c>; <c>tide:N</c> - a rise every N quiet rounds.</summary>
     private static bool _tide = true;
     private static int _tideStep = MatchRules.QuietRoundsDraw;
+    /// <summary><c>--dash</c>: the dash in the rules (<see cref="BattleState.DashOn"/>),
+    /// a trial until docs/ai-plan.md, «Рывок», settles it.</summary>
+    private static bool _dash;
 
     /// <summary>
     /// The upgrades of <c>--budget</c>: each unit a branch of its class drawn
@@ -262,13 +267,14 @@ public static class BattleRun
         s.Handicap = handicap;
         Upgrade(s, _budget, seed);
         s.StaleByCount = _staleByCount;
+        s.DashOn = _dash;
         s.Tide = _tide;
         s.TideStep = _tideStep;
         if (s.Tide)
             s.Ring(default);  // the rings once, shared by every clone of the match
         Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
                   + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : "")
-                  + (_staleByCount ? ", stalemate on count" : "") + (_tide ? $", the tide every {_tideStep}" : _staleByCount ? "" : ", stalemate drawn"));
+                  + (_staleByCount ? ", stalemate on count" : "") + (_dash ? ", the dash" : "") + (_tide ? $", the tide every {_tideStep}" : _staleByCount ? "" : ", stalemate drawn"));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();
@@ -460,7 +466,7 @@ public static class BattleRun
                     BattleState t = AiMoves.Copy(s);
                     t.Turn = shooter.Side;
                     t.Active = shooter.Id;
-                    t.Drove = t.Fired = t.Bonus = t.Overdrive = false;
+                    t.Drove = t.Fired = t.Bonus = t.Overdrive = t.Dash = false;
                     t.OnWay = null;
                     if (!t.Units[s.Units.IndexOf(shooter)].Class.Turreted)
                         t.Units[s.Units.IndexOf(shooter)].Heading = heading;

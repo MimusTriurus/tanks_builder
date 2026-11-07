@@ -88,6 +88,8 @@ public enum BattleEventKind
     Pinned,
     /// <summary>The forced engine said: the move to come is fired on only where it stops.</summary>
     Overdrive,
+    /// <summary>The dash said: the attack given up, the move to come the longer one.</summary>
+    Dash,
     /// <summary>The shot on the move said: fired as the move comes on to Cell; Note the aim.</summary>
     OnWay,
     /// <summary>The tide (trial, <see cref="BattleState.Tide"/>): Cell went
@@ -158,6 +160,13 @@ public sealed class BattleState
     /// двигатель»): the move's crossings of ambush axes draw no fire, only
     /// where it stops (<see cref="Battle.Overdrive"/>).</summary>
     public bool Overdrive;
+    /// <summary>The dash said this turn (match.md, «Структура хода», п. 2):
+    /// the attack given up for a move of speed × 1.5 up - <c>Fired</c> is set
+    /// with it, and the move is still to be had (<see cref="Battle.Dash"/>).</summary>
+    public bool Dash;
+    /// <summary>The dash is in the rules (<c>--dash</c>, a trial until the
+    /// measure in docs/ai-plan.md, «Рывок», settles it).</summary>
+    public bool DashOn;
     /// <summary>The shot on the move said this turn (upgrades.md, «Выстрел на
     /// ходу»): the move fires at <c>Aim</c> as the hull comes on to
     /// <c>At</c> (<see cref="Battle.OnTheWay"/>).</summary>
