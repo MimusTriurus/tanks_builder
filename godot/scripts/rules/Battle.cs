@@ -167,6 +167,13 @@ public sealed class BattleState
     /// <summary>The dash is in the rules (<c>--dash</c>, a trial until the
     /// measure in docs/ai-plan.md, «Рывок», settles it).</summary>
     public bool DashOn;
+    /// <summary>The dash's budget under trial (<c>--dash-plus</c>): speed + 1
+    /// rather than × 1.5 up (docs/ai-plan.md, «Рывок»: the first move won
+    /// river12 47 : 12 with × 1.5).</summary>
+    public bool DashPlusOne;
+    /// <summary>The first round the dash may be said in (<c>--dash-late</c>: 2,
+    /// none in the opening round); 1 is the rule as written.</summary>
+    public int DashFrom = 1;
     /// <summary>The shot on the move said this turn (upgrades.md, «Выстрел на
     /// ходу»): the move fires at <c>Aim</c> as the hull comes on to
     /// <c>At</c> (<see cref="Battle.OnTheWay"/>).</summary>

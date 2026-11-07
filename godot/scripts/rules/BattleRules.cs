@@ -424,7 +424,7 @@ public static partial class Battle
         Steps.Mover mover = Steps.Mover.Of(u.Class, (u.Kit & Kit.Snorkel) != 0, barred);
         Steps.Kitted(mover, u.Kit);
         if (s.Dash && s.Active == u.Id)
-            mover.Speed = DashSpeed(mover.Speed);
+            mover.Speed = s.DashPlusOne ? mover.Speed + 1 : DashSpeed(mover.Speed);
         return mover;
     }
 
@@ -923,6 +923,8 @@ public static partial class Battle
             return "no dash in these rules";
         if (s.Dash)
             return "already dashing";
+        if (s.Round < s.DashFrom)
+            return $"no dash before round {s.DashFrom}";
         if (s.Drove)
             return "said before the move";
         if (s.Fired || s.OnWay is not null)
