@@ -656,7 +656,7 @@ public sealed partial class Tank3DBench
             // ours are fired on only with «Атака» chosen (Tank3DBench.Acts)
             if (Match && !_attackMode && !_ramMode && FriendOn(cell))
             {
-                _orderNote = L.T("shell.friend_attack_only");
+                _orderNote = L.T("shell.friend_attack_only", _actAttack is null ? "" : ActKeyOf(_actAttack));
                 return;
             }
             // the ram, when its preview is up (Tank3DBench.RamPlan)

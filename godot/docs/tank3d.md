@@ -2934,7 +2934,7 @@ back`, и танк стоит на плите.
     `MoverOf` даёт рвущемуся `DashSpeed`; `TurnDone` не отдаёт ход до пути.
     `BattleState.DashOn` — правило в партии: `--battle-run … --dash`, приказ `dash`.
   - **Стенд:** `Match3D -- --dash`; кнопка «Рывок» (иконка `Icons/dash`) в
-    группе «Атака», без клавиши; `--do cmd=dash` и `--commands "take:1;dash;go:Q,R"`.
+    группе «Ход», рядом с ходом (клавиша 2 — нумерация сквозная); `--do cmd=dash` и `--commands "take:1;dash;go:Q,R"`.
     `MatchTurn.Dash` → `RigMover` с `DashSpeed`, зона хода перестраивается
     сразу (`_reachDash` в ключе поиска), плашка бюджета показывает новое число.
     Автопередача хода (`MatchTick`) ждёт пути. ИИ стенда (`ShadowOfBench` с

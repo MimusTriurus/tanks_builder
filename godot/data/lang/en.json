@@ -689,7 +689,7 @@
   "blastplan.wet": "; in water, won't burn: ",
   "blastplan.alight": "; burning already: ",
   "blastplan.nobody": "; nobody near",
-  "shell.friend_attack_only": "own unit — only via “Attack” (2)",
+  "shell.friend_attack_only": "own unit — only via “Attack” ({0})",
   "shell.own_hex": "can't fire at own hex",
   "shell.off_axis": "hex is off the fire axes",
   "shell.mortar_band": "mortar reaches {0}–{1} hexes, target at {2}",

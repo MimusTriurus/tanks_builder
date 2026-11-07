@@ -691,7 +691,7 @@
   "blastplan.wet": "; в воде не загорится: ",
   "blastplan.alight": "; уже горит: ",
   "blastplan.nobody": "; рядом никого",
-  "shell.friend_attack_only": "по своему — только через «Атака» (2)",
+  "shell.friend_attack_only": "по своему — только через «Атака» ({0})",
   "shell.own_hex": "по своему гексу не стреляют",
   "shell.off_axis": "гекс не на оси огня",
   "shell.mortar_band": "миномёт бьёт на {0}–{1} клетки, до цели {2}",
