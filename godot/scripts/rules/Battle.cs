@@ -174,6 +174,10 @@ public sealed class BattleState
     /// <summary>The first round the dash may be said in (<c>--dash-late</c>: 2,
     /// none in the opening round); 1 is the rule as written.</summary>
     public int DashFrom = 1;
+    /// <summary>The dash's trial (<c>--dash-ambush</c>): it spends the shot,
+    /// not the ambush - the hull that dashed in may watch an axis from where
+    /// it stopped (docs/ai-plan.md, «Рывок»).</summary>
+    public bool DashAmbush;
     /// <summary>The shot on the move said this turn (upgrades.md, «Выстрел на
     /// ходу»): the move fires at <c>Aim</c> as the hull comes on to
     /// <c>At</c> (<see cref="Battle.OnTheWay"/>).</summary>

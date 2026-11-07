@@ -104,7 +104,8 @@ public static class AiMoves
                     var near = new HashSet<Vector2I>(Steps.Plan(s0.Board, new Steps.Pose(su.Cell, su.Heading),
                                                                 Battle.MoverOf(s0, su)).Cells.Keys);
                     head.Add(new Order(OrderKind.Dash));
-                    gen.Moves(sd, head, attacked: true, beyond: near);
+                    // the dash's trial with the ambush: the attacks are tried, the rules refuse the shot
+                    gen.Moves(sd, head, attacked: !root.DashAmbush, beyond: near);
                     head.RemoveAt(head.Count - 1);
                 }
             }

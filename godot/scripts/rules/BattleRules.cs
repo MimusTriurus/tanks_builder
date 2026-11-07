@@ -998,7 +998,8 @@ public static partial class Battle
     {
         if (Acting(s, out string? why) is not { } u)
             return why;
-        if (s.Fired)
+        // the dash's trial: the shot given up, the ambush still to be had
+        if (s.Fired && !(s.Dash && s.DashAmbush))
             return "the attack is spent";
         if (Array.IndexOf(HexField.EdgeHeadings, axis) < 0)
             return $"{axis} is not an axis";

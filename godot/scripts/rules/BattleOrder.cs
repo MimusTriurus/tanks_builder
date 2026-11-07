@@ -241,6 +241,9 @@ public static partial class Battle
         // the dash spends the attack before the move it is for
         if (s.Dash && !s.Drove && !u.Pinned)
             return false;
+        // the dash's trial with the ambush: one still to be set (the ambush sets Bonus)
+        if (s.Dash && s.DashAmbush && !s.Bonus && !u.Class.Lobs)
+            return false;
         if (!BonusLeft(s, u))
             return true;
         if (u.Burning)

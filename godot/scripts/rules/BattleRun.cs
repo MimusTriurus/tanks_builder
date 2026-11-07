@@ -70,6 +70,7 @@ public static class BattleRun
             // the dash's trials (docs/ai-plan.md, «Рывок»): +1 step, none in round 1
             else if (a == "--dash-plus") _dash = _dashPlus = true;
             else if (a == "--dash-late") _dash = _dashLate = true;
+            else if (a == "--dash-ambush") _dash = _dashAmbush = true;
             else if (a == "--rot-check") rotCheck = true;
             else if (a == "--deploy" && more) deploy = args[++i].ToLowerInvariant();
             else if (a == "--doctrine" && more) doctrine = args[++i];
@@ -142,6 +143,7 @@ public static class BattleRun
         start.DashOn = _dash;
         start.DashPlusOne = _dashPlus;
         start.DashFrom = _dashLate ? 2 : 1;
+        start.DashAmbush = _dashAmbush;
         Log.Print($"battle-run: board {map.Name} {map.Columns}x{map.Rows} {(slopes ? "on the relief" : "with ramps and walls")}, {start.Units.Count} units, player 1 {first}, "
                   + $"{orders.Count} orders{(_dash ? ", the dash" : "")}{(place.Side is Camp p ? $", {p} place first" : "")}");
         foreach (BattleUnit u in start.Units)
@@ -191,7 +193,7 @@ public static class BattleRun
     private static int _tideStep = MatchRules.QuietRoundsDraw;
     /// <summary><c>--dash</c>: the dash in the rules (<see cref="BattleState.DashOn"/>),
     /// a trial until docs/ai-plan.md, «Рывок», settles it.</summary>
-    private static bool _dash, _dashPlus, _dashLate;
+    private static bool _dash, _dashPlus, _dashLate, _dashAmbush;
 
     /// <summary>
     /// The upgrades of <c>--budget</c>: each unit a branch of its class drawn
@@ -275,13 +277,14 @@ public static class BattleRun
         s.DashOn = _dash;
         s.DashPlusOne = _dashPlus;
         s.DashFrom = _dashLate ? 2 : 1;
+        s.DashAmbush = _dashAmbush;
         s.Tide = _tide;
         s.TideStep = _tideStep;
         if (s.Tide)
             s.Ring(default);  // the rings once, shared by every clone of the match
         Log.Print($"battle-run: ai {spec} on {map.Name}, seed {seed}, player 1 {first}, {s.Units.Count} units, handicap {handicap}, styles {styles[0].Id}/{styles[1].Id}"
                   + (_budget[0] >= 0 || _budget[1] >= 0 ? $", budget {_budget[0]}/{_budget[1]}" : "")
-                  + (_staleByCount ? ", stalemate on count" : "") + (_dash ? $", the dash{(_dashPlus ? " +1" : "")}{(_dashLate ? " from round 2" : "")}" : "") + (_tide ? $", the tide every {_tideStep}" : _staleByCount ? "" : ", stalemate drawn"));
+                  + (_staleByCount ? ", stalemate on count" : "") + (_dash ? $", the dash{(_dashPlus ? " +1" : "")}{(_dashLate ? " from round 2" : "")}{(_dashAmbush ? " with the ambush" : "")}" : "") + (_tide ? $", the tide every {_tideStep}" : _staleByCount ? "" : ", stalemate drawn"));
         foreach (BattleUnit u in s.Units)
             Log.Print($"battle-run: {u.Say(s.Shift)} kit {Kits.Names(u.Kit)}");
         var said = new List<string>();
